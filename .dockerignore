@@ -1,0 +1,11 @@
+# Governs the repo-root build context (this Dockerfile's `context: .`).
+node_modules
+web/node_modules
+web/dist
+collector
+.git
+data
+docs
+*.log
+.env
+.env.example

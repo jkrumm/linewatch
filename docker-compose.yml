@@ -1,0 +1,48 @@
+# One always-on service on the Mac mini (docs/DESIGN.md "Shape"). Colima's
+# NAT fabricates ICMP replies inside a container, so only the API + Ookla +
+# built UI live here — the ping collector runs natively (collector/probe.ts,
+# via `make collector-setup`). Run via `make up`; never raw `docker compose`
+# (docker-makefile rule).
+services:
+  linewatch:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: linewatch
+    restart: unless-stopped
+    ports:
+      # Loopback only. The local Caddy dev-proxy / tailnet door front this
+      # (see dotfiles CLAUDE.md "Two dev-server doors") — publishing 0.0.0.0
+      # here would make the bearer-gated write routes reachable from
+      # anywhere on the LAN.
+      - '127.0.0.1:7731:7731'
+    env_file:
+      - path: ./.env
+        format: raw
+    environment:
+      LINEWATCH_PORT: '7731'
+      LINEWATCH_DB: ./data/linewatch.db
+    # Run as the host user rather than the image's `app` user. A bind mount
+    # carries the host's ownership through, so the image UID would hit
+    # permission-denied on ./data; the alternative fix (chmod 777) opens the
+    # directory to every process on the machine to solve a UID mismatch.
+    # `make up` writes the real values into .env; the defaults are the standard
+    # macOS first-user pair (501:20, `staff`).
+    user: '${LINEWATCH_UID:-501}:${LINEWATCH_GID:-20}'
+    volumes:
+      # Bind mount, not a named volume: the SQLite file is meant to be
+      # directly inspectable/backupable from the host (unlike rb's
+      # deliberately opaque named volume — there's no privacy concern here).
+      - ./data:/app/data
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', 'http://localhost:7731/health']
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 5
+    init: true
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'

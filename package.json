@@ -1,0 +1,27 @@
+{
+  "name": "linewatch",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun run --hot src/index.ts",
+    "collector": "bun run collector/probe.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
+  },
+  "dependencies": {
+    "@elysiajs/openapi": "1.4.15",
+    "croner": "10.0.1",
+    "drizzle-orm": "0.45.2",
+    "elysia": "1.4.29",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "bun-types": "1.3.14",
+    "drizzle-kit": "0.31.10",
+    "typescript": "6.0.3"
+  }
+}

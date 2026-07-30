@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.jkrumm.linewatch-collector</string>
+  <!-- The native half of linewatch (docs/DESIGN.md "Shape"): Colima's NAT
+       fabricates ICMP replies inside a container, so ping has to run on the
+       host. RunAtLoad + KeepAlive — same always-on shape as the herdr brew
+       service and the collie LaunchAgent — so it survives a reboot and gets
+       restarted if it ever exits. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>__BUN__</string>
+    <string>run</string>
+    <string>__REPO_DIR__/collector/probe.ts</string>
+  </array>
+  <key>WorkingDirectory</key><string>__REPO_DIR__</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <!-- PATH is load-bearing, not cosmetic: launchd starts this agent with no
+       shell profile at all, so an unqualified `ping` or `bun` inside
+       probe.ts's Bun.spawn calls would fail to resolve. Includes /sbin,
+       where macOS keeps `ping`. Same class of trap as collie's plist and the
+       mosh-server/~/.zshenv gap (see dotfiles CLAUDE.md). -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>StandardOutPath</key><string>__HOME__/Library/Logs/linewatch-collector.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/Library/Logs/linewatch-collector.log</string>
+</dict>
+</plist>

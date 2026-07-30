@@ -1,0 +1,8 @@
+node_modules
+data
+collector/spool.jsonl
+web/dist
+*.log
+
+# Carries the real bearer token (rendered by `make up`) — never commit it.
+.env

@@ -18,7 +18,7 @@ import {
   IP_INTF_ROWS,
   IP_INTF_STATS_ROWS,
 } from './fixtures.js'
-import { RouterPoller, type RouterReader } from './poll.js'
+import { readRouterSnapshot, RouterPoller, type RouterReader } from './poll.js'
 import { redactRow } from './redact.js'
 
 type RawRows = Array<Record<string, string>>
@@ -274,5 +274,102 @@ describe('RouterPoller', () => {
     const summary = await poller.poll()
     expect(summary.disagreements).toEqual([])
     expect(db.select().from(event).all()).toHaveLength(0)
+  })
+})
+
+describe('readRouterSnapshot', () => {
+  const COLLECTOR_IP = '192.168.1.100'
+  /** Two 5-minute poll intervals, i.e. `routerConfig.staleAfterMs` in production. */
+  const STALE_AFTER_MS = 10 * 60 * 1000
+
+  /**
+   * The WAN outage as the router actually reports it: every `DEV2_ADT_WAN`
+   * instance disconnected, so `parseLiveWan` finds no live connection and no
+   * interface can be given the `wan` role. `DEV2_IP_INTF_STATS` still answers
+   * for the LAN bridge, so the LAN half of the record keeps advancing while the
+   * WAN half stops — the exact divergence that made a 15-minute-old throughput
+   * figure read as current.
+   */
+  function wanDownRows(): Array<Record<string, string>> {
+    return ADT_WAN_ROWS.map((row) => ({ ...row, connStatusV4: 'Disconnected', connStatusV6: 'Disconnected' }))
+  }
+
+  it('is empty, not zero, before the first poll', () => {
+    const db = createTestDb()
+    const snapshot = readRouterSnapshot(db, { collectorHostIp: COLLECTOR_IP, staleAfterMs: STALE_AFTER_MS, now: 1_000 })
+    expect(snapshot.line).toBeNull()
+    expect(snapshot.wan).toBeNull()
+    expect(snapshot.lan).toBeNull()
+    expect(snapshot.collector).toBeNull()
+    expect(snapshot.ports).toBeNull()
+  })
+
+  it('serves a fresh poll as current', async () => {
+    const now = 1_000_000
+    const { db, poller } = makePoller(new FakeRouter(), () => now)
+    await poller.poll()
+
+    const snapshot = readRouterSnapshot(db, { collectorHostIp: COLLECTOR_IP, staleAfterMs: STALE_AFTER_MS, now })
+    expect(snapshot.wan).toMatchObject({ observedAt: now, ageMs: 0, stale: false })
+    expect(snapshot.wan?.value.name).toBe('ppp0')
+    expect(snapshot.lan).toMatchObject({ ageMs: 0, stale: false })
+    expect(snapshot.line).toMatchObject({ ageMs: 0, stale: false })
+    expect(snapshot.ports).toMatchObject({ ageMs: 0, stale: false })
+    expect(snapshot.ports?.value).toHaveLength(3)
+    expect(snapshot.collector?.value.ip).toBe(COLLECTOR_IP)
+  })
+
+  it('marks the WAN reading stale through an outage while the LAN half stays current', async () => {
+    const client = new FakeRouter()
+    let now = 1_000_000
+    const { db, poller } = makePoller(client, () => now)
+
+    // One healthy poll, then the line goes down and three more polls land.
+    await poller.poll()
+    client.replace('DEV2_ADT_WAN', wanDownRows())
+    for (const minutes of [5, 10, 15]) {
+      now = 1_000_000 + minutes * 60_000
+      const summary = await poller.poll()
+      // Reproduces the reported symptom: no WAN row is written at all.
+      expect(summary.wanIfName).toBeNull()
+      expect(summary.wanRxKbps).toBeNull()
+      expect(summary.intfRows).toBe(1)
+    }
+
+    const snapshot = readRouterSnapshot(db, { collectorHostIp: COLLECTOR_IP, staleAfterMs: STALE_AFTER_MS, now })
+
+    // The WAN number is still served — "last seen 15 minutes ago" is the
+    // finding — but it can no longer be mistaken for a current reading.
+    expect(snapshot.wan?.observedAt).toBe(1_000_000)
+    expect(snapshot.wan?.ageMs).toBe(15 * 60_000)
+    expect(snapshot.wan?.stale).toBe(true)
+
+    // Everything the router did answer for is current, and says so.
+    expect(snapshot.lan?.ageMs).toBe(0)
+    expect(snapshot.lan?.stale).toBe(false)
+    expect(snapshot.line?.stale).toBe(false)
+    expect(snapshot.ports?.stale).toBe(false)
+    expect(snapshot.now).toBe(now)
+    expect(snapshot.staleAfterMs).toBe(STALE_AFTER_MS)
+  })
+
+  it('does not call a value stale until it is older than the bound', async () => {
+    const now = 1_000_000
+    const { db, poller } = makePoller(new FakeRouter(), () => now)
+    await poller.poll()
+
+    const atBound = readRouterSnapshot(db, {
+      collectorHostIp: COLLECTOR_IP,
+      staleAfterMs: STALE_AFTER_MS,
+      now: now + STALE_AFTER_MS,
+    })
+    expect(atBound.wan?.stale).toBe(false)
+
+    const pastBound = readRouterSnapshot(db, {
+      collectorHostIp: COLLECTOR_IP,
+      staleAfterMs: STALE_AFTER_MS,
+      now: now + STALE_AFTER_MS + 1,
+    })
+    expect(pastBound.wan?.stale).toBe(true)
   })
 })

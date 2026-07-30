@@ -2,7 +2,7 @@ import { Elysia } from 'elysia'
 import { z } from 'zod'
 import { db } from '../db/client.js'
 import { readRouterSnapshot } from '../services/router/poll.js'
-import { bucketRouterLine, bucketRouterThroughput, isRangeError, MAX_BUCKETS, resolveRange } from '../services/router/range.js'
+import { bucketRouterLine, bucketRouterThroughput, isRangeError, resolveRange } from '../services/router/range.js'
 import { routerConfig } from '../services/router/config.js'
 
 /**
@@ -152,55 +152,14 @@ const RangeQuery = z.object({
   bucket: z.coerce.number().int().min(1).default(3600).describe('Bucket width in seconds (default 3600 = hourly)'),
 })
 
-type RangeError = z.infer<typeof RangeErrorSchema>
-
-interface ResolvedRange {
-  from: number
-  to: number
-  bucketSeconds: number
-}
-
 /**
- * Turns the query into a range, or into the reason it cannot be one. Both
- * failures are explicit 400s: the alternative — clamping the range or widening
- * the bucket on the caller's behalf — answers a question that was not asked and
+ * The query shape, handed to the shared resolver in `services/router/range.ts`.
+ * Both failure modes come back as explicit 400s: clamping the range or widening
+ * the bucket on the caller's behalf answers a question that was not asked and
  * looks exactly like a complete answer.
  */
-function resolveRange(query: z.infer<typeof RangeQuery>): ResolvedRange | RangeError {
-  const to = query.to ?? Date.now()
-  const from = query.from ?? to - DEFAULT_WINDOW_MS
-  const bucketSeconds = query.bucket
-
-  if (from > to) {
-    return {
-      error: 'invalid_range',
-      message: `from (${from}) is after to (${to})`,
-      from,
-      to,
-      bucketSeconds,
-      buckets: null,
-      maxBuckets: MAX_BUCKETS,
-    }
-  }
-
-  const buckets = Math.ceil((to - from) / (bucketSeconds * 1000))
-  if (buckets > MAX_BUCKETS) {
-    return {
-      error: 'range_too_fine',
-      message: `${buckets} buckets requested (max ${MAX_BUCKETS}) — widen \`bucket\` or shorten the range`,
-      from,
-      to,
-      bucketSeconds,
-      buckets,
-      maxBuckets: MAX_BUCKETS,
-    }
-  }
-
-  return { from, to, bucketSeconds }
-}
-
-function isRangeError(value: ResolvedRange | RangeError): value is RangeError {
-  return 'error' in value
+function rangeOf(query: z.infer<typeof RangeQuery>) {
+  return resolveRange({ from: query.from, to: query.to, bucketSeconds: query.bucket })
 }
 
 export const routerRoutes = new Elysia()
@@ -252,7 +211,7 @@ export const routerRoutes = new Elysia()
   .get(
     '/api/router/line',
     ({ query, status }) => {
-      const range = resolveRange(query)
+      const range = rangeOf(query)
       if (isRangeError(range)) return status(400, range)
       return {
         from: range.from,
@@ -278,7 +237,7 @@ export const routerRoutes = new Elysia()
   .get(
     '/api/router/throughput',
     ({ query, status }) => {
-      const range = resolveRange(query)
+      const range = rangeOf(query)
       if (isRangeError(range)) return status(400, range)
       return {
         from: range.from,

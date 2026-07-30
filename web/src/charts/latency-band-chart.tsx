@@ -29,10 +29,13 @@ import { fmtMs, fmtPct } from '../lib/format'
 
 type Point = { key: string; bucket: ProbeBucket }
 
+/** The *Solid* variants, not `VX.good`/`VX.warn`/`VX.bad`: those are area-fill tokens mixed down to
+ * 18% / 8% / 18% opacity (`tokens.css`), which is right behind a line and invisible on a 3 px
+ * marker. A loss marker has to read at a glance or it is not a warning. */
 function lossColor(lossPct: number): string {
-  if (lossPct <= 0) return VX.good
-  if (lossPct < 20) return VX.warn
-  return VX.bad
+  if (lossPct <= 0) return VX.goodSolid
+  if (lossPct < 20) return VX.warnSolid
+  return VX.badSolid
 }
 
 /**
@@ -165,8 +168,16 @@ function LatencyBandPlot({
                 dashed
               />
               <TooltipRow
-                color={lossColor(tip.data.bucket.maxLossPct)}
+                color={lossColor(tip.data.bucket.lossPct)}
                 label="Loss"
+                value={fmtPct(tip.data.bucket.lossPct)}
+                shape="dot"
+              />
+              {/* The marker colour tracks the worst cycle, so name it — labelling it "Loss" made a
+                  one-blip hour read as a 100%-loss hour. */}
+              <TooltipRow
+                color={lossColor(tip.data.bucket.maxLossPct)}
+                label="Worst cycle"
                 value={fmtPct(tip.data.bucket.maxLossPct)}
                 shape="dot"
               />

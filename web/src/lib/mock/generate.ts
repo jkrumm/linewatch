@@ -262,7 +262,11 @@ export function generateProbeBuckets(
         medianMs: null,
         p5Ms: null,
         p95Ms: null,
+        minMs: null,
+        maxMs: null,
         maxLossPct: 100,
+        lossPct: 100,
+        downCycles: cyclesPerBucket,
         count: cyclesPerBucket,
       })
       continue
@@ -271,13 +275,24 @@ export function generateProbeBuckets(
     const s = sampleAt(target, sampleTs)
     const spread = Math.max(0.1, (s.maxMs ?? 0) - (s.minMs ?? 0))
     const maxLossPct = Math.min(100, Math.max(s.lossPct, round2(lossFraction * 100)))
+    // The mock must reproduce the divergence the real SQL produces, or the UI gets
+    // developed against data where `lossPct` and `maxLossPct` are interchangeable.
+    // Outage overlap contributes whole fully-down cycles; the sampled blip
+    // contributes its own loss for the single cycle it stands for — so one 100%
+    // blip in an hourly bucket reads ~0.8% aggregate against 100% worst.
+    const outageCycles = Math.min(cyclesPerBucket, Math.round(lossFraction * cyclesPerBucket))
+    const blipCycles = outageCycles < cyclesPerBucket ? s.lossPct / 100 : 0
     out.push({
       bucket: bucketStart,
       target,
       medianMs: s.medMs,
       p5Ms: s.medMs === null ? null : round2(Math.max(0, s.medMs - spread * 0.5)),
       p95Ms: s.medMs === null ? null : round2(s.medMs + spread * 1.1),
+      minMs: s.minMs,
+      maxMs: s.maxMs,
       maxLossPct,
+      lossPct: round2(Math.min(100, (100 * (outageCycles + blipCycles)) / cyclesPerBucket)),
+      downCycles: outageCycles + (blipCycles >= 1 ? 1 : 0),
       count: cyclesPerBucket,
     })
   }
@@ -351,7 +366,7 @@ export function generateSpeedTests(from: number, to: number): SpeedTest[] {
       serverName: server.name,
       serverLocation: server.location,
       serverId: server.id,
-      isp: 'Deutsche Glasfaser',
+      isp: 'Example ISP',
       externalIp: '203.0.113.42',
       bytesDown: Math.round((downloadMbps * 1_000_000 * 30) / 8),
       bytesUp: Math.round((uploadMbps * 1_000_000 * 30) / 8),

@@ -1,0 +1,481 @@
+import { describe, expect, test } from 'bun:test'
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import {
+  captureVantage,
+  classifyHardwarePort,
+  classifyPath,
+  deriveOnHomeLine,
+  parseDefaultRoute,
+  parseIfCounters,
+  parseLinkState,
+  parseServiceOrder,
+  type Vantage,
+} from './vantage.js'
+
+// Fixtures are verbatim output from this Mac mini (macOS 26, 2026-07-30) unless
+// a comment says otherwise. MAC addresses, the hostname and global IPv6
+// addresses are scrubbed — this repo is public. RFC 1918 addresses are kept:
+// 192.168.1.1/192.168.1.100 are the whole point of the on_home_line check.
+
+const ROUTE_DEFAULT = `   route to: default
+destination: default
+       mask: default
+    gateway: 192.168.1.1
+  interface: en0
+      flags: <UP,GATEWAY,DONE,STATIC,PRCLONING,GLOBAL>
+ recvpipe  sendpipe  ssthresh  rtt,msec    rttvar  hopcount      mtu     expire
+       0         0         0         0         0         0      1500         0
+`
+
+// A route with an interface and no gateway. Captured from
+// `route -n get 255.255.255.255` because a gateway-less default route (PPPoE
+// dialled on the host, a VPN owning the default) cannot be provoked here — the
+// point is only that the `gateway:` line can be absent.
+const ROUTE_NO_GATEWAY = `   route to: 255.255.255.255
+destination: 255.255.255.255
+       mask: 255.255.255.255
+  interface: en0
+      flags: <UP,HOST,DONE,LLINFO,WASCLONED,IFSCOPE,IFREF,BROADCAST>
+`
+
+const IFCONFIG_EN0_GIGABIT = `en0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
+	options=50b<RXCSUM,TXCSUM,VLAN_HWTAGGING,AV,CHANNEL_IO>
+	ether 00:11:22:33:44:55
+	inet6 fe80::1122:3344:5566:7788%en0 prefixlen 64 secured scopeid 0x8
+	inet 192.168.1.100 netmask 0xffffff00 broadcast 192.168.1.255
+	inet6 2001:db8:1:1:1122:3344:5566:7788 prefixlen 64 autoconf secured
+	nd6 options=201<PERFORMNUD,DAD>
+	media: autoselect (1000baseT <full-duplex>)
+	status: active
+`
+
+// The renegotiation this whole module exists for: a cable or switch port fault
+// drops en0 to Fast Ethernet, capping throughput at ~94 Mbit/s with no packet
+// loss and no outage. Derived from the capture above by substituting the media
+// line with the token macOS prints for that speed (`ifconfig -m en0` lists
+// `100baseTX mediaopt full-duplex` as supported on this NIC).
+const IFCONFIG_EN0_FAST_ETHERNET = IFCONFIG_EN0_GIGABIT.replace(
+  'media: autoselect (1000baseT <full-duplex>)',
+  'media: autoselect (100baseTX <full-duplex>)',
+)
+
+// Wi-Fi: a bare `media: autoselect`, no speed token, no duplex. Captured from
+// `ifconfig en1` while associated (172.20.10.5 is an iPhone hotspot's DHCP
+// range — this host really was on Wi-Fi to a phone).
+const IFCONFIG_EN1_WIFI = `en1: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500 constrained
+	options=6460<TSO4,TSO6,CHANNEL_IO,PARTIAL_CSUM,ZEROINVERT_CSUM>
+	ether 00:11:22:33:44:66
+	inet6 fe80::2233:4455:6677:8899%en1 prefixlen 64 secured scopeid 0x12
+	inet 172.20.10.5 netmask 0xfffffff0 broadcast 172.20.10.15
+	nd6 options=201<PERFORMNUD,DAD>
+	media: autoselect
+	status: active
+`
+
+// An idle Thunderbolt bridge. `ifconfig bridge0`, media line verbatim.
+const IFCONFIG_BRIDGE0 = `bridge0: flags=8863<UP,BROADCAST,SMART,RUNNING,SIMPLEX,MULTICAST> mtu 1500
+	options=63<RXCSUM,TXCSUM,TSO4,TSO6>
+	ether 00:11:22:33:44:77
+	media: <unknown type>
+	status: inactive
+`
+
+// Five rows for one interface, and only the `<Link#8>` row carries numeric
+// Ierrs/Oerrs/Coll — the others print `-`. `netstat -I en0 -b`, verbatim except
+// for the scrubbed MAC/hostname/IPv6.
+const NETSTAT_EN0 = `Name       Mtu   Network       Address            Ipkts Ierrs     Ibytes    Opkts Oerrs     Obytes  Coll
+en0        1500  <Link#8>    00:11:22:33:44:55 41568543     0 34938024026 25255614     0 12509590061     0
+en0        1500  myhost.loca fe80:8::1122:3344 41568543     - 34938024026 25255614     - 12509590061     -
+en0        1500  192.168.1     192.168.1.100   41568543     - 34938024026 25255614     - 12509590061     -
+en0        1500  2001:db8:1: 2001:db8:1:1:1122 41568543     - 34938024026 25255614     - 12509590061     -
+en0        1500  2001:db8:1: 2001:db8:1:1:7572 41568543     - 34938024026 25255614     - 12509590061     -
+`
+
+// Same command with real error counters, so a non-zero count is exercised too.
+const NETSTAT_EN0_WITH_ERRORS = NETSTAT_EN0.replace(
+  'en0        1500  <Link#8>    00:11:22:33:44:55 41568543     0 34938024026 25255614     0 12509590061     0',
+  'en0        1500  <Link#8>    00:11:22:33:44:55 41568543   417 34938024026 25255614    23 12509590061     9',
+)
+
+// `netstat -I utun0 -b`: the Link row has **no Address column**, so it prints
+// ten fields where en0's prints eleven. This is why columns are read as offsets
+// from the right: left-indexing this short row shifts every column past the gap
+// by one, so it reads Obytes (80) as Oerrs and runs off the end of the row
+// looking for Coll. Ierrs happens to survive left-indexing here — the fixture
+// discriminates on Oerrs and Coll, which do not.
+const NETSTAT_UTUN0 = `Name       Mtu   Network       Address            Ipkts Ierrs     Ibytes    Opkts Oerrs     Obytes  Coll
+utun0      1500  <Link#22>                            0     0          0        1     0         80     0
+utun0      1500  myhost.loca fe80:16::1808:370        0     -          0        1     -         80     -
+`
+
+// `networksetup -listnetworkserviceorder`, verbatim. Two cellular devices, and
+// they are not adjacent in the numbering: `en10` is iPhone tethering and `en11`
+// a Nighthawk hotspot, while `en1` (between them) is Wi-Fi. Any hardcoded
+// interface-name map would be one reboot away from calling one of them
+// something harmless.
+const SERVICE_ORDER = `An asterisk (*) denotes that a network service is disabled.
+(1) Ethernet
+(Hardware Port: Ethernet, Device: en0)
+
+(2) MR2100
+(Hardware Port: MR2100, Device: en11)
+
+(3) Wi-Fi
+(Hardware Port: Wi-Fi, Device: en1)
+
+(4) Thunderbolt Bridge
+(Hardware Port: Thunderbolt Bridge, Device: bridge0)
+
+(5) iPhone USB
+(Hardware Port: iPhone USB, Device: en10)
+
+(6) Tailscale
+(Hardware Port: io.tailscale.ipn.macsys, Device: )
+`
+
+describe('parseDefaultRoute', () => {
+  test('reads the interface and gateway actually carrying the default route', () => {
+    expect(parseDefaultRoute(ROUTE_DEFAULT)).toEqual({ iface: 'en0', gateway: '192.168.1.1' })
+  })
+
+  test('reads an interface with no gateway line', () => {
+    expect(parseDefaultRoute(ROUTE_NO_GATEWAY)).toEqual({ iface: 'en0', gateway: null })
+  })
+
+  test('yields nulls when the output names no interface', () => {
+    // `route` complains on stderr and prints nothing usable on stdout when there
+    // is no default route at all (link down). Anything that names no interface
+    // must come back null — captureVantage turns that into an absent vantage
+    // rather than a fabricated one.
+    expect(parseDefaultRoute('route: writing to routing socket: not in table\n')).toEqual({ iface: null, gateway: null })
+    expect(parseDefaultRoute('')).toEqual({ iface: null, gateway: null })
+  })
+})
+
+describe('parseLinkState', () => {
+  test('parses a negotiated gigabit link', () => {
+    expect(parseLinkState(IFCONFIG_EN0_GIGABIT)).toEqual({ linkMedia: '1000baseT', linkMbit: 1000, linkDuplex: 'full' })
+  })
+
+  test('parses a link that renegotiated down to 100baseTX', () => {
+    // The situation this module exists for: no loss, no outage, throughput
+    // capped at a tenth of the line. Invisible without link_mbit.
+    expect(parseLinkState(IFCONFIG_EN0_FAST_ETHERNET)).toEqual({
+      linkMedia: '100baseTX',
+      linkMbit: 100,
+      linkDuplex: 'full',
+    })
+  })
+
+  test('returns null speed for Wi-Fi, which prints no speed token', () => {
+    expect(parseLinkState(IFCONFIG_EN1_WIFI)).toEqual({ linkMedia: 'autoselect', linkMbit: null, linkDuplex: null })
+  })
+
+  test('returns null speed for an unknown media type', () => {
+    expect(parseLinkState(IFCONFIG_BRIDGE0)).toEqual({ linkMedia: '<unknown type>', linkMbit: null, linkDuplex: null })
+  })
+
+  test('parses the 10baseT and multi-gig token families', () => {
+    // `10baseT/UTP` is what this NIC's supported-media list actually calls
+    // 10 Mbit. The 2.5G/5G/10G tokens come from adapters not present here (a 2.5G
+    // Thunderbolt adapter is a planned upgrade per docs/DESIGN.md) and drivers
+    // disagree about capitalising `base`, which is why the parser ignores case.
+    expect(parseLinkState('\tmedia: autoselect (10baseT/UTP <half-duplex>)').linkMbit).toBe(10)
+    expect(parseLinkState('\tmedia: autoselect (10baseT/UTP <half-duplex>)').linkDuplex).toBe('half')
+    expect(parseLinkState('\tmedia: autoselect (2500Base-T <full-duplex>)')).toEqual({
+      linkMedia: '2500Base-T',
+      linkMbit: 2500,
+      linkDuplex: 'full',
+    })
+    expect(parseLinkState('\tmedia: autoselect (5000Base-T <full-duplex>)').linkMbit).toBe(5000)
+    expect(parseLinkState('\tmedia: autoselect (10Gbase-T <full-duplex>)').linkMbit).toBe(10_000)
+  })
+
+  test('parses the decimal spelling of every multi-gig rate as the same speed', () => {
+    // Drivers spell these two ways — `2500Base-T` and `2.5GBase-T` are the same
+    // link — and the second spelling is the one that broke: an unanchored token
+    // regex matched the `5` out of `2.5G` and recorded a 2.5 Gbit link as
+    // `5GBase-T` at 5000 Mbit. A fabricated speed, under a media string the
+    // driver never printed, on exactly the adapter docs/DESIGN.md plans to buy.
+    // Both spellings of each rate, so neither can drift alone.
+    expect(parseLinkState('\tmedia: autoselect (2.5GBase-T <full-duplex>)')).toEqual({
+      linkMedia: '2.5GBase-T',
+      linkMbit: 2500,
+      linkDuplex: 'full',
+    })
+    expect(parseLinkState('\tmedia: autoselect (5GBase-T <full-duplex>)')).toEqual({
+      linkMedia: '5GBase-T',
+      linkMbit: 5000,
+      linkDuplex: 'full',
+    })
+    expect(parseLinkState('\tmedia: autoselect (10GBase-T <full-duplex>)').linkMbit).toBe(10_000)
+    expect(parseLinkState('\tmedia: autoselect (1000baseT <full-duplex>)').linkMbit).toBe(1000)
+    expect(parseLinkState('\tmedia: autoselect (1GBase-T <full-duplex>)').linkMbit).toBe(1000)
+  })
+
+  test('never lets a duplex or media word be read as a speed', () => {
+    // `full-duplex` and `autoselect` are tokens on the same line. Whole-token
+    // matching is what keeps them out; a substring match would not.
+    expect(parseLinkState('\tmedia: autoselect <full-duplex>').linkMbit).toBeNull()
+    expect(parseLinkState('\tmedia: none').linkMbit).toBeNull()
+    expect(parseLinkState('\tmedia: none')).toEqual({ linkMedia: 'none', linkMbit: null, linkDuplex: null })
+  })
+
+  test('parses a manually configured media line with no autoselect wrapper', () => {
+    expect(parseLinkState('\tmedia: 1000baseT <full-duplex>')).toEqual({
+      linkMedia: '1000baseT',
+      linkMbit: 1000,
+      linkDuplex: 'full',
+    })
+  })
+
+  test('yields all nulls when there is no media line', () => {
+    expect(parseLinkState('ifconfig: interface en11 does not exist\n')).toEqual({
+      linkMedia: null,
+      linkMbit: null,
+      linkDuplex: null,
+    })
+  })
+})
+
+describe('parseIfCounters', () => {
+  test('takes the counters from the only row that has them', () => {
+    // Four of the five rows print `-` for Ierrs/Oerrs/Coll. Picking the first or
+    // last row would yield nulls forever and look like "no data".
+    expect(parseIfCounters(NETSTAT_EN0)).toEqual({ ifIerrs: 0, ifOerrs: 0, ifColl: 0 })
+  })
+
+  test('reads non-zero cumulative counters', () => {
+    expect(parseIfCounters(NETSTAT_EN0_WITH_ERRORS)).toEqual({ ifIerrs: 417, ifOerrs: 23, ifColl: 9 })
+  })
+
+  test('survives a row with the Address column missing', () => {
+    // Ten fields instead of eleven. Left-indexed, this row yields Oerrs 80 (the
+    // Obytes value) and a null Coll — a permanent, entirely fictional error rate
+    // on every tunnel interface. Oerrs and ifColl are what this case proves.
+    expect(parseIfCounters(NETSTAT_UTUN0)).toEqual({ ifIerrs: 0, ifOerrs: 0, ifColl: 0 })
+  })
+
+  test('yields nulls for a header-only or empty output', () => {
+    const headerOnly = NETSTAT_EN0.split('\n')[0] ?? ''
+    expect(parseIfCounters(`${headerOnly}\n`)).toEqual({ ifIerrs: null, ifOerrs: null, ifColl: null })
+    expect(parseIfCounters('')).toEqual({ ifIerrs: null, ifOerrs: null, ifColl: null })
+  })
+})
+
+describe('parseServiceOrder', () => {
+  test('maps every device to its hardware port and drops device-less services', () => {
+    expect(parseServiceOrder(SERVICE_ORDER)).toEqual([
+      { hardwarePort: 'Ethernet', device: 'en0' },
+      { hardwarePort: 'MR2100', device: 'en11' },
+      { hardwarePort: 'Wi-Fi', device: 'en1' },
+      { hardwarePort: 'Thunderbolt Bridge', device: 'bridge0' },
+      { hardwarePort: 'iPhone USB', device: 'en10' },
+    ])
+  })
+
+  test('yields an empty list for unusable output', () => {
+    expect(parseServiceOrder('')).toEqual([])
+  })
+})
+
+describe('classifyPath', () => {
+  const services = parseServiceOrder(SERVICE_ORDER)
+
+  test('classifies every device in this host real service order', () => {
+    expect(classifyPath({ iface: 'en0', services })).toBe('ethernet')
+    expect(classifyPath({ iface: 'en1', services })).toBe('wifi')
+    expect(classifyPath({ iface: 'en10', services })).toBe('cellular')
+    expect(classifyPath({ iface: 'en11', services })).toBe('cellular')
+    expect(classifyPath({ iface: 'bridge0', services })).toBe('other')
+  })
+
+  test('falls through to other for an interface not in the service order', () => {
+    // Never `ethernet`. A wrong `ethernet` is the lie this module prevents.
+    expect(classifyPath({ iface: 'utun4', services })).toBe('other')
+    expect(classifyPath({ iface: 'en9', services })).toBe('other')
+  })
+
+  test('is unknown, not ethernet, when the service list could not be read', () => {
+    expect(classifyPath({ iface: 'en0', services: [] })).toBeNull()
+    expect(classifyPath({ iface: null, services })).toBeNull()
+  })
+
+  test('never resolves a device claimed by two services to ethernet', () => {
+    // macOS keeps stale service entries and reuses device names across
+    // re-plugs, so one device can be claimed twice. Taking the first match made
+    // a hotspot on en11 read as `ethernet` — the one verdict this module exists
+    // to make impossible — purely because a dead Ethernet service still named
+    // the same device. Order must not decide it, so both orderings are asserted.
+    const stale = { hardwarePort: 'Thunderbolt Ethernet Slot 1', device: 'en11' }
+    const hotspot = { hardwarePort: 'MR2100', device: 'en11' }
+    expect(classifyPath({ iface: 'en11', services: [stale, hotspot] })).toBe('cellular')
+    expect(classifyPath({ iface: 'en11', services: [hotspot, stale] })).toBe('cellular')
+
+    // Same rule for the less dramatic clashes: anything outranks `ethernet`,
+    // because only `ethernet` can claim the home line.
+    expect(classifyPath({ iface: 'en5', services: [stale, { hardwarePort: 'Wi-Fi', device: 'en5' }] })).toBe('wifi')
+    expect(classifyPath({ iface: 'en5', services: [stale, { hardwarePort: 'Thunderbolt Bridge', device: 'en5' }] })).toBe('other')
+
+    // Two Ethernet services on one device is agreement, not a clash.
+    expect(classifyPath({ iface: 'en5', services: [stale, { hardwarePort: 'USB 10/100/1000 LAN', device: 'en5' }] })).toBe('ethernet')
+  })
+})
+
+describe('classifyHardwarePort', () => {
+  test('classifies port names by shape, not by interface number', () => {
+    expect(classifyHardwarePort('Thunderbolt Ethernet Slot 1')).toBe('ethernet')
+    expect(classifyHardwarePort('USB 10/100/1000 LAN')).toBe('ethernet')
+    expect(classifyHardwarePort('AX88179A')).toBe('other')
+    expect(classifyHardwarePort('Wi-Fi')).toBe('wifi')
+    expect(classifyHardwarePort('AirPort')).toBe('wifi')
+    // Tethering and hotspots are not the home line, and reading them as `other`
+    // would understate that.
+    expect(classifyHardwarePort('iPhone')).toBe('cellular')
+    expect(classifyHardwarePort('iPad USB')).toBe('cellular')
+    expect(classifyHardwarePort('Broadband Modem')).toBe('cellular')
+    expect(classifyHardwarePort('MR1100')).toBe('cellular')
+    // A host-to-host bridge is not a path to the line.
+    expect(classifyHardwarePort('Thunderbolt Bridge')).toBe('other')
+    expect(classifyHardwarePort('io.tailscale.ipn.macsys')).toBe('other')
+  })
+})
+
+describe('deriveOnHomeLine', () => {
+  const expectedGateway = '192.168.1.1'
+
+  test('is 1 only for Ethernet on the expected gateway', () => {
+    expect(deriveOnHomeLine({ pathClass: 'ethernet', gatewayAddr: '192.168.1.1', expectedGateway })).toBe(1)
+  })
+
+  test('is 0 for every other path class, however healthy the probes look', () => {
+    expect(deriveOnHomeLine({ pathClass: 'wifi', gatewayAddr: '192.168.1.1', expectedGateway })).toBe(0)
+    expect(deriveOnHomeLine({ pathClass: 'cellular', gatewayAddr: '172.20.10.1', expectedGateway })).toBe(0)
+    expect(deriveOnHomeLine({ pathClass: 'other', gatewayAddr: '192.168.1.1', expectedGateway })).toBe(0)
+  })
+
+  test('is 0 for Ethernet through a gateway that is not the expected one', () => {
+    expect(deriveOnHomeLine({ pathClass: 'ethernet', gatewayAddr: '10.0.0.1', expectedGateway })).toBe(0)
+  })
+
+  test('is 0 for a known non-Ethernet path even with nothing to compare gateways against', () => {
+    // Evidence, not absence of it: the home line is the Ethernet one, so naming
+    // the path settles the question on its own. This is the mirror of the
+    // missing-gateway case below — the two together are the whole rule.
+    expect(deriveOnHomeLine({ pathClass: 'cellular', gatewayAddr: null, expectedGateway })).toBe(0)
+    expect(deriveOnHomeLine({ pathClass: 'wifi', gatewayAddr: '192.168.1.1', expectedGateway: null })).toBe(0)
+  })
+
+  test('is null — never 0 or 1 — when an input is unknown', () => {
+    // Unclassifiable path: 0 would claim "not the home line", which is a
+    // different statement from "cannot tell" and would let a read path discard
+    // good samples.
+    expect(deriveOnHomeLine({ pathClass: null, gatewayAddr: '192.168.1.1', expectedGateway })).toBeNull()
+    // No configured gateway target to compare against.
+    expect(deriveOnHomeLine({ pathClass: 'ethernet', gatewayAddr: '192.168.1.1', expectedGateway: null })).toBeNull()
+  })
+
+  test('is null, not 0, for Ethernet on a default route that names no gateway', () => {
+    // The regression this test exists for. A default route can legitimately
+    // carry no `gateway:` line — host-side PPPoE, a VPN owning the default (see
+    // ROUTE_NO_GATEWAY above). Scoring that 0 marked *every* cycle on the real
+    // home line "not the home line", and a read path filtering on on_home_line
+    // would then throw away the entire dataset. Absence of evidence is not
+    // evidence of absence.
+    expect(deriveOnHomeLine({ pathClass: 'ethernet', gatewayAddr: null, expectedGateway })).toBeNull()
+    // End to end, from the route output that provokes it.
+    const route = parseDefaultRoute(ROUTE_NO_GATEWAY)
+    expect(deriveOnHomeLine({ pathClass: 'ethernet', gatewayAddr: route.gateway, expectedGateway })).toBeNull()
+  })
+})
+
+describe('captureVantage', () => {
+  /**
+   * Runs the real `captureVantage` in a child process whose PATH puts a stub
+   * `route` ahead of `/sbin/route`. `captureVantage` shells out, so the
+   * link-down branch cannot be reached by feeding it a fixture — the only
+   * honest exercise is to make `route` behave the way it does when the host has
+   * no default route.
+   *
+   * A child process rather than mutating this one's PATH, because Bun.spawn
+   * resolves the binary against the PATH it captured at startup and ignores a
+   * later `process.env['PATH'] = …` unless `env` is passed explicitly (measured
+   * — the in-process version of this test silently ran `/sbin/route` and
+   * "passed" against live network state). The production code is therefore run
+   * untouched, with a PATH that genuinely contains the stub.
+   */
+  async function withStubbedRoute(stdout: string, exitCode: number): Promise<Vantage> {
+    const dir = mkdtempSync(join(tmpdir(), 'linewatch-vantage-'))
+    try {
+      // The canned output goes in a file the stub cats, rather than inline in
+      // the script: `printf '%s'` does not expand the `\n` escapes that come
+      // back from JSON.stringify, which collapsed these multi-line fixtures onto
+      // one line and made the stub look like a host with no default route.
+      writeFileSync(join(dir, 'route.out'), stdout)
+      writeFileSync(join(dir, 'route'), `#!/bin/sh\ncat ${JSON.stringify(join(dir, 'route.out'))}\nexit ${exitCode}\n`)
+      chmodSync(join(dir, 'route'), 0o755)
+      const script = join(dir, 'capture.ts')
+      writeFileSync(
+        script,
+        `import { captureVantage } from ${JSON.stringify(join(import.meta.dir, 'vantage.ts'))}\n` +
+          `console.log(JSON.stringify(await captureVantage({ expectedGateway: '192.168.1.1', timeoutMs: 5000 })))\n`,
+      )
+      const proc = Bun.spawn(['bun', 'run', script], {
+        stdout: 'pipe',
+        stderr: 'ignore',
+        env: { ...process.env, PATH: `${dir}:${process.env['PATH'] ?? ''}` },
+      })
+      const out = await new Response(proc.stdout).text()
+      await proc.exited
+      return JSON.parse(out) as Vantage
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  }
+
+  test('the stub really does shadow the system route', async () => {
+    // Guards the guard. If PATH injection stopped working, every assertion
+    // below would quietly measure this host's live network instead, and the
+    // link-down test would fail for the right reason only by accident.
+    const vantage = await withStubbedRoute(ROUTE_DEFAULT.replace('192.168.1.1', '198.51.100.1'), 0)
+    expect(vantage.gatewayAddr).toBe('198.51.100.1')
+    expect(vantage.onHomeLine).toBe(0)
+  })
+
+  test('reports a vantage even when there is no default route at all', async () => {
+    // The state this is for: en0 down, no route, nothing to describe. Returning
+    // nothing wrote no probe_cycle row — indistinguishable on the wire from a
+    // collector too old to have looked, which is what every cycle before this
+    // module says. The row's existence is the measurement; the nulls are the
+    // finding. `route` exits non-zero and prints its complaint on stderr here,
+    // same shape as ping's 100%-loss case.
+    const vantage = await withStubbedRoute('', 1)
+    expect(vantage).toEqual({
+      pathIf: null,
+      pathClass: null,
+      linkMedia: null,
+      linkMbit: null,
+      linkDuplex: null,
+      gatewayAddr: null,
+      ifIerrs: null,
+      ifOerrs: null,
+      ifColl: null,
+      // Never 0. A hard home-line outage takes the default route with it, and
+      // calling that "not the home line" would let a read path filter away the
+      // very outage the collector exists to record.
+      onHomeLine: null,
+    })
+  })
+
+  test('describes the real path when the route names one', async () => {
+    // The other side of the branch, through the same harness: proves the
+    // all-null result above comes from the no-route branch and not from a stub
+    // that would have nulled everything regardless.
+    const vantage = await withStubbedRoute(ROUTE_DEFAULT, 0)
+    expect(vantage.pathIf).toBe('en0')
+    expect(vantage.gatewayAddr).toBe('192.168.1.1')
+    expect(vantage.pathClass).not.toBeNull()
+  })
+})

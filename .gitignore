@@ -1,5 +1,15 @@
 node_modules
+
+# Vestigial since the database moved into the linewatch-data Docker volume — now
+# holds only the MOVED-TO-DOCKER-VOLUME marker (docs/storage.md). Nothing here is
+# the record: src/db/client.ts refuses a host-side open of this directory by
+# path, so the guard survives a fresh clone that has no marker.
 data
+# Throwaway database for a native `bun run dev` / `bun run start`. Never the
+# record — that only ever lives in the linewatch-data volume.
+.dev-data
+# `make db-backup` snapshots, and the pre-volume archive left by `make db-import`.
+backups
 collector/spool.jsonl
 web/dist
 *.log

@@ -31,12 +31,29 @@ const RANGE_BUCKET: Record<RangeOption, ProbeBucketSeconds> = {
   all: 86_400,
 }
 
+/**
+ * The collector's probe cycle, per DESIGN.md's "Cadence" section. `rangeToWindow` floors `to` onto a
+ * multiple of it, so the window it returns is identical for 30 seconds at a time — no finer
+ * resolution exists in the data anyway.
+ *
+ * This quantisation is load-bearing, not cosmetic: `queries.ts` puts the raw `from`/`to` millisecond
+ * values directly into the TanStack Query keys. With an unquantised `Date.now()`, any component that
+ * both computes the window and holds the `useQuery` gets a new key on every render — data arrives,
+ * component re-renders, `to` moves, key changes, refetch, forever. That loop kept three of the four
+ * dashboard views permanently empty while they reported plausible-looking zeroes. Do not remove the
+ * flooring to "simplify" this.
+ */
+export const PROBE_CYCLE_MS = 30_000
+
 export function isRangeOption(value: string): value is RangeOption {
   return (RANGE_OPTIONS as readonly string[]).includes(value)
 }
 
 export function rangeToWindow(range: RangeOption, now: number = Date.now()): { from: number; to: number } {
-  return { from: now - RANGE_SPAN_MS[range], to: now }
+  // Floor `to` (never round) so the window never reaches past `now` into data that cannot exist yet,
+  // and derive `from` from the floored `to` so both ends are stable and the span stays exact.
+  const to = Math.floor(now / PROBE_CYCLE_MS) * PROBE_CYCLE_MS
+  return { from: to - RANGE_SPAN_MS[range], to }
 }
 
 export function rangeToBucket(range: RangeOption): ProbeBucketSeconds {

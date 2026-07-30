@@ -16,24 +16,66 @@ services:
       # here would make the bearer-gated write routes reachable from
       # anywhere on the LAN.
       - '127.0.0.1:7731:7731'
+    # Both secrets arrive here and only here. `make env` reads
+    # ~/.config/linewatch/token and ~/.config/linewatch/router-password on the
+    # host and writes LINEWATCH_TOKEN / LINEWATCH_ROUTER_PASSWORD into ./.env;
+    # this is what loads them. `format: raw` means the values are taken
+    # literally — no interpolation, no quote stripping — so a password
+    # containing $ or # survives intact.
+    #
+    # There is deliberately no bind mount of a credential file. The image's
+    # `app` user is created with --home-dir /app, so the poller's
+    # ~/.config/linewatch/router-password fallback resolves to /app/.config
+    # inside the container; mounting a host file there would work but would make
+    # the container's home directory part of the deployment contract. The
+    # environment variable is the one path in.
+    #
+    # A missing router password is a supported state: the poller stays off,
+    # GET /api/router reports `pollerEnabled: false` with the reason, and every
+    # other route is unaffected.
     env_file:
       - path: ./.env
         format: raw
     environment:
       LINEWATCH_PORT: '7731'
       LINEWATCH_DB: ./data/linewatch.db
-    # Run as the host user rather than the image's `app` user. A bind mount
-    # carries the host's ownership through, so the image UID would hit
-    # permission-denied on ./data; the alternative fix (chmod 777) opens the
-    # directory to every process on the machine to solve a UID mismatch.
-    # `make up` writes the real values into .env; the defaults are the standard
-    # macOS first-user pair (501:20, `staff`).
-    user: '${LINEWATCH_UID:-501}:${LINEWATCH_GID:-20}'
+      # Read by src/db/client.ts. Inside the container the database is reachable
+      # and must be opened; on the host the same open is a bug, so the guard
+      # there needs to tell the two apart. See docs/storage.md.
+      LINEWATCH_DOCKER: '1'
+    # No `user:` mapping. It existed only to make the old ./data bind mount
+    # writable by matching the host's UID/GID, and a named volume lives inside
+    # the Docker VM where there is no host ownership to match. Dropping it means
+    # the container runs as the image's own non-root `app` user (Dockerfile
+    # `USER app`) instead of having its identity depend on which machine started
+    # it. `make db-import` chowns the volume to `app` once, at creation.
     volumes:
-      # Bind mount, not a named volume: the SQLite file is meant to be
-      # directly inspectable/backupable from the host (unlike rb's
-      # deliberately opaque named volume — there's no privacy concern here).
-      - ./data:/app/data
+      # Named volume, NOT a bind mount — the host must not be able to open this
+      # file at all.
+      #
+      # ./data:/app/data was the original choice, argued for on the grounds that
+      # the SQLite file should be "directly inspectable/backupable from the
+      # host". That convenience is the corruption mechanism. SQLite coordinates
+      # concurrent access with fcntl byte-range locks, and those do not propagate
+      # across the macOS-host / Docker-VM boundary, so a host process and the
+      # container each hold the database believing they are alone; incoherent
+      # mmap of the -shm file across virtiofs is a second trigger on top.
+      # Measured 2026-07-30: `pragma integrity_check` returned
+      # `btreeInitPage() returns error code 11` on three b-trees,
+      # `probe_sample` and `speed_test` became unreadable, and `.recover`
+      # salvaged 945 of ~1400 rows — a hole in the very uptime record this
+      # project exists to keep.
+      #
+      # With the volume the race is impossible rather than discouraged. It also
+      # introduces one new failure mode, which is why src/db/client.ts carries a
+      # guard: a host-side open no longer races, it silently creates a NEW empty
+      # database and appears to work. Read the data through the API, or use
+      # `make db-shell` / `make db-counts` / `make db-backup`.
+      #
+      # `external: true` (below) is a safety property: Compose refuses to delete
+      # an external volume, so `docker compose down -v` cannot destroy the
+      # history. `make up` creates it if absent.
+      - linewatch-data:/app/data
     healthcheck:
       test: ['CMD', 'curl', '-fsS', 'http://localhost:7731/health']
       interval: 10s
@@ -46,3 +88,12 @@ services:
       options:
         max-size: '10m'
         max-file: '3'
+
+volumes:
+  linewatch-data:
+    # Not managed by this project's lifecycle: `docker compose down -v` must not
+    # be able to delete a year of uptime history. Deleting it has to be a
+    # deliberate `docker volume rm linewatch-data`. `make up` creates it when
+    # absent so a fresh clone still works.
+    external: true
+    name: linewatch-data

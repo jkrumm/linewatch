@@ -20,13 +20,18 @@ Throughput through the VM is unaffected, so speed tests belong in the container.
 
 | Piece | Where | Why |
 |-|-|-|
-| `collector/probe.ts` | native, launchd | real ICMP; ~150 lines, no npm deps |
-| API + SQLite + Ookla + UI | Docker (`:7731`) | restart policy, rollhook CD |
+| `collector/{probe,ping-parser,vantage}.ts` | native, launchd | real ICMP + the host's own vantage; no npm deps |
+| API + SQLite + Ookla + router poll + UI | Docker (`:7731`) | restart policy, rollhook CD |
 
 The collector POSTs batches with a bearer token and **spools to
 `collector/spool.jsonl` on failure**, replaying on the next successful cycle. Do
 not "simplify" the spool away — without it every redeploy writes a fake outage
 into the record.
+
+**The database is in the `linewatch-data` named Docker volume and the host
+cannot open it.** Read it with `make db-counts` / `make db-shell`, never by
+opening the file — [`docs/storage.md`](docs/storage.md) has the rule, the
+corruption that forced it, and the backup/restore targets.
 
 ## Boot order trap, already hit once
 
@@ -41,15 +46,34 @@ an invariant of importing the client.
 
 ## Conventions
 
-- Bearer auth on the two write routes only (`POST /api/probes`,
-  `POST /api/speedtests/run`). Reads are open on the tailnet.
-- `GET /api/probes` **must** bucket in SQL. Never return raw rows for a long
-  range — the table grows ~4.2M rows/year.
+- Bearer auth on the two routes that write to the historical record: `POST
+  /api/probes` and `POST /api/interventions`. Everything else is open on the
+  tailnet — including `POST /api/speedtests/run`, which is a dashboard button
+  with no token to present and is **rate-limited instead** (429 within
+  `speedtestMinIntervalS`, 5 min by default, measured against the newest
+  `speed_test` row so a container restart cannot reset it). Saturating the line
+  is its only abuse and the limit caps that. `grep -rn hasValidBearer src/` is
+  the source of truth; keep this list in sync with it.
+- `GET /api/probes` **must** bucket in SQL, and so must any new range route.
+  Never return raw rows for a long range — `probe_sample` grows ~4.2M rows/year.
+  The router range routes cap with an explicit `limit` instead.
 - Outages are materialised on write by `services/outage-detector.ts`, not derived
   on read. Single-cycle blips are recorded honestly and filtered in the UI.
-- The `event` table is the extension point for router control (TP-Link reconnect,
-  LAN↔WLAN failover). Nothing writes `intervention` or `link_change` yet — they
-  exist so phase 2 needs no migration.
+- `probe_cycle` records what each cycle measured **through** — default-route
+  interface, path class, negotiated media/link speed/duplex, gateway, NIC error
+  counters. `on_home_line` is three-state: 1 / 0 / **null = unknown**. Never
+  coalesce null to 1 on a read path, and never default an unparseable field to a
+  plausible value; that fabrication is the exact bug the table exists to prevent.
+  `ts` is UNIQUE so a spool replay is idempotent.
+- `link_change` events are materialised on write, like outages — by the probe
+  ingest when the host-side vantage changes, and by the router poller from the
+  carrier side. `intervention` is written by `POST /api/interventions`.
+  `config_change` and `note` are still unwritten; the `event` table stays the
+  extension point for phase-2 router control (TP-Link reconnect, LAN↔WLAN
+  failover) so it needs no migration.
+- The router poller is **read-only** against the router, and no schema table
+  stores a MAC. This is a public repo: no real MAC, hostname, ISP name, city,
+  public IP or credential in tracked files, fixtures and tests included.
 - The dashboard's fetch layer has a single `USE_MOCK` switch. Keep it working;
   it is how the UI is developed before real data accumulates.
 

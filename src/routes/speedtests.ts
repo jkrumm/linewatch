@@ -4,7 +4,7 @@ import { and, desc, eq, gte, lte, type SQL } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { speedTest } from '../db/schema.js'
 import { percentile } from '../lib/stats.js'
-import { hasValidBearer } from '../lib/auth.js'
+import { config } from '../config.js'
 import { triggerSpeedtestNow } from '../services/speedtest-runner.js'
 
 const SpeedTestSchema = z.object({
@@ -110,8 +110,29 @@ export const speedtestsRoutes = new Elysia()
   )
   .post(
     '/api/speedtests/run',
-    ({ headers, status }) => {
-      if (!hasValidBearer(headers)) return status(401, 'Unauthorized')
+    ({ status }) => {
+      // No bearer here, unlike POST /api/probes. This route is a button in the
+      // dashboard, which has no token; the only abuse it enables is saturating
+      // the line, and the rate limit below caps that. Consistent with "reads are
+      // open on the tailnet" — the tailnet is the perimeter.
+      //
+      // The limit is enforced against the newest speed_test row (`ts` = run
+      // start), not an in-process timer, so restarting the container cannot
+      // reset the budget.
+      const last = db.select({ ts: speedTest.ts }).from(speedTest).orderBy(desc(speedTest.ts)).limit(1).get()
+      const minIntervalMs = config.speedtestMinIntervalS * 1000
+      if (last) {
+        const elapsedMs = Date.now() - last.ts
+        if (elapsedMs < minIntervalMs) {
+          return status(429, {
+            error: 'rate_limited' as const,
+            secondsUntilNext: Math.ceil((minIntervalMs - elapsedMs) / 1000),
+            minIntervalS: config.speedtestMinIntervalS,
+            lastRunTs: last.ts,
+          })
+        }
+      }
+
       const triggered = triggerSpeedtestNow()
       return { ok: true as const, triggered }
     },
@@ -121,14 +142,18 @@ export const speedtestsRoutes = new Elysia()
           ok: z.literal(true),
           triggered: z.boolean().describe('false if a run — scheduled or manual — was already in progress'),
         }),
-        401: z.string(),
+        429: z.object({
+          error: z.literal('rate_limited'),
+          secondsUntilNext: z.number().int(),
+          minIntervalS: z.number().int(),
+          lastRunTs: z.number().int(),
+        }),
       },
       detail: {
         tags: ['Speed Tests'],
         summary: 'Trigger a speed test now',
         description:
-          'Fire-and-forget: starts an Ookla run in the background and returns immediately. Poll GET /api/speedtests or GET /api/status for the result once it lands.',
-        security: [{ BearerAuth: [] }],
+          'Fire-and-forget: starts an Ookla run in the background and returns immediately. Poll GET /api/speedtests or GET /api/status for the result once it lands. No bearer token — tailnet-only, rate-limited instead: a run within `minIntervalS` of the last one gets a 429 carrying `secondsUntilNext`. A run takes ~250 MB–1 GB of traffic, so the limit is the abuse control.',
       },
     },
   )

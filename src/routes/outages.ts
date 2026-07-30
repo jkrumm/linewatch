@@ -3,6 +3,29 @@ import { z } from 'zod'
 import { and, desc, gte, isNull, lte, or, type SQL } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { outage } from '../db/schema.js'
+import { config } from '../config.js'
+import { rangeSummary } from '../db/range-summary.js'
+
+const RangeSummarySchema = z.object({
+  from: z.number().int(),
+  to: z.number().int(),
+  recordedCycles: z.number().int().describe('Distinct probe cycles actually recorded in the range'),
+  expectedCycles: z.number().int().describe('How many the probe cadence should have produced across the whole range'),
+  coveragePct: z.number().describe('recordedCycles / expectedCycles × 100. Below 100 means part of the range was NOT MEASURED, which is not the same as up.'),
+  firstTs: z.number().int().nullable(),
+  lastTs: z.number().int().nullable(),
+  degradedCycles: z
+    .number()
+    .int()
+    .describe('Cycles whose worst target lost ≥ degradedLossPct while no outage row covered them — degradation the outage table structurally cannot show'),
+  degradedLossPct: z.number().describe('The threshold used (LINEWATCH_DEGRADED_LOSS_PCT / src/config.ts)'),
+  onHomeLine: z
+    .enum(['all', 'none', 'mixed', 'unknown'])
+    .describe('Vantage verdict over the range. Only `all` means every recorded cycle measured the home line; `unknown` is not `all`.'),
+  homeLineCycles: z.number().int(),
+  offHomeLineCycles: z.number().int(),
+  unknownHomeLineCycles: z.number().int(),
+})
 
 const OutageSchema = z.object({
   id: z.number().int(),
@@ -28,6 +51,20 @@ export const outagesRoutes = new Elysia().get(
     const where = conditions.length > 0 ? and(...conditions) : undefined
 
     const rows = db.select().from(outage).where(where).orderBy(desc(outage.startedAt)).all()
+
+    // Only computable for an explicit range: "how much of the window was
+    // actually measured" is meaningless without a window. The dashboard's
+    // headline ("24 h: 0 min downtime") must be read together with this.
+    const summary =
+      query.from !== undefined && query.to !== undefined
+        ? rangeSummary(db, {
+            from: query.from,
+            to: query.to,
+            probeCycleSeconds: config.probeCycleSeconds,
+            degradedLossPct: config.degradedLossPct,
+          })
+        : null
+
     return {
       outages: rows.map((row) => ({
         id: row.id,
@@ -38,6 +75,7 @@ export const outagesRoutes = new Elysia().get(
         cycles: row.cycles,
         evidence: JSON.parse(row.evidence) as string[],
       })),
+      summary,
     }
   },
   {
@@ -46,12 +84,15 @@ export const outagesRoutes = new Elysia().get(
       to: z.coerce.number().int().optional(),
       minDuration: z.coerce.number().int().optional().describe('Seconds — filters closed outages; ongoing outages always show'),
     }),
-    response: z.object({ outages: z.array(OutageSchema) }),
+    response: z.object({
+      outages: z.array(OutageSchema),
+      summary: RangeSummarySchema.nullable().describe('Coverage, degradation and vantage over the requested range; null when `from`/`to` were not both given'),
+    }),
     detail: {
       tags: ['Outages'],
       summary: 'List outages',
       description:
-        'Outage rows materialised by the ingest-time state machine (never derived on read). Single-cycle blips are included honestly — filter them client-side or with `minDuration`.',
+        'Outage rows materialised by the ingest-time state machine (never derived on read). Single-cycle blips are included honestly — filter them client-side or with `minDuration`. When both `from` and `to` are given, `summary` carries the three things an outage list cannot say on its own: how much of the range was actually measured (`recordedCycles` vs `expectedCycles` — "0 min downtime" over an unmeasured range is a lie of omission), how many cycles were materially degraded without ever reaching zero replies (`degradedCycles`, which the outage state machine cannot record because it only fires on `received === 0`), and whether the range was measured over the home line at all (`onHomeLine`).',
     },
   },
 )

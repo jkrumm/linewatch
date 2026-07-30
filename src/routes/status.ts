@@ -4,6 +4,7 @@ import { desc, eq, isNull } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { outage, probeSample, speedTest } from '../db/schema.js'
 import { config } from '../config.js'
+import { currentVantage } from '../services/cycle-vantage.js'
 
 const LastSampleSchema = z.object({
   target: z.string(),
@@ -39,11 +40,26 @@ const LastSpeedTestSchema = z.object({
   error: z.string().nullable(),
 })
 
+const VantageSchema = z.object({
+  ts: z.number().int(),
+  pathIf: z.string().nullable(),
+  pathClass: z.enum(['ethernet', 'wifi', 'cellular', 'other']).nullable(),
+  linkMedia: z.string().nullable(),
+  linkMbit: z.number().int().nullable(),
+  linkDuplex: z.enum(['full', 'half']).nullable(),
+  gatewayAddr: z.string().nullable(),
+  onHomeLine: z
+    .boolean()
+    .nullable()
+    .describe('true = Ethernet through the configured home gateway; false = some other path; null = not reported, i.e. UNKNOWN. Never render null as true.'),
+})
+
 const StatusResponse = z.object({
   up: z.boolean().describe('false while any scope (gateway or wan) has an ongoing outage'),
   ongoingOutages: z.array(OngoingOutageSchema),
   lastSamples: z.array(LastSampleSchema),
   lastSpeedTest: LastSpeedTestSchema.nullable(),
+  vantage: VantageSchema.nullable().describe('The most recent cycle vantage, or null when no cycle ever reported one'),
 })
 
 export const statusRoute = new Elysia().get(
@@ -103,11 +119,29 @@ export const statusRoute = new Elysia().get(
         }
       : null
 
+    const vantageRow = currentVantage(db)
+    const vantage = vantageRow
+      ? {
+          ts: vantageRow.ts,
+          pathIf: vantageRow.pathIf,
+          pathClass: vantageRow.pathClass,
+          linkMedia: vantageRow.linkMedia,
+          linkMbit: vantageRow.linkMbit,
+          linkDuplex: vantageRow.linkDuplex,
+          gatewayAddr: vantageRow.gatewayAddr,
+          // Three states, preserved: the column is 0/1/NULL and NULL means the
+          // collector did not report. Coalescing it to `true` here is precisely
+          // the lie this table exists to prevent.
+          onHomeLine: vantageRow.onHomeLine === null ? null : vantageRow.onHomeLine === 1,
+        }
+      : null
+
     return {
       up: ongoingOutages.length === 0,
       ongoingOutages,
       lastSamples,
       lastSpeedTest,
+      vantage,
     }
   },
   {
@@ -116,7 +150,7 @@ export const statusRoute = new Elysia().get(
       tags: ['Status'],
       summary: 'Current line status',
       description:
-        'Up/down now, any ongoing outage (gateway and/or wan scope), the most recent sample per configured target, and the most recent speed test. This is the "Now" dashboard view in one call.',
+        'Up/down now, any ongoing outage (gateway and/or wan scope), the most recent sample per configured target, the most recent speed test, and the current vantage — which interface and negotiated link the last cycle went out over, and whether that was the home line at all. This is the "Now" dashboard view in one call.',
     },
   },
 )

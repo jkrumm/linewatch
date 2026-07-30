@@ -20,7 +20,7 @@ Throughput through the VM is unaffected, so speed tests belong in the container.
 
 | Piece | Where | Why |
 |-|-|-|
-| `collector/probe.ts` | native, launchd | real ICMP; ~150 lines, no npm deps |
+| `collector/{probe,ping-parser}.ts` | native, launchd | real ICMP; no npm deps |
 | API + SQLite + Ookla + UI | Docker (`:7731`) | restart policy, rollhook CD |
 
 The collector POSTs batches with a bearer token and **spools to
@@ -43,19 +43,30 @@ an invariant of importing the client.
 
 - Bearer auth on the two write routes only (`POST /api/probes`,
   `POST /api/speedtests/run`). Reads are open on the tailnet.
+  `grep -rn hasValidBearer src/` is the source of truth; keep this list in sync
+  with it.
 - `GET /api/probes` **must** bucket in SQL. Never return raw rows for a long
   range — the table grows ~4.2M rows/year.
 - Outages are materialised on write by `services/outage-detector.ts`, not derived
   on read. Single-cycle blips are recorded honestly and filtered in the UI.
+- `probe_sample.duplicates` / `out_of_wait_time` are nullable, never `default 0`:
+  null means the collector that wrote the row did not report the number, and a 0
+  would claim it was measured. They are optional on ingest for the same reason —
+  a spooled batch written before they existed must still replay.
 - The `event` table is the extension point for router control (TP-Link reconnect,
   LAN↔WLAN failover). Nothing writes `intervention` or `link_change` yet — they
   exist so phase 2 needs no migration.
+- This is a public repo: no real MAC, hostname, ISP name, city, public IP or
+  credential in tracked files, fixtures and tests included.
 - The dashboard's fetch layer has a single `USE_MOCK` switch. Keep it working;
   it is how the UI is developed before real data accumulates.
 
 ## Validation
 
-`make check` (typecheck + `bun test`). The ping parser is tested against real
+`make check` (typecheck of API + collector, then of `web/`, then `bun test`).
+The dashboard needs its own pass because the root tsconfig's `include` is
+src/collector only — without it a broken `web/` typechecks clean and only fails
+at image build. The ping parser is tested against real
 macOS `ping` output fixtures — including the 100%-loss case, where `ping` **exits
 non-zero and prints no round-trip summary line**. That is a valid measurement,
 not an error; never gate on the exit code.

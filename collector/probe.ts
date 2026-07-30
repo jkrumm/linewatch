@@ -22,7 +22,7 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { median, stddev } from '../src/lib/stats.js'
-import { parsePingOutput } from './ping-parser.js'
+import { parsePingOutput, type PingResult } from './ping-parser.js'
 
 interface Target {
   name: string
@@ -87,6 +87,16 @@ interface TargetSample {
   avgMs: number | null
   jitterMs: number | null
   samples: number[] | null
+  /** `+N duplicates,` in ping's summary. Normal on a LAN; makes `samples` longer than `received`. */
+  duplicates: number
+  /**
+   * Replies that arrived after `-W` — counted in `received` but never timed, so they print no
+   * `time=` line. Non-zero means min/med/max/jitter for this cycle are a floor computed from the
+   * fast replies only, and the censored ones are precisely the slow ones. Carried to the API so a
+   * cycle that looks fast because its slow replies were dropped is distinguishable from a genuinely
+   * fast one, instead of the distinction dying at this boundary.
+   */
+  outOfWaitTime: number
 }
 
 interface Batch {
@@ -109,13 +119,13 @@ async function pingTarget(target: Target): Promise<TargetSample> {
     log('ping.spawn_error', { target: target.name, error: err instanceof Error ? err.message : String(err) })
   }
 
-  let parsed: { sent: number; received: number; lossPct: number; rtts: number[] }
+  let parsed: PingResult
   try {
     parsed = parsePingOutput(stdout)
   } catch {
     // No usable output at all (binary missing, DNS failure, etc.) — record
     // it as a full-loss cycle rather than silently dropping the target.
-    parsed = { sent: config.pingCount, received: 0, lossPct: 100, rtts: [] }
+    parsed = { sent: config.pingCount, received: 0, lossPct: 100, rtts: [], duplicates: 0, outOfWaitTime: 0 }
   }
 
   const rtts = parsed.rtts
@@ -133,6 +143,8 @@ async function pingTarget(target: Target): Promise<TargetSample> {
     avgMs: hasData ? rtts.reduce((sum, v) => sum + v, 0) / rtts.length : null,
     jitterMs: hasData ? stddev(rtts) : null,
     samples: hasData ? rtts : null,
+    duplicates: parsed.duplicates,
+    outOfWaitTime: parsed.outOfWaitTime,
   }
 }
 

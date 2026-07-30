@@ -20,6 +20,14 @@ export const probeSample = sqliteTable(
     avgMs: real('avg_ms'),
     jitterMs: real('jitter_ms'),
     samples: text('samples'),
+    // Both nullable rather than `default 0`: null means "the collector that wrote
+    // this row did not report the number", which is what every row predating the
+    // clause-by-clause ping parser is. A 0 there would claim it was measured.
+    duplicates: integer('duplicates'),
+    // > 0 means replies arrived after `-W` and were counted in `received` but
+    // never timed, so min/med/max/jitter for that row are a floor computed from
+    // the fast replies only — the censored ones are precisely the slow ones.
+    outOfWaitTime: integer('out_of_wait_time'),
   },
   (t) => [index('probe_target_ts').on(t.target, t.ts), index('probe_ts').on(t.ts)],
 )

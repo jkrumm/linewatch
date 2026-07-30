@@ -7,6 +7,7 @@ import { probeBucketsQuery, statusQuery } from '../lib/queries'
 import { StatusBanner } from '../components/status-banner'
 import { TargetTile } from '../components/target-tile'
 import { TARGETS } from '../lib/types'
+import { rangeToWindow } from '../lib/range'
 import { fmtMbps, fmtMs, fmtRelative } from '../lib/format'
 
 /** 15-minute buckets over 24h ≈ 96 points for the WAN latency sparkline. */
@@ -19,11 +20,14 @@ export const Route = createFileRoute('/')({
 
 function NowPage() {
   const { data: status } = useQuery(statusQuery())
-  const now = Date.now()
+  // Via rangeToWindow, not a raw Date.now(): probeBucketsQuery embeds `from`/`to` in its query key,
+  // so an unquantised clock read mints a new key every render and refetches forever. `to` also
+  // serves as "now" for relative formatting — it is the clock floored to one probe cycle.
+  const { from, to } = rangeToWindow('24h')
   const { data: sparklineBuckets } = useQuery(
     probeBucketsQuery({
-      from: now - 24 * 3_600_000,
-      to: now,
+      from,
+      to,
       target: 'cloudflare',
       bucket: SPARKLINE_BUCKET_SECONDS,
     }),
@@ -46,7 +50,7 @@ function NowPage() {
         <StatCard label="Idle ping" value={fmtMs(status.lastSpeedTest?.pingMs ?? null)} />
         <StatCard
           label="Last speed test"
-          value={status.lastSpeedTest ? fmtRelative(status.lastSpeedTest.ts, now) : '—'}
+          value={status.lastSpeedTest ? fmtRelative(status.lastSpeedTest.ts, to) : '—'}
         />
       </SimpleGrid>
 

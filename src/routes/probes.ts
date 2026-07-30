@@ -21,6 +21,12 @@ const SampleInput = z.object({
   avgMs: z.number().nullable(),
   jitterMs: z.number().nullable(),
   samples: z.array(z.number()).nullable().optional(),
+  // Optional, not required: the native collector and the container deploy
+  // independently, and collector/spool.jsonl can hold batches written before
+  // these fields existed. A required field here would reject that replay and
+  // lose real measurements — the exact hole the spool exists to prevent.
+  duplicates: z.number().int().min(0).optional(),
+  outOfWaitTime: z.number().int().min(0).optional(),
 })
 
 const IngestBody = z.object({
@@ -34,7 +40,11 @@ const ProbeBucketSchema = z.object({
   medianMs: z.number().nullable(),
   p5Ms: z.number().nullable(),
   p95Ms: z.number().nullable(),
+  minMs: z.number().nullable(),
+  maxMs: z.number().nullable(),
   maxLossPct: z.number(),
+  lossPct: z.number(),
+  downCycles: z.number().int(),
   count: z.number().int(),
 })
 
@@ -68,6 +78,8 @@ export const probesRoutes = new Elysia()
             avgMs: sample.avgMs,
             jitterMs: sample.jitterMs,
             samples: sample.samples ? JSON.stringify(sample.samples) : null,
+            duplicates: sample.duplicates ?? null,
+            outOfWaitTime: sample.outOfWaitTime ?? null,
           })),
         )
         .run()
@@ -118,7 +130,7 @@ export const probesRoutes = new Elysia()
         tags: ['Probes'],
         summary: 'Server-bucketed probe timeseries',
         description:
-          'Buckets probe_sample rows in SQL — never raw rows — grouping by `floor(ts / (bucket*1000))` per target. Each bucket returns the median-of-medians, a p5/p95 band, max packet loss, and the sample count, for the SmokePing-style latency chart. `bucket` is in seconds (default 3600 = hourly).',
+          'Buckets probe_sample rows in SQL — never raw rows — grouping by `floor(ts / (bucket*1000))` per target. Each bucket returns the median-of-medians, a p5/p95 band over those medians, the true min/max round trip for the SmokePing spread band, and the sample count. Two loss figures: `lossPct` is the sent-weighted aggregate (availability = `100 - lossPct`), `maxLossPct` is the worst single cycle, and `downCycles` counts cycles with nothing returned. `bucket` is in seconds (default 3600 = hourly).',
       },
     },
   )

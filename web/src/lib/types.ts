@@ -20,16 +20,32 @@ export const TARGET_LABEL: Record<TargetName, string> = {
 export type OutageScope = 'gateway' | 'wan'
 
 /** One server-bucketed point from `GET /api/probes` — the envelope's `buckets[]` items. `bucket`
- * is the bucket-start timestamp (unix ms), NOT a bucket-size label. `maxLossPct` is never null
- * (0 when every cycle in the bucket succeeded); the latency fields are null only when every cycle
- * in the bucket was 100% loss. */
+ * is the bucket-start timestamp (unix ms), NOT a bucket-size label. The latency fields are null
+ * only when every cycle in the bucket was 100% loss.
+ *
+ * Two loss numbers, deliberately: `lossPct` is the honest aggregate over the bucket
+ * (`100 * SUM(sent-received) / SUM(sent)`, 0 when nothing was sent), `maxLossPct` is the single
+ * worst cycle in it. One bad cycle in an hour reads as ~0.03% aggregate and 100% worst — both are
+ * true and they answer different questions, so neither is derivable from the other. `downCycles`
+ * separates "one blip" from "the line was gone for this whole bucket". */
 export type ProbeBucket = {
   bucket: number
   target: string
   medianMs: number | null
+  /** p5 of the per-cycle medians — the band's lower edge. Not the same as `minMs`. */
   p5Ms: number | null
+  /** p95 of the per-cycle medians — the band's upper edge. Not the same as `maxMs`. */
   p95Ms: number | null
+  /** `MIN(min_ms)` — the true smoke-band floor: the fastest individual ping in the bucket. */
+  minMs: number | null
+  /** `MAX(max_ms)` — the true smoke-band ceiling: the slowest individual ping in the bucket. */
+  maxMs: number | null
+  /** `MAX(loss_pct)` — the worst single cycle. Never null (0 when every cycle succeeded). */
   maxLossPct: number
+  /** Aggregate loss across the whole bucket. Never null (0 when `SUM(sent)` is 0). */
+  lossPct: number
+  /** Cycles in this bucket where `received = 0` — i.e. fully down, not merely lossy. */
+  downCycles: number
   count: number
 }
 

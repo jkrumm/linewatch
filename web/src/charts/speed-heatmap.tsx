@@ -1,4 +1,4 @@
-import { ChartCard, Heatmap, ResponsiveChart, VX, alpha } from 'basalt-ui/charts'
+import { ChartCard, Heatmap, ResponsiveChart, VX } from 'basalt-ui/charts'
 import type { SpeedTest } from '../lib/types'
 import { fmtMbps } from '../lib/format'
 
@@ -38,7 +38,10 @@ export function SpeedHeatmap({ tests }: { tests: SpeedTest[] }) {
             cols={HOUR_LABELS}
             color={VX.accent}
             formatValue={(v) => fmtMbps(maxDownload - v)}
-            legend={{ min: alpha(VX.accent, 0.08), max: VX.accent }}
+            // legend.min/.max are rendered as the strip's two captions, not as gradient colours.
+            // Faint end is the low value — and the value here is the deficit from the fastest hour,
+            // so faint means fast.
+            legend={{ min: 'Fastest', max: 'Slowest' }}
           />
         )}
       </ResponsiveChart>

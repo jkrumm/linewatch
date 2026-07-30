@@ -24,6 +24,33 @@ function sample(ts: number, target: string, medMs: number | null, lossPct = 0) {
   }
 }
 
+/**
+ * A cycle with the loss fields set independently of the latency fields — the
+ * `sample()` helper above ties `received` to `medMs`, which cannot express a
+ * partial-loss cycle (some packets back, so a median exists).
+ */
+function lossyCycle(
+  ts: number,
+  target: string,
+  cycle: { sent: number; received: number; minMs?: number | null; medMs?: number | null; maxMs?: number | null },
+) {
+  const { sent, received, minMs = null, medMs = null, maxMs = null } = cycle
+  return {
+    ts,
+    target,
+    addr: '1.1.1.1',
+    sent,
+    received,
+    lossPct: sent === 0 ? 0 : (100 * (sent - received)) / sent,
+    minMs,
+    medMs,
+    maxMs,
+    avgMs: medMs,
+    jitterMs: null,
+    samples: null,
+  }
+}
+
 describe('bucketProbes', () => {
   test('returns nothing for a range with no matching rows', () => {
     const db = createTestDb()
@@ -105,5 +132,101 @@ describe('bucketProbes', () => {
     const buckets = bucketProbes(db, { from: HOUR_0, to: HOUR_0 + BUCKET_MS, bucketSeconds: BUCKET_S })
     expect(buckets).toHaveLength(1)
     expect(buckets[0]?.count).toBe(500)
+  })
+
+  test('one partial-loss cycle among many clean ones barely moves lossPct, but maxLossPct is large', () => {
+    const db = createTestDb()
+    const clean = Array.from({ length: 99 }, (_, i) =>
+      lossyCycle(HOUR_0 + i * 1000, 'cloudflare', { sent: 20, received: 20, minMs: 10, medMs: 12, maxMs: 15 }),
+    )
+    // One cycle loses 15 of 20 packets: 75% for that cycle, 15/2000 overall.
+    db.insert(probeSample)
+      .values([...clean, lossyCycle(HOUR_0 + 99_000, 'cloudflare', { sent: 20, received: 5, minMs: 10, medMs: 40, maxMs: 90 })])
+      .run()
+
+    const [bucket] = bucketProbes(db, { from: HOUR_0, to: HOUR_0 + BUCKET_MS, bucketSeconds: BUCKET_S })
+    expect(bucket?.count).toBe(100)
+    expect(bucket?.maxLossPct).toBe(75)
+    // 100 * 15 / 2000 — sent-weighted, not the worst cycle.
+    expect(bucket?.lossPct).toBeCloseTo(0.75, 6)
+    expect(bucket?.lossPct).not.toBeCloseTo(bucket?.maxLossPct ?? 0, 1)
+    // Availability read off maxLossPct would claim 25% for an hour that was 99.25% up.
+    expect(100 - (bucket?.lossPct ?? 0)).toBeCloseTo(99.25, 6)
+    expect(bucket?.downCycles).toBe(0)
+  })
+
+  test('a bucket where every cycle is down reports lossPct 100 and downCycles = count', () => {
+    const db = createTestDb()
+    db.insert(probeSample)
+      .values([
+        lossyCycle(HOUR_0 + 0, 'cloudflare', { sent: 20, received: 0 }),
+        lossyCycle(HOUR_0 + 30_000, 'cloudflare', { sent: 20, received: 0 }),
+        lossyCycle(HOUR_0 + 60_000, 'cloudflare', { sent: 20, received: 0 }),
+      ])
+      .run()
+
+    const [bucket] = bucketProbes(db, { from: HOUR_0, to: HOUR_0 + BUCKET_MS, bucketSeconds: BUCKET_S })
+    expect(bucket?.count).toBe(3)
+    expect(bucket?.lossPct).toBe(100)
+    expect(bucket?.downCycles).toBe(3)
+    expect(bucket?.medianMs).toBeNull()
+    expect(bucket?.minMs).toBeNull()
+    expect(bucket?.maxMs).toBeNull()
+  })
+
+  test('one fully-down cycle among clean ones: downCycles 1, lossPct strictly between 0 and maxLossPct', () => {
+    const db = createTestDb()
+    db.insert(probeSample)
+      .values([
+        lossyCycle(HOUR_0 + 0, 'cloudflare', { sent: 20, received: 20, minMs: 8, medMs: 10, maxMs: 12 }),
+        lossyCycle(HOUR_0 + 30_000, 'cloudflare', { sent: 20, received: 20, minMs: 8, medMs: 10, maxMs: 12 }),
+        lossyCycle(HOUR_0 + 60_000, 'cloudflare', { sent: 20, received: 20, minMs: 8, medMs: 10, maxMs: 12 }),
+        lossyCycle(HOUR_0 + 90_000, 'cloudflare', { sent: 20, received: 0 }),
+      ])
+      .run()
+
+    const [bucket] = bucketProbes(db, { from: HOUR_0, to: HOUR_0 + BUCKET_MS, bucketSeconds: BUCKET_S })
+    expect(bucket?.count).toBe(4)
+    expect(bucket?.downCycles).toBe(1)
+    expect(bucket?.maxLossPct).toBe(100)
+    expect(bucket?.lossPct).toBeCloseTo(25, 6)
+    expect(bucket?.lossPct).toBeGreaterThan(0)
+    expect(bucket?.lossPct).toBeLessThan(bucket?.maxLossPct ?? 0)
+  })
+
+  test('minMs/maxMs are the real round-trip extremes, not the spread of per-cycle medians', () => {
+    const db = createTestDb()
+    db.insert(probeSample)
+      .values([
+        lossyCycle(HOUR_0 + 0, 'cloudflare', { sent: 20, received: 20, minMs: 7, medMs: 10, maxMs: 240 }),
+        lossyCycle(HOUR_0 + 30_000, 'cloudflare', { sent: 20, received: 20, minMs: 9, medMs: 11, maxMs: 30 }),
+        lossyCycle(HOUR_0 + 60_000, 'cloudflare', { sent: 20, received: 20, minMs: 8, medMs: 12, maxMs: 45 }),
+      ])
+      .run()
+
+    const [bucket] = bucketProbes(db, { from: HOUR_0, to: HOUR_0 + BUCKET_MS, bucketSeconds: BUCKET_S })
+    expect(bucket?.minMs).toBe(7)
+    expect(bucket?.maxMs).toBe(240)
+    // The median band is far narrower — that is exactly why both are returned.
+    expect(bucket?.medianMs).toBe(11)
+    expect(bucket?.p5Ms).toBe(10)
+    expect(bucket?.p95Ms).toBe(12)
+  })
+
+  test('a bucket where no packets were sent yields lossPct 0, not NaN or null', () => {
+    const db = createTestDb()
+    db.insert(probeSample)
+      .values([
+        lossyCycle(HOUR_0 + 0, 'cloudflare', { sent: 0, received: 0 }),
+        lossyCycle(HOUR_0 + 30_000, 'cloudflare', { sent: 0, received: 0 }),
+      ])
+      .run()
+
+    const [bucket] = bucketProbes(db, { from: HOUR_0, to: HOUR_0 + BUCKET_MS, bucketSeconds: BUCKET_S })
+    expect(bucket?.lossPct).toBe(0)
+    expect(Number.isNaN(bucket?.lossPct)).toBe(false)
+    // sent = 0 still means nothing came back, so the cycle counts as down.
+    expect(bucket?.downCycles).toBe(2)
+    expect(bucket?.count).toBe(2)
   })
 })

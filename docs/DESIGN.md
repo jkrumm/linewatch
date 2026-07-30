@@ -58,10 +58,12 @@ launchd (native, macOS)              Docker (Colima)
                                     └──────────────────────────────┘
 ```
 
-The collector is the only native piece: ~150 lines, no dependencies beyond the
-system `ping`, and it changes rarely. Everything with a reason to change
-— schema, detection logic, API, dashboard — stays in the container with a
-restart policy and rollhook deployment.
+The collector is the only native piece: ~410 lines across `probe.ts` and
+`ping-parser.ts`, no npm dependencies beyond the system `ping`, and it changes
+rarely. Most of `ping-parser.ts` is parsing that output, kept as a pure module
+with fixture tests. Everything with a reason to change — schema, detection
+logic, API, dashboard — stays in the container with a restart policy and
+rollhook deployment.
 
 **The collector spools.** If the API is down (redeploy, container restart) it
 appends batches to `collector/spool.jsonl` and replays them on the next
@@ -108,6 +110,12 @@ the table is large enough to matter — noted, not built.
 | `loss_pct` | real | |
 | `min_ms`, `med_ms`, `max_ms`, `avg_ms`, `jitter_ms` | real, nullable | null when 100% loss |
 | `samples` | text, nullable | JSON array of RTTs — the smoke band |
+| `duplicates` | integer, nullable | `+N duplicates,` from ping's summary; makes `samples` longer than `received` |
+| `out_of_wait_time` | integer, nullable | replies that arrived after `-W`: counted in `received`, never timed, so this row's min/med/max/jitter are a floor |
+
+Both are nullable rather than `default 0`: null means the collector that wrote
+the row did not report the number, which is what every row predating the
+clause-by-clause ping parser is. A 0 there would claim it was measured.
 
 Indexes: `(target, ts)`, `(ts)`.
 
@@ -173,7 +181,7 @@ Bearer token on writes; reads are open on the tailnet.
 | `GET /health` | container healthcheck |
 | `POST /api/probes` | batch ingest from the collector (bearer) |
 | `GET /api/status` | now: up/down, ongoing outage, last sample per target, last speed test |
-| `GET /api/probes?from&to&target&bucket` | server-bucketed timeseries: median of medians, max loss, p5/p95 band |
+| `GET /api/probes?from&to&target&bucket` | server-bucketed timeseries: median of medians, aggregate and worst-cycle loss, p5/p95 band |
 | `GET /api/outages?from&to&minDuration` | list |
 | `GET /api/speedtests?from&to` | list |
 | `GET /api/speedtests/summary?days` | p50/p95 down/up, best, worst |

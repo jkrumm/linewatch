@@ -20,6 +20,21 @@ import { startSpeedtestScheduler } from './services/speedtest-runner.js'
 const WEB_DIST = resolve(dirname(fileURLToPath(import.meta.url)), '../web/dist')
 const INDEX_HTML = join(WEB_DIST, 'index.html')
 
+/** Whether the last path segment carries an extension, i.e. names a file rather than a view. */
+function namesAFile(path: string): boolean {
+  return path.slice(path.lastIndexOf('/') + 1).includes('.')
+}
+
+/** The file this path maps to inside web/dist, or null if there isn't one. */
+async function openDistFile(path: string) {
+  const candidate = resolve(join(WEB_DIST, path))
+  // A request for /../../etc/passwd must not escape the dist directory.
+  const insideDist = candidate === WEB_DIST || candidate.startsWith(WEB_DIST + sep)
+  if (!insideDist || candidate === WEB_DIST) return null
+  const file = Bun.file(candidate)
+  return (await file.exists()) ? file : null
+}
+
 export const app = new Elysia()
   .use(
     openapi({
@@ -60,24 +75,36 @@ export const app = new Elysia()
   .use(speedtestsRoutes)
   .use(eventsRoutes)
   // Serves the built dashboard: a real file when the path maps to one, and
-  // index.html otherwise so client-side deep links like /uptime resolve.
-  // Registered last, so every API route above still wins.
+  // index.html only for paths shaped like a client-side route. Registered last,
+  // so every API route above still wins.
   //
-  // This replaced @elysiajs/static, which with `prefix: ''` matched nothing —
-  // every asset fell through to the SPA fallback and was served as index.html
-  // with `content-type: text/html`, so the browser loaded HTML as JavaScript
-  // and rendered a blank page. It typechecks and returns 200 either way; only
-  // the content type gives it away.
+  // The blanket fallback this replaced answered *every* unmatched path with
+  // index.html and a 200 — first via @elysiajs/static with `prefix: ''`, then
+  // via a hand-rolled version of the same mistake. A browser holding a cached
+  // index.html then requests the previous build's hashed asset, receives HTML
+  // with `content-type: text/html`, loads it as JavaScript, and renders a blank
+  // dashboard with a clean 200 and nothing in the log. Only the content type
+  // gives it away, so a miss must be a 404 instead: under /assets/ it is always
+  // a deploy bug (stale index.html vs a renamed chunk) and it has to be loud.
   .get(
     '*',
-    async ({ path }) => {
-      const candidate = resolve(join(WEB_DIST, path))
-      // A request for /../../etc/passwd must not escape the dist directory.
-      const insideDist = candidate === WEB_DIST || candidate.startsWith(WEB_DIST + sep)
-      if (insideDist && candidate !== WEB_DIST) {
-        const file = Bun.file(candidate)
-        if (await file.exists()) return file
+    async ({ path, status }) => {
+      // Routes above are `.use()`d first, so only genuinely unclaimed /api/
+      // paths get here. Answer them in the shape an API client parses.
+      if (path === '/api' || path.startsWith('/api/')) {
+        return status(404, { error: 'Not Found', path })
       }
+
+      const file = await openDistFile(path)
+      if (file) return file
+
+      // A request that names a file — a hashed chunk, a stylesheet, a font,
+      // /favicon.ico — asked for that file, not for a page.
+      if (path.startsWith('/assets/') || namesAFile(path)) {
+        return status(404, 'Not Found')
+      }
+
+      // Extensionless: a client-side deep link such as /uptime or /latency.
       return Bun.file(INDEX_HTML)
     },
     { detail: { hide: true } },

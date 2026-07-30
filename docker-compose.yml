@@ -33,6 +33,10 @@ services:
     # A missing router password is a supported state: the poller stays off,
     # GET /api/router reports `pollerEnabled: false` with the reason, and every
     # other route is unaffected.
+    # The bearer token arrives here and only here. `make env` reads
+    # ~/.config/linewatch/token on the host and writes LINEWATCH_TOKEN into
+    # ./.env; this is what loads it. `format: raw` means the value is taken
+    # literally — no interpolation, no quote stripping.
     env_file:
       - path: ./.env
         format: raw

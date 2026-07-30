@@ -1,4 +1,4 @@
-.PHONY: help env up down reset rebuild logs collector-setup collector-teardown collector-logs check \
+.PHONY: help env up down rebuild logs collector-setup collector-teardown collector-logs check \
 	marker db-counts db-shell db-backup db-restore db-import
 .DEFAULT_GOAL := help
 
@@ -29,13 +29,20 @@ BACKUP_DIR    := $(REPO_DIR)/backups
 HOST_DATA_DIR := $(REPO_DIR)/data
 MARKER        := $(HOST_DATA_DIR)/MOVED-TO-DOCKER-VOLUME
 HOST_OWNER    := $(shell id -u):$(shell id -g)
+# Compose derives its project name from the directory. `up` asserts that the
+# fixed `container_name: linewatch` belongs to *this* project before starting.
+COMPOSE_PROJECT := $(notdir $(REPO_DIR))
 
 REQUIRE_VOLUME = @docker volume inspect $(VOLUME) >/dev/null 2>&1 || { echo "  ✗ Docker volume '$(VOLUME)' does not exist — run 'make up' first."; exit 1; }
 
 # Stopping and starting the service is only correct for the live volume. A drill
 # against a scratch volume must leave the running service alone.
 SERVICE_STOP  = $(if $(IS_LIVE),docker compose down,echo "  · drill on volume $(VOLUME) — leaving the running service alone")
-SERVICE_START = $(if $(IS_LIVE),$(MAKE) up,echo "  · drill on volume $(VOLUME) — service untouched")
+# Deliberately `$(SUBMAKE)`, not the literal `$(MAKE)`: GNU make runs any recipe
+# line containing that string even under `-n`, and here it shares a line with the
+# restore itself. `make -n db-restore` has to stay a dry run.
+SUBMAKE       := $(MAKE)
+SERVICE_START = $(if $(IS_LIVE),$(SUBMAKE) up,echo "  · drill on volume $(VOLUME) — service untouched")
 
 # A throwaway container from this project's own image, with the volume and
 # ./backups mounted. Safe to run while `linewatch` is up: both sit inside the
@@ -92,6 +99,20 @@ up: env marker ## Ensure the token, .env and data volume exist, build, and (re)s
 	@# fails with EACCES on the database. Asserted on every `up` rather than only
 	@# at creation: the volume can also be recreated by hand.
 	@docker compose run --rm --no-deps --user 0:0 --entrypoint sh linewatch -c 'chown -R app:app /app/data' >/dev/null
+	@# `container_name: linewatch` is a fixed name, so a container started by a
+	@# *different* compose project — a sibling worktree, a renamed directory, an
+	@# interrupted run — holds that name without being tracked here. Compose then
+	@# fails with "container name is already in use" and the orphan keeps serving
+	@# whatever image it was built from, which is how a rebuilt bearer-auth fix went
+	@# undeployed for half an hour. Assert the name is ours; do not ship a separate
+	@# "more thorough" target, which would only offer a way to distrust `up`.
+	@if docker inspect linewatch >/dev/null 2>&1; then \
+		OWNER=$$(docker inspect linewatch --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null); \
+		if [ "$$OWNER" != "$(COMPOSE_PROJECT)" ]; then \
+			echo "  ! container 'linewatch' belongs to compose project '$${OWNER:-<none>}', not '$(COMPOSE_PROJECT)' — removing it"; \
+			docker rm -f linewatch >/dev/null; \
+		fi; \
+	fi
 	docker compose up -d --force-recreate --remove-orphans
 	@printf "  waiting for /health… "
 	@for i in 1 2 3 4 5 6 7 8 9 10; do \
@@ -103,20 +124,6 @@ up: env marker ## Ensure the token, .env and data volume exist, build, and (re)s
 
 down: ## Stop the stack
 	docker compose down
-
-reset: ## Force-remove a stale/orphaned `linewatch` container, then rebuild and start clean
-	@# `container_name: linewatch` is a fixed name, so a container left behind by an earlier
-	@# compose project (different project labels, an interrupted run, a renamed directory)
-	@# keeps the name without being tracked by *this* project. `docker compose down` then
-	@# reports nothing to remove while `up` fails with "container name is already in use",
-	@# and the stack silently keeps serving whatever image that orphan was built from —
-	@# which is how a rebuilt bearer-auth fix went un-deployed for half an hour.
-	@#
-	@# Safe: the record lives in the external `linewatch-data` volume (docker-compose.yml),
-	@# which no container removal can touch and `docker compose down -v` cannot delete.
-	-docker rm -f linewatch 2>/dev/null
-	docker compose down --remove-orphans
-	$(MAKE) up
 
 logs: ## Tail container logs
 	docker compose logs -f
@@ -236,13 +243,15 @@ db-restore: ## Restore the database from a snapshot in ./backups: make db-restor
 				ARCH_MAX=$$(sqlite3 -readonly "$$ARCHIVE" "select coalesce(max(ts),0) from probe_sample"); \
 				rm -f "$$ARCHIVE"-wal "$$ARCHIVE"-shm; \
 				chown $(HOST_OWNER) "$$ARCHIVE"; \
-				echo "  ✓ archived the live database first: backups/$$(basename $$ARCHIVE) — $$ARCH_ROWS probe_sample rows, max ts $$ARCH_MAX (WAL included; restorable with FROM=)"; \
+				KEPT="backups/$$(basename $$ARCHIVE)"; \
+				echo "  ✓ archived the live database first: $$KEPT — $$ARCH_ROWS probe_sample rows, max ts $$ARCH_MAX (WAL included; restorable with FROM=)"; \
 			else \
 				UNREAD="/backups/linewatch-unreadable-$$STAMP"; \
 				mkdir -p "$$UNREAD"; \
 				cp $(DB) "$$UNREAD"/; \
 				for s in -wal -shm; do if [ -f $(DB)$$s ]; then cp $(DB)$$s "$$UNREAD"/; fi; done; \
 				chown -R $(HOST_OWNER) "$$UNREAD"; \
+				KEPT="backups/$$(basename $$UNREAD)/"; \
 				echo "  ! the live database cannot be read (probe_sample query failed) — that is"; \
 				echo "    corruption, not an empty database. Copied it, WAL and all, to"; \
 				echo "    backups/$$(basename $$UNREAD)."; \
@@ -261,8 +270,15 @@ db-restore: ## Restore the database from a snapshot in ./backups: make db-restor
 		[ "$$GOT" = "$$WANT" ] || { echo "  ✗ row count mismatch after restore: $$WANT -> $$GOT"; exit 1; }; \
 		chown -R app:app /app/data; \
 		echo "  ✓ the database is now exactly backups/$(FROM): $$GOT probe_sample rows, max ts $$SNAP_MAX."; \
-		echo "    Anything measured after that snapshot is no longer live — it survives only"; \
-		echo "    in the pre-restore archive named above."' || STATUS=$$?; \
+		: "deliberately not claiming more than that. The old message — restored N"; \
+		: "rows, previous copy kept — read as if nothing was lost, on a target that"; \
+		: "had just dropped an accepted measurement."; \
+		if [ -n "$$KEPT" ]; then \
+			echo "    Whatever the database held after that snapshot is no longer live. It"; \
+			echo "    survives only in $$KEPT."; \
+		else \
+			echo "    The volume held no database before this, so nothing was replaced."; \
+		fi' || STATUS=$$?; \
 	$(SERVICE_START); \
 	exit $$STATUS
 
@@ -290,7 +306,7 @@ db-import: env ## ONE-TIME: move a pre-volume ./data/linewatch.db (or FROM=<file
 		WANT=$$(sqlite3 -readonly "$$SRC" "select count(*) from probe_sample"); \
 		if [ -f $(DB) ]; then \
 			: "an unreadable table is corruption, not an empty database. Coalescing"; \
-			: "the failure to 0 (the old `|| echo 0`) put a corrupt file on the"; \
+			: "the failure to 0 (the old ...-or-echo-0 fallback) put a corrupt file on the"; \
 			: "safe-to-delete branch — and .recover on exactly such a file is what"; \
 			: "salvaged 945 rows on 2026-07-30. Separate query-failed from returned-0."; \
 			if HAVE=$$(sqlite3 -readonly $(DB) "select count(*) from probe_sample" 2>/dev/null); then \

@@ -30,6 +30,9 @@ LIVE_VOLUME   := linewatch-data
 VOLUME        := $(LIVE_VOLUME)
 IS_LIVE       := $(if $(filter $(VOLUME),$(LIVE_VOLUME)),1,)
 DB            := /app/data/linewatch.db
+# Compose derives its project name from the directory. `up` asserts that the
+# fixed `container_name: linewatch` belongs to *this* project before starting.
+COMPOSE_PROJECT := $(notdir $(REPO_DIR))
 BACKUP_DIR    := $(REPO_DIR)/backups
 HOST_DATA_DIR := $(REPO_DIR)/data
 MARKER        := $(HOST_DATA_DIR)/MOVED-TO-DOCKER-VOLUME
@@ -105,6 +108,20 @@ env: ## Ensure the bearer token, the router password (if any) and .env exist (id
 	chmod 600 .env
 
 up: env marker ## Ensure the token, .env and data volume exist, build, and (re)start the stack. Safe to re-run any time.
+	@# `container_name: linewatch` is a fixed name, so a container started by a
+	@# *different* compose project — a sibling worktree, a renamed directory, an
+	@# interrupted run — holds that name without being tracked here. Compose then
+	@# fails with "container name is already in use" and the orphan keeps serving
+	@# whatever image it was built from, which is how a rebuilt bearer-auth fix went
+	@# undeployed for half an hour. Assert the name is ours; do not ship a separate
+	@# "more thorough" target, which would only offer a way to distrust `up`.
+	@if docker inspect linewatch >/dev/null 2>&1; then \
+		OWNER=$$(docker inspect linewatch --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null); \
+		if [ "$$OWNER" != "$(COMPOSE_PROJECT)" ]; then \
+			echo "  ! container 'linewatch' belongs to compose project '$${OWNER:-<none>}', not '$(COMPOSE_PROJECT)' — removing it"; \
+			docker rm -f linewatch >/dev/null; \
+		fi; \
+	fi
 	@# The volume is declared `external:` so `docker compose down -v` can never
 	@# delete the uptime history. That means Compose will not create it either —
 	@# so ensure it here rather than failing a fresh clone with a bare

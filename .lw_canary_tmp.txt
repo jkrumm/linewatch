@@ -1,2 +1,0 @@
-canary-isp Deutsche Glasfaser
-canary-mac aa:bb:cc:dd:ee:ff

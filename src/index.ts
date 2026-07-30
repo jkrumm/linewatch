@@ -49,8 +49,11 @@ export const app = new Elysia()
           description:
             'Historical record of one internet connection: uptime, outage duration, and throughput. ' +
             '30-second ping cycles feed an outage state machine; hourly Ookla runs measure throughput ' +
-            'and loaded (bufferbloat) latency. Reads are open; `POST /api/probes` and ' +
-            '`POST /api/speedtests/run` require `Authorization: Bearer <token>`.',
+            'and loaded (bufferbloat) latency. Reads are open on the tailnet. `Authorization: Bearer ' +
+            '<token>` is required by the two routes that write to the historical record from outside — ' +
+            '`POST /api/probes` and `POST /api/interventions`. `POST /api/speedtests/run` is **not** ' +
+            'one of them: it is a dashboard button with no token to present, so it is rate-limited ' +
+            'instead — a second call inside `minIntervalS` gets a 429 carrying `secondsUntilNext`.',
         },
         components: {
           securitySchemes: {

@@ -11,13 +11,20 @@ const RangeSummarySchema = z.object({
   to: z.number().int(),
   recordedCycles: z.number().int().describe('Distinct probe cycles actually recorded in the range'),
   expectedCycles: z.number().int().describe('How many the probe cadence should have produced across the whole range'),
-  coveragePct: z.number().describe('recordedCycles / expectedCycles × 100. Below 100 means part of the range was NOT MEASURED, which is not the same as up.'),
+  coveragePct: z
+    .number()
+    .nullable()
+    .describe(
+      'recordedCycles / expectedCycles × 100. Below 100 means part of the range was NOT MEASURED, which is not the same as up. `null` means unknown: the range is shorter than one probe cycle, so `expectedCycles` is 0 and there is no share of it to report — 0 would claim a measured window was unmeasured.',
+    ),
   firstTs: z.number().int().nullable(),
   lastTs: z.number().int().nullable(),
   degradedCycles: z
     .number()
     .int()
-    .describe('Cycles whose worst target lost ≥ degradedLossPct while no outage row covered them — degradation the outage table structurally cannot show'),
+    .describe(
+      'Cycles in which EVERY WAN anchor lost ≥ degradedLossPct while no outage row covered them — degradation the outage table structurally cannot show. All anchors, not the worst one: three anchors sit on three networks so that one provider deprioritising ICMP is not a line problem. The gateway is excluded — gateway loss is a LOCAL problem, not a home-line degradation.',
+    ),
   degradedLossPct: z.number().describe('The threshold used (LINEWATCH_DEGRADED_LOSS_PCT / src/config.ts)'),
   onHomeLine: z
     .enum(['all', 'none', 'mixed', 'unknown'])
@@ -62,6 +69,11 @@ export const outagesRoutes = new Elysia().get(
             to: query.to,
             probeCycleSeconds: config.probeCycleSeconds,
             degradedLossPct: config.degradedLossPct,
+            // Scope, not name: which targets are WAN anchors is configuration
+            // (src/config.ts), and a degradation of the *line* has to be
+            // visible on all of them. Renaming a target must not silently
+            // change what "degraded" counts.
+            wanTargets: config.targets.filter((target) => target.scope === 'wan').map((target) => target.name),
           })
         : null
 

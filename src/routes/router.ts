@@ -2,7 +2,7 @@ import { Elysia } from 'elysia'
 import { z } from 'zod'
 import { db } from '../db/client.js'
 import { readRouterSnapshot } from '../services/router/poll.js'
-import { bucketRouterLine, bucketRouterThroughput, isRangeError, MAX_BUCKETS, resolveRange } from '../services/router/range.js'
+import { bucketRouterLine, bucketRouterThroughput, isRangeError, resolveRange } from '../services/router/range.js'
 import { routerConfig } from '../services/router/config.js'
 
 /**
@@ -152,7 +152,15 @@ const RangeQuery = z.object({
   bucket: z.coerce.number().int().min(1).default(3600).describe('Bucket width in seconds (default 3600 = hourly)'),
 })
 
-type RangeError = z.infer<typeof RangeErrorSchema>
+/**
+ * The query shape, handed to the shared resolver in `services/router/range.ts`.
+ * Both failure modes come back as explicit 400s: clamping the range or widening
+ * the bucket on the caller's behalf answers a question that was not asked and
+ * looks exactly like a complete answer.
+ */
+function rangeOf(query: z.infer<typeof RangeQuery>) {
+  return resolveRange({ from: query.from, to: query.to, bucketSeconds: query.bucket })
+}
 
 export const routerRoutes = new Elysia()
   .get(
@@ -203,7 +211,7 @@ export const routerRoutes = new Elysia()
   .get(
     '/api/router/line',
     ({ query, status }) => {
-      const range = resolveRange({ ...query, bucketSeconds: query.bucket })
+      const range = rangeOf(query)
       if (isRangeError(range)) return status(400, range)
       return {
         from: range.from,
@@ -229,7 +237,7 @@ export const routerRoutes = new Elysia()
   .get(
     '/api/router/throughput',
     ({ query, status }) => {
-      const range = resolveRange({ ...query, bucketSeconds: query.bucket })
+      const range = rangeOf(query)
       if (isRangeError(range)) return status(400, range)
       return {
         from: range.from,

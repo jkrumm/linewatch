@@ -1,8 +1,8 @@
 import { Database } from 'bun:sqlite'
 import { drizzle } from 'drizzle-orm/bun-sqlite'
 import { migrate } from 'drizzle-orm/bun-sqlite/migrator'
-import { existsSync, mkdirSync } from 'node:fs'
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { existsSync, mkdirSync, realpathSync } from 'node:fs'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { config } from '../config.js'
 import * as schema from './schema.js'
@@ -31,6 +31,29 @@ export class DatabaseOnVolumeError extends Error {}
 function isInside(parent: string, child: string): boolean {
   const rel = relative(parent, child)
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+}
+
+/**
+ * Absolute path with every symlink in its *existing* prefix resolved.
+ *
+ * `resolve()` alone is not enough: on macOS `/tmp` is a symlink to `/private/tmp`,
+ * so `LINEWATCH_DB=/tmp/repo/data/linewatch.db` and a module that reports itself
+ * as living under `/private/tmp/repo` compare as different trees and the guard
+ * misses — measured, not theorised. The database file itself usually does not
+ * exist yet (that is the whole failure mode), so only the deepest existing
+ * ancestor can be canonicalised; the remaining segments are appended verbatim.
+ */
+function canonical(p: string): string {
+  const absolute = resolve(p)
+  const trailing: string[] = []
+  let existing = absolute
+  while (!existsSync(existing)) {
+    const parent = dirname(existing)
+    if (parent === existing) return absolute
+    trailing.unshift(basename(existing))
+    existing = parent
+  }
+  return join(realpathSync(existing), ...trailing)
 }
 
 /**
@@ -69,18 +92,19 @@ function inContainer(): boolean {
  */
 function assertContainerOwned(dbPath: string): void {
   if (inContainer()) return
-  const resolved = resolve(dbPath)
-  const onVolumeMount = isInside(CONTAINER_OWNED_DIR, resolved)
+  const resolved = canonical(dbPath)
+  const onVolumeMount = isInside(canonical(CONTAINER_OWNED_DIR), resolved)
   const marked = existsSync(join(dirname(resolved), MOVED_MARKER))
   if (!onVolumeMount && !marked) return
   throw new DatabaseOnVolumeError(
     [
       `Refusing to open ${resolved} from the host.`,
       '',
-      "The database lives in the 'linewatch-data' Docker volume, mounted at",
-      `${CONTAINER_OWNED_DIR} inside the container, so the host and the container can`,
-      'never hold the same SQLite file open — that corrupted it on 2026-07-30',
-      '(btreeInitPage error 11; 945 of ~1400 rows recovered).',
+      "The database lives in the 'linewatch-data' Docker volume, which",
+      `docker-compose.yml mounts over ${CONTAINER_OWNED_DIR} (as /app/data in the`,
+      'container). The host and the container must never hold the same SQLite file',
+      'open — that corrupted this database on 2026-07-30 (btreeInitPage error 11;',
+      '945 of ~1400 rows recovered).',
       'Opening it here would silently create a NEW empty database and write into nothing.',
       '',
       '  • Serve the real data:      make up   (then http://127.0.0.1:7731)',

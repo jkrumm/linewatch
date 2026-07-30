@@ -40,7 +40,11 @@ REQUIRE_VOLUME = @docker volume inspect $(VOLUME) >/dev/null 2>&1 || { echo "  �
 # Stopping and starting the service is only correct for the live volume. A drill
 # against a scratch volume must leave the running service alone.
 SERVICE_STOP  = $(if $(IS_LIVE),docker compose down,echo "  · drill on volume $(VOLUME) — leaving the running service alone")
-SERVICE_START = $(if $(IS_LIVE),$(MAKE) up,echo "  · drill on volume $(VOLUME) — service untouched")
+# Deliberately `$(SUBMAKE)`, not the literal `$(MAKE)`: GNU make runs any recipe
+# line containing that string even under `-n`, and here it shares a line with the
+# restore itself. `make -n db-restore` has to stay a dry run.
+SUBMAKE       := $(MAKE)
+SERVICE_START = $(if $(IS_LIVE),$(SUBMAKE) up,echo "  · drill on volume $(VOLUME) — service untouched")
 
 # A throwaway container from this project's own image, with the volume and
 # ./backups mounted. Safe to run while `linewatch` is up: both sit inside the
@@ -244,13 +248,15 @@ db-restore: ## Restore the database from a snapshot in ./backups: make db-restor
 				ARCH_MAX=$$(sqlite3 -readonly "$$ARCHIVE" "select coalesce(max(ts),0) from probe_sample"); \
 				rm -f "$$ARCHIVE"-wal "$$ARCHIVE"-shm; \
 				chown $(HOST_OWNER) "$$ARCHIVE"; \
-				echo "  ✓ archived the live database first: backups/$$(basename $$ARCHIVE) — $$ARCH_ROWS probe_sample rows, max ts $$ARCH_MAX (WAL included; restorable with FROM=)"; \
+				KEPT="backups/$$(basename $$ARCHIVE)"; \
+				echo "  ✓ archived the live database first: $$KEPT — $$ARCH_ROWS probe_sample rows, max ts $$ARCH_MAX (WAL included; restorable with FROM=)"; \
 			else \
 				UNREAD="/backups/linewatch-unreadable-$$STAMP"; \
 				mkdir -p "$$UNREAD"; \
 				cp $(DB) "$$UNREAD"/; \
 				for s in -wal -shm; do if [ -f $(DB)$$s ]; then cp $(DB)$$s "$$UNREAD"/; fi; done; \
 				chown -R $(HOST_OWNER) "$$UNREAD"; \
+				KEPT="backups/$$(basename $$UNREAD)/"; \
 				echo "  ! the live database cannot be read (probe_sample query failed) — that is"; \
 				echo "    corruption, not an empty database. Copied it, WAL and all, to"; \
 				echo "    backups/$$(basename $$UNREAD)."; \
@@ -269,8 +275,15 @@ db-restore: ## Restore the database from a snapshot in ./backups: make db-restor
 		[ "$$GOT" = "$$WANT" ] || { echo "  ✗ row count mismatch after restore: $$WANT -> $$GOT"; exit 1; }; \
 		chown -R app:app /app/data; \
 		echo "  ✓ the database is now exactly backups/$(FROM): $$GOT probe_sample rows, max ts $$SNAP_MAX."; \
-		echo "    Anything measured after that snapshot is no longer live — it survives only"; \
-		echo "    in the pre-restore archive named above."' || STATUS=$$?; \
+		: "deliberately not claiming more than that. The old message — restored N"; \
+		: "rows, previous copy kept — read as if nothing was lost, on a target that"; \
+		: "had just dropped an accepted measurement."; \
+		if [ -n "$$KEPT" ]; then \
+			echo "    Whatever the database held after that snapshot is no longer live. It"; \
+			echo "    survives only in $$KEPT."; \
+		else \
+			echo "    The volume held no database before this, so nothing was replaced."; \
+		fi' || STATUS=$$?; \
 	$(SERVICE_START); \
 	exit $$STATUS
 
@@ -298,7 +311,7 @@ db-import: env ## ONE-TIME: move a pre-volume ./data/linewatch.db (or FROM=<file
 		WANT=$$(sqlite3 -readonly "$$SRC" "select count(*) from probe_sample"); \
 		if [ -f $(DB) ]; then \
 			: "an unreadable table is corruption, not an empty database. Coalescing"; \
-			: "the failure to 0 (the old `|| echo 0`) put a corrupt file on the"; \
+			: "the failure to 0 (the old ...-or-echo-0 fallback) put a corrupt file on the"; \
 			: "safe-to-delete branch — and .recover on exactly such a file is what"; \
 			: "salvaged 945 rows on 2026-07-30. Separate query-failed from returned-0."; \
 			if HAVE=$$(sqlite3 -readonly $(DB) "select count(*) from probe_sample" 2>/dev/null); then \

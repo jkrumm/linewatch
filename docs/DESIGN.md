@@ -98,6 +98,10 @@ the table is large enough to matter — noted, not built.
 
 ## Schema
 
+The database file lives in the `linewatch-data` Docker volume and the host may
+never open it — [`storage.md`](storage.md) has the rule, the corruption it
+replaced, and the `make db-*` targets that reach it.
+
 `probe_sample` — one row per target per cycle.
 
 | Column | Type | Note |

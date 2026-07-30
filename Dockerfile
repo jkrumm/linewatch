@@ -40,10 +40,13 @@ FROM oven/bun:1 AS runner
 WORKDIR /app
 
 # curl: the HEALTHCHECK below. ca-certificates: TLS for both curl and the
-# Ookla CLI's own outbound speed-test connections.
+# Ookla CLI's own outbound speed-test connections. sqlite3: the database lives in
+# a Docker volume the host cannot open (docs/storage.md), so every `make db-*`
+# target reaches it through a container — including `db-restore`, which runs
+# while the API is stopped and therefore cannot borrow bun from a live process.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
   --mount=type=cache,target=/var/lib/apt,sharing=locked \
-  apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+  apt-get update && apt-get install -y --no-install-recommends curl ca-certificates sqlite3 \
   && groupadd --system app && useradd --system --gid app --home-dir /app app
 
 COPY --from=ookla /tmp/ookla/speedtest /usr/local/bin/speedtest

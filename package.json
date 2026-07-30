@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "bun run src/index.ts",
-    "dev": "bun run --hot src/index.ts",
+    "start": "LINEWATCH_DB=${LINEWATCH_DB:-./.dev-data/linewatch.db} bun run src/index.ts",
+    "dev": "LINEWATCH_DB=${LINEWATCH_DB:-./.dev-data/linewatch.db} bun run --hot src/index.ts",
     "collector": "bun run collector/probe.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",

@@ -28,6 +28,11 @@ The collector POSTs batches with a bearer token and **spools to
 not "simplify" the spool away — without it every redeploy writes a fake outage
 into the record.
 
+**The database is in the `linewatch-data` named Docker volume and the host
+cannot open it.** Read it with `make db-counts` / `make db-shell`, never by
+opening the file — [`docs/storage.md`](docs/storage.md) has the rule, the
+corruption that forced it, and the backup/restore targets.
+
 ## Boot order trap, already hit once
 
 `src/db/client.ts` runs migrations **at module load**, not from a statement in

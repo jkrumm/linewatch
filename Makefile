@@ -202,6 +202,16 @@ db-backup: ## Verified snapshot of the database into ./backups (gitignored)
 		[ "$$(sqlite3 -readonly $(DB) "pragma integrity_check")" = ok ] || { echo "  ✗ source fails integrity_check — refusing to snapshot a corrupt database"; exit 1; }; \
 		OUT="/backups/linewatch-$$(date -u +%Y%m%dT%H%M%SZ).db"; \
 		sqlite3 $(DB) ".backup $$OUT"; \
+		: "Take the snapshot out of WAL mode before anything else touches it."; \
+		: "A .backup inherits journal_mode from the source, and a WAL database"; \
+		: "cannot be opened -readonly unless its -shm sidecar exists, which the"; \
+		: "rm below deletes. Snapshots written before this line are valid but"; \
+		: "unverifiable: sqlite3 -readonly answers unable to open database file"; \
+		: "on a perfectly good 14874-row backup. That is the worst possible"; \
+		: "property for a file whose only job is to be readable on the day"; \
+		: "something has gone wrong. journal_mode=delete makes it a genuine"; \
+		: "single file, openable anywhere, read-only or not."; \
+		sqlite3 "$$OUT" "pragma journal_mode=delete" >/dev/null; \
 		[ "$$(sqlite3 -readonly "$$OUT" "pragma integrity_check")" = ok ] || { echo "  ✗ snapshot fails integrity_check"; rm -f "$$OUT"; exit 1; }; \
 		ROWS=$$(sqlite3 -readonly "$$OUT" "select count(*) from probe_sample"); \
 		SIZE=$$(du -h "$$OUT" | cut -f1); \

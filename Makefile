@@ -211,6 +211,32 @@ db-backup: ## Verified snapshot of the database into ./backups (gitignored)
 		rm -f "$$OUT"-wal "$$OUT"-shm; \
 		echo "  ✓ backups/$$(basename $$OUT) — $$ROWS probe_sample rows, $$SIZE"'
 
+intervention: ## Record a manual action on the line: make intervention ACTION="swapped the LAN cable" [NOTE="..."]
+	@# Attribution is the whole point: without a recorded action, a recovery two
+	@# minutes after a cable swap is indistinguishable from one that would have
+	@# happened anyway, and the record silently credits the ISP for a fix that was
+	@# a human with a plug. Wrapped in a target because the route is bearer-gated
+	@# and nobody should be pasting the token into a shell to answer that.
+	@if [ -z "$(ACTION)" ]; then \
+		echo 'Usage: make intervention ACTION="what you did" [NOTE="why, or what you expect of it"]'; \
+		exit 1; \
+	fi
+	@test -f "$(TOKEN_FILE)" || { echo "  ✗ no bearer token at $(TOKEN_FILE) — run: make collector-setup"; exit 1; }
+	@# Body built by python's json module, not by string-concatenating into a
+	@# template: an apostrophe in the description is entirely likely ("swapped the
+	@# router's cable") and hand-quoted JSON breaks on it.
+	@#
+	@# Known limit, measured: an embedded DOUBLE quote is swallowed by the
+	@# make-then-shell expansion before python ever sees it, so ACTION="say \"hi\""
+	@# records `say hi`. Apostrophes survive. Not worth a third quoting layer to
+	@# fix — POST /api/interventions directly if a description really needs one.
+	@BODY=$$(ACTION="$(ACTION)" NOTE="$(NOTE)" python3 -c 'import json,os; a=os.environ["ACTION"]; n=os.environ.get("NOTE",""); print(json.dumps({"action": a, **({"note": n} if n else {})}))'); \
+	curl -fsS -X POST http://127.0.0.1:7731/api/interventions \
+		-H "Authorization: Bearer $$(cat $(TOKEN_FILE))" \
+		-H 'content-type: application/json' \
+		-d "$$BODY" \
+		&& echo "  ✓ recorded — it will appear on the timeline and in GET /api/events"
+
 db-vacuum: ## Rebuild the database, reclaiming freed pages (run after a migration that DROPs a column)
 	$(REQUIRE_VOLUME)
 	@# Why this exists rather than trusting the migration: SQLite's ALTER TABLE

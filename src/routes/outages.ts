@@ -48,8 +48,13 @@ export const outagesRoutes = new Elysia().get(
   '/api/outages',
   ({ query }) => {
     const conditions: SQL[] = []
-    if (query.from !== undefined) conditions.push(gte(outage.startedAt, query.from))
+    // True overlap, not containment of the start instant. `startedAt >= from`
+    // dropped an outage that began 30 min before a 24 h window and ran three
+    // hours into it — whole, from both the table and the downtime sum, which is
+    // the single worst row to lose. An outage overlaps the window when it began
+    // at or before `to` and had not yet ended at `from` (still ongoing counts).
     if (query.to !== undefined) conditions.push(lte(outage.startedAt, query.to))
+    if (query.from !== undefined) conditions.push(or(isNull(outage.endedAt), gte(outage.endedAt, query.from)) as SQL)
     if (query.minDuration !== undefined) {
       // An ongoing outage (durationS still null) always passes — its final
       // duration isn't known yet, and it's the most operationally relevant row.

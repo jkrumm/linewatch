@@ -211,6 +211,34 @@ db-backup: ## Verified snapshot of the database into ./backups (gitignored)
 		rm -f "$$OUT"-wal "$$OUT"-shm; \
 		echo "  ✓ backups/$$(basename $$OUT) — $$ROWS probe_sample rows, $$SIZE"'
 
+db-vacuum: ## Rebuild the database, reclaiming freed pages (run after a migration that DROPs a column)
+	$(REQUIRE_VOLUME)
+	@# Why this exists rather than trusting the migration: SQLite's ALTER TABLE
+	@# DROP COLUMN rewrites the live rows but returns the old pages to the
+	@# freelist WITHOUT zeroing them, so a dropped column's contents stay
+	@# recoverable from the file — and from the WAL — until the database is
+	@# rebuilt. Migration 0005 drops router_host.host_name precisely because it
+	@# held MAC-derived vendor hostnames, and "the column and its contents are
+	@# gone" is not true of the storage until this has run.
+	@#
+	@# Integrity-gated on both sides for the same reason db-backup is: VACUUM
+	@# rewrites the whole file, and doing that to an already-corrupt database
+	@# turns a recoverable problem into an unrecoverable one.
+	$(SERVICE_STOP)
+	@STATUS=0; \
+	$(DB_TOOL) 'set -e; \
+		[ "$$(sqlite3 -readonly $(DB) "pragma integrity_check")" = ok ] || { echo "  ✗ fails integrity_check — refusing to vacuum a corrupt database"; exit 1; }; \
+		BEFORE=$$(du -k $(DB) | cut -f1); \
+		: "checkpoint first: VACUUM does not rewrite pages still sitting in the"; \
+		: "WAL, and the dropped values can be in there too"; \
+		sqlite3 $(DB) "pragma wal_checkpoint(TRUNCATE)" >/dev/null; \
+		sqlite3 $(DB) "vacuum"; \
+		[ "$$(sqlite3 -readonly $(DB) "pragma integrity_check")" = ok ] || { echo "  ✗ fails integrity_check AFTER vacuum — restore from ./backups"; exit 1; }; \
+		AFTER=$$(du -k $(DB) | cut -f1); \
+		echo "  ✓ vacuumed — $${BEFORE}K → $${AFTER}K"' || STATUS=$$?; \
+	$(SERVICE_START); \
+	exit $$STATUS
+
 db-restore: ## Restore the database from a snapshot in ./backups: make db-restore FROM=<file>.db [FORCE=1]
 	@if [ -z "$(FROM)" ]; then \
 		echo 'Usage: make db-restore FROM=<file>.db   (a filename inside ./backups)'; \
@@ -414,8 +442,14 @@ collector-teardown: ## Unload and remove the collector's LaunchAgent (does not d
 		echo "  · nothing to remove"; \
 	fi
 
-collector-logs: ## Tail the native collector's log
+collector-logs: ## Tail the native collector's log (the previous generation is the same path + .1)
 	@touch "$(COLLECTOR_LOG)"
+	@# The collector rotates this file in place, so `tail -f` survives a rotation
+	@# (it reports "file truncated" and reads on) instead of silently following a
+	@# renamed inode. Anything older than the truncation is in the .1 generation.
+	@if [ -f "$(COLLECTOR_LOG).1" ]; then \
+		echo "  · older window kept at $(COLLECTOR_LOG).1"; \
+	fi
 	tail -f "$(COLLECTOR_LOG)"
 
 check: ## Typecheck (API + collector, then the dashboard) + run the test suite

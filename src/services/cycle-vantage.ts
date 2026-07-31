@@ -28,10 +28,25 @@ export interface CycleVantage {
    * accepted too so neither side has to be redeployed for the other's spelling.
    */
   onHomeLine?: boolean | 0 | 1 | null | undefined
+  /** Fastest media the interface *supports* — the NIC's ceiling, not what it negotiated. */
+  linkMaxMbit?: number | null | undefined
+  /** DHCP lease start on `pathIf`, unix ms. A change proves a re-bind; no change proves nothing. */
+  dhcpBoundAt?: number | null | undefined
+  /** Seconds of 1 Hz link sampling behind this cycle. Null = no sampler, i.e. link state unknown. */
+  linkWatchS?: number | null | undefined
 }
 
-/** The fields whose change is a link change worth an `event` row. */
-const WATCHED = ['pathIf', 'pathClass', 'linkMbit', 'linkDuplex'] as const
+/**
+ * The fields whose change is a link change worth an `event` row.
+ *
+ * `linkMaxMbit` is here because a changed *ceiling* means the hardware in the
+ * path changed — a different adapter, a different NIC — which reframes every
+ * `linkMbit` reading after it. `dhcpBoundAt` and `linkWatchS` are deliberately
+ * absent: the first is a timestamp that moves on every ordinary lease renewal,
+ * the second a per-cycle coverage counter, and an event on either would bury
+ * the real transitions.
+ */
+const WATCHED = ['pathIf', 'pathClass', 'linkMbit', 'linkDuplex', 'linkMaxMbit'] as const
 type WatchedField = (typeof WATCHED)[number]
 
 /** Just the fields the diff looks at — both `probe_cycle` rows and fresh input satisfy it. */
@@ -40,6 +55,7 @@ export interface WatchedVantage {
   pathClass: PathClass | null
   linkMbit: number | null
   linkDuplex: LinkDuplex | null
+  linkMaxMbit: number | null
 }
 
 export interface FieldChange {
@@ -47,7 +63,19 @@ export interface FieldChange {
   after: string | number
 }
 
-export type LinkChangeDetail = { changed: Partial<Record<WatchedField, FieldChange>> }
+/**
+ * `source` names the observation, not the writer, because the three writers of
+ * `link_change` observe at wildly different precisions and the timeline has to
+ * say which one it is showing: `vantage-diff` compares two 30 s snapshots, so
+ * the transition happened *somewhere* in the preceding cycle; `link-sampler`
+ * stamps the transition itself to ~1 s; `router-poller` sees the carrier side a
+ * poll interval late. Rows written before this field existed carry no source at
+ * all, and a read path must leave those unlabelled rather than assume this one.
+ */
+export type LinkChangeDetail = {
+  source: 'vantage-diff'
+  changed: Partial<Record<WatchedField, FieldChange>>
+}
 
 export interface RecordCycleVantageResult {
   /** false when a row for this `ts` already existed — a spool replay. */
@@ -171,6 +199,9 @@ export function recordCycleVantage(
     ifOerrs: vantage.ifOerrs ?? null,
     ifColl: vantage.ifColl ?? null,
     onHomeLine: onHomeLine === null ? null : Number(onHomeLine),
+    linkMaxMbit: vantage.linkMaxMbit ?? null,
+    dhcpBoundAt: vantage.dhcpBoundAt ?? null,
+    linkWatchS: vantage.linkWatchS ?? null,
   }
 
   // Read the predecessor *before* inserting, so "previous" cannot be this row.
@@ -187,7 +218,7 @@ export function recordCycleVantage(
   const changed = diffVantage(previous, row)
   if (Object.keys(changed).length === 0) return { inserted: true, linkChangeEventId: null }
 
-  const detail: LinkChangeDetail = { changed }
+  const detail: LinkChangeDetail = { source: 'vantage-diff', changed }
   const eventRow = db.insert(event).values({ ts, kind: 'link_change', detail: JSON.stringify(detail) }).returning({ id: event.id }).get()
   return { inserted: true, linkChangeEventId: eventRow.id }
 }

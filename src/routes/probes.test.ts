@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 import { Elysia } from 'elysia'
 import { parsePingOutput } from '../../collector/ping-parser.js'
+import type { LinkTransition } from '../../collector/link-sampler.js'
 import { deriveOnHomeLine, type Vantage } from '../../collector/vantage.js'
+import type { WifiSampleInput } from '../../collector/wifi.js'
 
 /**
  * Route-level tests: the ingest contract as the collector actually meets it,
@@ -30,7 +32,7 @@ process.env['LINEWATCH_HOME_GATEWAY'] = HOME_GW
 
 const { probesRoutes } = await import('./probes.js')
 const { db } = await import('../db/client.js')
-const { event, probeCycle, probeSample } = await import('../db/schema.js')
+const { event, probeCycle, probeSample, wifiSample } = await import('../db/schema.js')
 
 const app = new Elysia().use(probesRoutes)
 
@@ -103,12 +105,18 @@ const ETHERNET: Vantage = {
   ifOerrs: 0,
   ifColl: 0,
   onHomeLine: deriveOnHomeLine({ pathClass: 'ethernet', gatewayAddr: HOME_GW, expectedGateway: HOME_GW }),
+  linkMaxMbit: 1000,
+  dhcpBoundAt: 1_785_419_309_000,
+  // The collector has no link sampler yet, so it sends null — "unknown", not 0.
+  linkWatchS: null,
 }
 
 interface Batch {
   ts: number
   samples: ReturnType<typeof samples>
   cycle?: Vantage
+  linkEvents?: LinkTransition[]
+  wifi?: WifiSampleInput
 }
 
 function post(body: unknown, token: string | null = TOKEN): Promise<Response> {
@@ -124,8 +132,13 @@ function post(body: unknown, token: string | null = TOKEN): Promise<Response> {
   )
 }
 
-function batch(ts: number, cycle?: Vantage): Batch {
-  return { ts, samples: samples(), ...(cycle === undefined ? {} : { cycle }) }
+function batch(ts: number, cycle?: Vantage, linkEvents?: LinkTransition[]): Batch {
+  return {
+    ts,
+    samples: samples(),
+    ...(cycle === undefined ? {} : { cycle }),
+    ...(linkEvents === undefined ? {} : { linkEvents }),
+  }
 }
 
 function cycleRow(ts: number) {
@@ -163,8 +176,24 @@ describe('POST /api/probes — the collector wire format', () => {
     // disagrees with the collector rejects the batch, the collector spools it,
     // and the record silently stops growing.
     expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ok: true, inserted: 4, skipped: false, linkChange: false })
+    expect(await res.json()).toEqual({ ok: true, inserted: 4, skipped: false, linkChange: false, cycleStored: true })
     expect(samplesAt(ts)).toHaveLength(4)
+  })
+
+  test('the whole vantage lands, ceiling and lease included', async () => {
+    // Not decoration: `linkMaxMbit` is what separates "the NIC can only do 100"
+    // from "it can do 1000 and negotiated 100", and a field the route drops
+    // silently reads downstream as "unknown" forever.
+    const ts = freshTs()
+    await post(batch(ts, { ...ETHERNET, linkMbit: 100, linkMedia: '100baseTX' }))
+
+    const row = cycleRow(ts)
+    expect(row?.linkMbit).toBe(100)
+    expect(row?.linkMaxMbit).toBe(1000)
+    expect(row?.dhcpBoundAt).toBe(1_785_419_309_000)
+    // Null, not 0: this collector runs no link sampler, and 0 would claim a
+    // cycle that watched the link and saw nothing.
+    expect(row?.linkWatchS).toBeNull()
   })
 
   test('the collector sends on_home_line as 0/1, and the row lands as 1', async () => {
@@ -184,6 +213,21 @@ describe('POST /api/probes — the collector wire format', () => {
     expect(samplesAt(ts)).toHaveLength(4)
     // No claim about the vantage is better than a fabricated one.
     expect(cycleRow(ts)).toBeUndefined()
+    // …and the server says so, rather than letting "no cycle sent" look the
+    // same as "cycle sent and stored".
+    expect(await res.json()).toMatchObject({ cycleStored: false })
+  })
+
+  test('a cycle field this API does not know is ignored, and the batch still ingests', async () => {
+    // The other direction of the independent-deploy contract: a collector ahead
+    // of the API. Lenient parse on purpose — rejecting the batch would lose four
+    // real probe samples over one unknown field.
+    const ts = freshTs()
+    const res = await post({ ...batch(ts, ETHERNET), cycle: { ...ETHERNET, somethingTheApiHasNeverSeen: 42 } })
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ cycleStored: true })
+    expect(cycleRow(ts)?.linkMaxMbit).toBe(1000)
   })
 
   test('the raw round-trip samples survive the round trip', async () => {
@@ -214,6 +258,9 @@ describe('POST /api/probes — the home line cannot be claimed by the collector 
       ifOerrs: null,
       ifColl: null,
       onHomeLine: 1,
+      linkMaxMbit: null,
+      dhcpBoundAt: null,
+      linkWatchS: null,
     }
 
     const res = await post(batch(ts, cellular))
@@ -243,6 +290,9 @@ describe('POST /api/probes — the home line cannot be claimed by the collector 
       ifOerrs: null,
       ifColl: null,
       onHomeLine: null,
+      linkMaxMbit: null,
+      dhcpBoundAt: null,
+      linkWatchS: null,
     }
 
     await post(batch(ts, noPath))
@@ -273,10 +323,94 @@ describe('POST /api/probes — spool replay', () => {
     const replay = await post(batch(ts + 30_000, { ...ETHERNET, linkMedia: '100baseTX', linkMbit: 100 }))
 
     expect(replay.status).toBe(200)
-    expect(await replay.json()).toEqual({ ok: true, inserted: 0, skipped: true, linkChange: false })
+    // `cycleStored: false` alongside `skipped: true` is the correct answer, not
+    // a dropped vantage: this ts stored its vantage on the first ingest. The
+    // collector only warns when `skipped` is false, and this pair is why.
+    expect(await replay.json()).toEqual({ ok: true, inserted: 0, skipped: true, linkChange: false, cycleStored: false })
     expect(samplesAt(ts + 30_000)).toHaveLength(4)
     expect(db.select().from(probeCycle).all().filter((row) => row.ts === ts + 30_000)).toHaveLength(1)
     expect(db.select().from(event).all().length).toBe(eventsBefore)
+  })
+})
+
+describe('POST /api/probes — sub-cycle link transitions', () => {
+  /** Every `link_change` written by the 1 Hz sampler at exactly this ts. */
+  function samplerEventsAt(ts: number) {
+    return db
+      .select()
+      .from(event)
+      .all()
+      .filter((row) => row.ts === ts && row.kind === 'link_change')
+      .map((row) => ({ ...row, detail: JSON.parse(row.detail) as { source?: string; state?: string; iface?: string | null } }))
+      .filter((row) => row.detail.source === 'link-sampler')
+  }
+
+  test('a cable pull mid-cycle lands as two events tagged with their source', async () => {
+    const ts = freshTs()
+    // The shape the sampler drains for a flap inside one 30 s cycle: the
+    // vantage diff cannot see this at all — both snapshots read 1000baseT.
+    const downAt = ts + 8_000
+    const upAt = ts + 22_300
+    const res = await post(batch(ts, { ...ETHERNET, linkWatchS: 30 }, [{ ts: downAt, state: 'down' }, { ts: upAt, state: 'up' }]))
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ linkChange: true, cycleStored: true })
+
+    // Timestamped at the second the sampler saw them, not folded onto the
+    // cycle's ts — that resolution is the entire point of the sampler.
+    expect(samplerEventsAt(downAt).map((row) => row.detail)).toEqual([{ source: 'link-sampler', state: 'down', iface: 'en0' }])
+    expect(samplerEventsAt(upAt).map((row) => row.detail)).toEqual([{ source: 'link-sampler', state: 'up', iface: 'en0' }])
+    // …and the coverage counter that makes "no transitions" readable reaches
+    // the column, rather than staying null and reading as "nothing watched".
+    expect(cycleRow(ts)?.linkWatchS).toBe(30)
+  })
+
+  test('the iface is null when the cycle reported no default route, never a plausible one', async () => {
+    const ts = freshTs()
+    const downAt = ts + 3_000
+    const noPath: Vantage = { ...ETHERNET, pathIf: null, pathClass: null, gatewayAddr: null, linkMbit: null, onHomeLine: null, linkWatchS: 30 }
+
+    await post(batch(ts, noPath, [{ ts: downAt, state: 'down' }]))
+    expect(samplerEventsAt(downAt)[0]?.detail.iface).toBeNull()
+  })
+
+  test('reposting an identical batch writes the link events exactly once', async () => {
+    const ts = freshTs()
+    const downAt = ts + 5_000
+    const events = [{ ts: downAt, state: 'down' as const }]
+
+    await post(batch(ts, ETHERNET, events))
+    const replay = await post(batch(ts, ETHERNET, events))
+
+    // The spool replays batches verbatim, and `event.ts` has no unique index to
+    // fall back on — it must not gain one, because interventions legitimately
+    // share a timestamp.
+    expect(await replay.json()).toMatchObject({ skipped: true, linkChange: false })
+    expect(samplerEventsAt(downAt)).toHaveLength(1)
+  })
+
+  test('a later batch re-sending an already-recorded transition does not duplicate it', async () => {
+    const ts = freshTs()
+    const downAt = ts + 5_000
+    await post(batch(ts, ETHERNET, [{ ts: downAt, state: 'down' }]))
+
+    // The case the `skipped` branch does not cover: a *different* cycle whose
+    // sampling window overlaps one already ingested. Only the explicit
+    // ts+kind guard stops this one.
+    await post(batch(ts + 30_000, ETHERNET, [{ ts: downAt, state: 'down' }, { ts: ts + 35_000, state: 'up' }]))
+
+    expect(samplerEventsAt(downAt)).toHaveLength(1)
+    expect(samplerEventsAt(ts + 35_000)).toHaveLength(1)
+  })
+
+  test('a batch with no linkEvents key ingests unchanged — a collector without a sampler', async () => {
+    const ts = freshTs()
+    const res = await post(batch(ts, ETHERNET))
+
+    expect(res.status).toBe(200)
+    expect(await res.json()).toMatchObject({ linkChange: false })
+    // Null, not 0: no sampler ran, so link state for this cycle is unknown.
+    expect(cycleRow(ts)?.linkWatchS).toBeNull()
   })
 })
 
@@ -296,6 +430,99 @@ describe('POST /api/probes — bearer', () => {
 
     expect(res.status).toBe(401)
     expect(samplesAt(ts)).toHaveLength(0)
+  })
+})
+
+describe('POST /api/probes — the Wi-Fi radio sample', () => {
+  // Exactly what collector/wifi.ts returns on this host: an alternate radio
+  // path currently attached, associated and reachable. Not "the standby path"
+  // — the configured next hop above Wi-Fi here is a cellular hotspot.
+  const WIFI: WifiSampleInput = {
+    iface: 'en1',
+    status: 'Connected',
+    phyMode: '802.11ax',
+    channel: 3,
+    band: '2GHz',
+    widthMhz: 20,
+    rssiDbm: -45,
+    noiseDbm: -83,
+    txRateMbps: 229,
+    mcsIndex: 9,
+    rttMedMs: 9.99,
+    lossPct: 0,
+  }
+
+  function wifiRowsAt(ts: number) {
+    return db
+      .select()
+      .from(wifiSample)
+      .all()
+      .filter((row) => row.ts === ts)
+  }
+
+  test('stores the radio sample that rode along with the cycle', async () => {
+    const ts = freshTs()
+    const res = await post({ ...batch(ts, ETHERNET), wifi: WIFI })
+
+    expect(res.status).toBe(200)
+    const [row] = wifiRowsAt(ts)
+    expect(row).toMatchObject({ iface: 'en1', status: 'Connected', rssiDbm: -45, txRateMbps: 229, rttMedMs: 9.99 })
+  })
+
+  test('a cycle without a Wi-Fi sample writes no row — nine cycles in ten', async () => {
+    const ts = freshTs()
+    await post(batch(ts, ETHERNET))
+    expect(wifiRowsAt(ts)).toHaveLength(0)
+  })
+
+  test('a replayed batch cannot duplicate the row', async () => {
+    // The spool replays batches verbatim. `wifi_sample.ts` is UNIQUE and the
+    // insert is onConflictDoNothing, so a replay that gets past the
+    // already-ingested check still cannot write a second radio sample for one
+    // instant.
+    const ts = freshTs()
+    await post({ ...batch(ts, ETHERNET), wifi: WIFI })
+    await post({ ...batch(ts, ETHERNET), wifi: { ...WIFI, rssiDbm: -70 } })
+
+    const rows = wifiRowsAt(ts)
+    expect(rows).toHaveLength(1)
+    expect(rows[0]?.rssiDbm).toBe(-45)
+  })
+
+  test('an all-null radio sample is stored as the finding it is', async () => {
+    // What a churned `system_profiler` produces: the sample happened, the radio
+    // state is unknown. A row of nulls says that; dropping the row would say
+    // "no sample was taken", which is a different and false statement.
+    const ts = freshTs()
+    const nulls: WifiSampleInput = {
+      iface: 'en1',
+      status: null,
+      phyMode: null,
+      channel: null,
+      band: null,
+      widthMhz: null,
+      rssiDbm: null,
+      noiseDbm: null,
+      txRateMbps: null,
+      mcsIndex: null,
+      rttMedMs: null,
+      lossPct: 100,
+    }
+    await post({ ...batch(ts, ETHERNET), wifi: nulls })
+
+    const [row] = wifiRowsAt(ts)
+    expect(row).toMatchObject({ iface: 'en1', status: null, rssiDbm: null, rttMedMs: null, lossPct: 100 })
+  })
+
+  test('a collector that omits fields entirely still ingests', async () => {
+    // Collector and API deploy independently: every field is optional on the
+    // wire, and an omitted one lands as null rather than 422ing a batch that
+    // also carries four real probe samples.
+    const ts = freshTs()
+    const res = await post({ ...batch(ts, ETHERNET), wifi: { iface: 'en1', rssiDbm: -50 } })
+
+    expect(res.status).toBe(200)
+    expect(wifiRowsAt(ts)[0]).toMatchObject({ iface: 'en1', rssiDbm: -50, phyMode: null, txRateMbps: null })
   })
 })
 

@@ -187,6 +187,15 @@ export const HOSTS_ROW: Record<string, string> = {
   stack: '0,0,0,0,0,0',
 }
 
+/**
+ * The device name the wire carries. Nothing parses or stores it — `router_host`
+ * has no name column, because a fifth of this router's names were vendor
+ * defaults of the form prefix + 12 hex digits, i.e. a MAC with its separators
+ * stripped. It stays in the fixture as a canary so `redact.test.ts` can prove
+ * the redactor blanks the key, rather than the key merely going unread.
+ */
+export const HOST_NAME_CANARY = 'FIXTURE-CANARY-NOT-A-REAL-HOSTNAME'
+
 /** `DEV2_HOST_ENTRY` — must be read with `gl`; `go` returns only the first row. */
 export const HOST_ENTRY_ROWS: Array<Record<string, string>> = [
   {
@@ -194,7 +203,7 @@ export const HOST_ENTRY_ROWS: Array<Record<string, string>> = [
     IPAddress: '192.168.1.100',
     addressSource: 'DHCP',
     layer1Interface: 'Device.Ethernet.Interface.1.',
-    hostName: 'fixture-host',
+    hostName: HOST_NAME_CANARY,
     interfaceType: 'Ethernet',
     X_TP_LanConnDev: 'br0',
     active: '1',
@@ -205,7 +214,7 @@ export const HOST_ENTRY_ROWS: Array<Record<string, string>> = [
     physAddress: '00:11:22:33:44:66',
     IPAddress: '192.168.1.104',
     layer1Interface: 'Device.WiFi.Radio.1.',
-    hostName: 'fixture-phone',
+    X_TP_HostName: HOST_NAME_CANARY,
     interfaceType: 'Wi-Fi',
     active: '1',
     X_TP_ClientType: 'Phone',
@@ -215,7 +224,7 @@ export const HOST_ENTRY_ROWS: Array<Record<string, string>> = [
     physAddress: '00:11:22:33:44:77',
     IPAddress: '192.168.1.105',
     layer1Interface: 'Device.Ethernet.Interface.2.',
-    hostName: 'fixture-stale-lease',
+    hostName: HOST_NAME_CANARY,
     interfaceType: 'Ethernet',
     // Inactive: a stale DHCP lease, not a connection.
     active: '0',

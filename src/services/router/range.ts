@@ -144,7 +144,7 @@ export interface RouterThroughputBucket {
   names: string[]
   /**
    * Instantaneous rates as the router reports them: each sample is its own ~30s
-   * average taken at poll time, so `avg` is the mean of five-minute spot checks,
+   * average taken at poll time, so `avg` is the mean of one spot check per poll,
    * not the mean of the bucket. `bytesRxDelta` is the number that covers the
    * whole bucket.
    */
@@ -234,7 +234,7 @@ function isRole(value: string | null): value is 'wan' | 'lan' | 'other' {
 
 /**
  * Carrier line history, one row per bucket. Sync rate and noise margin keep a
- * `min` alongside the average because the average is what hides a five-minute
+ * `min` alongside the average because the average is what hides a single poll's
  * drop to a lower profile, and that drop is the whole reason the column exists.
  */
 export function bucketRouterLine(db: BunSQLiteDatabase<typeof schema>, params: RouterBucketParams): RouterLineBucket[] {

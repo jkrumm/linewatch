@@ -74,10 +74,17 @@ function TargetLatencyPanel({
   return (
     <ChartCard
       title={TARGET_LABEL[target]}
-      subtitle="Median RTT · p5–p95 spread · loss"
-      tooltip="Median round-trip time with the p5–p95 spread shaded behind it, SmokePing-style. Dots mark cycles with packet loss."
+      subtitle="Median RTT · p5–p95 spread · worst ping · loss"
+      tooltip="Median round-trip time with the p5–p95 spread shaded behind it, SmokePing-style, and a faint outer line at the slowest single ping in each bucket. Dots mark cycles with packet loss. Hatched columns were not measured at all; a red column is a bucket where cycles got nothing back; the hatched rail along the bottom marks buckets not provably measured over the home line."
     >
-      <LatencyBandChart target={target} buckets={data ?? []} />
+      <LatencyBandChart
+        target={target}
+        buckets={data?.buckets ?? []}
+        vantage={data?.vantage ?? []}
+        from={from}
+        to={to}
+        bucketSeconds={bucket}
+      />
     </ChartCard>
   )
 }

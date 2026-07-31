@@ -17,7 +17,7 @@ process.env['LINEWATCH_TOKEN'] = 'test-token-not-the-real-one'
 
 const { outagesRoutes } = await import('./outages.js')
 const { db } = await import('../db/client.js')
-const { probeSample } = await import('../db/schema.js')
+const { outage, probeSample } = await import('../db/schema.js')
 
 const app = new Elysia().use(outagesRoutes)
 
@@ -62,6 +62,30 @@ function seedCycle(ts: number, lossByTarget: Record<string, number> = {}): void 
       }),
     )
     .run()
+}
+
+/** One materialised outage row. `endedAt` null is an ongoing outage. */
+function seedOutage(startedAt: number, endedAt: number | null): number {
+  const row = db
+    .insert(outage)
+    .values({
+      scope: 'wan',
+      startedAt,
+      endedAt,
+      durationS: endedAt === null ? null : Math.round((endedAt - startedAt) / 1000),
+      cycles: 1,
+      evidence: JSON.stringify(['cloudflare', 'google', 'quad9']),
+    })
+    .returning({ id: outage.id })
+    .get()
+  return row.id
+}
+
+async function outageIds(from: number, to: number): Promise<number[]> {
+  const res = await app.handle(new Request(`http://localhost/api/outages?from=${from}&to=${to}`))
+  expect(res.status).toBe(200)
+  const body = (await res.json()) as { outages: { id: number }[] }
+  return body.outages.map((row) => row.id)
 }
 
 interface Summary {
@@ -133,5 +157,50 @@ describe('GET /api/outages — coverage of a range too short to hold a cycle', (
     const body = await summary(ts, ts + 10 * CYCLE_MS)
     expect(body.expectedCycles).toBe(10)
     expect(body.coveragePct).toBe(20)
+  })
+})
+
+describe('GET /api/outages — the range filter is an overlap, not a containment', () => {
+  test('an outage that started before the window and ran into it is in the window', async () => {
+    // The exact row the old `startedAt >= from` predicate dropped whole: 30 min
+    // of it predates the range and three hours of it are inside, and it went
+    // missing from both the table and the downtime sum.
+    const from = freshTs()
+    const to = from + 24 * 60 * 60 * 1000
+    const id = seedOutage(from - 30 * 60 * 1000, from + 3 * 60 * 60 * 1000)
+
+    expect(await outageIds(from, to)).toContain(id)
+  })
+
+  test('an outage that started inside the window and ended after it is too', async () => {
+    const from = freshTs()
+    const to = from + 24 * 60 * 60 * 1000
+    const id = seedOutage(to - 10 * 60 * 1000, to + 2 * 60 * 60 * 1000)
+
+    expect(await outageIds(from, to)).toContain(id)
+  })
+
+  test('an outage still ongoing from before the window is the most relevant row of all', async () => {
+    const from = freshTs()
+    const to = from + 24 * 60 * 60 * 1000
+    const id = seedOutage(from - 60 * 60 * 1000, null)
+
+    expect(await outageIds(from, to)).toContain(id)
+  })
+
+  test('an outage that ended before the window is not in it', async () => {
+    const from = freshTs()
+    const to = from + 24 * 60 * 60 * 1000
+    const id = seedOutage(from - 2 * 60 * 60 * 1000, from - 60 * 60 * 1000)
+
+    expect(await outageIds(from, to)).not.toContain(id)
+  })
+
+  test('an outage that started after the window is not in it', async () => {
+    const from = freshTs()
+    const to = from + 24 * 60 * 60 * 1000
+    const id = seedOutage(to + 60 * 60 * 1000, to + 2 * 60 * 60 * 1000)
+
+    expect(await outageIds(from, to)).not.toContain(id)
   })
 })

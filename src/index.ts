@@ -15,6 +15,8 @@ import { speedtestsRoutes } from './routes/speedtests.js'
 import { eventsRoutes } from './routes/events.js'
 import { interventionsRoutes } from './routes/interventions.js'
 import { routerRoutes } from './routes/router.js'
+import { verdictRoutes } from './routes/verdict.js'
+import { wifiRoutes } from './routes/wifi.js'
 import { startSpeedtestScheduler } from './services/speedtest-runner.js'
 import { startRouterPoller } from './services/router/scheduler.js'
 
@@ -83,6 +85,8 @@ export const app = new Elysia()
   .use(eventsRoutes)
   .use(interventionsRoutes)
   .use(routerRoutes)
+  .use(verdictRoutes)
+  .use(wifiRoutes)
   // Serves the built dashboard: a real file when the path maps to one, and
   // index.html only for paths shaped like a client-side route. Registered last,
   // so every API route above still wins.
@@ -121,7 +125,7 @@ export const app = new Elysia()
   .listen({ port: config.port })
 
 startSpeedtestScheduler()
-// Read-only 5-minute router poll. Returns null (and says why) when no router
+// Read-only 10-minute router poll. Returns null (and says why) when no router
 // password is configured — the API must serve with or without it.
 startRouterPoller()
 

@@ -47,6 +47,20 @@ const VantageSchema = z.object({
   linkMedia: z.string().nullable(),
   linkMbit: z.number().int().nullable(),
   linkDuplex: z.enum(['full', 'half']).nullable(),
+  linkMaxMbit: z
+    .number()
+    .int()
+    .nullable()
+    .describe(
+      'Fastest speed in the interface\'s *supported* media list, not the negotiated one in linkMbit. It is what separates "the NIC can only do 100" from "the NIC can do 1000 and negotiated 100" — a different repair in each case. Null when the collector could not parse it; never an implied 1000.',
+    ),
+  dhcpBoundAt: z
+    .number()
+    .int()
+    .nullable()
+    .describe(
+      'Unix ms of the DHCP lease start on pathIf. A *change* proves a re-bind; an unchanged value proves nothing about link stability. Null when the line was absent or unparseable.',
+    ),
   gatewayAddr: z.string().nullable(),
   onHomeLine: z
     .boolean()
@@ -128,6 +142,8 @@ export const statusRoute = new Elysia().get(
           linkMedia: vantageRow.linkMedia,
           linkMbit: vantageRow.linkMbit,
           linkDuplex: vantageRow.linkDuplex,
+          linkMaxMbit: vantageRow.linkMaxMbit,
+          dhcpBoundAt: vantageRow.dhcpBoundAt,
           gatewayAddr: vantageRow.gatewayAddr,
           // Three states, preserved: the column is 0/1/NULL and NULL means the
           // collector did not report. Coalescing it to `true` here is precisely
@@ -150,7 +166,7 @@ export const statusRoute = new Elysia().get(
       tags: ['Status'],
       summary: 'Current line status',
       description:
-        'Up/down now, any ongoing outage (gateway and/or wan scope), the most recent sample per configured target, the most recent speed test, and the current vantage — which interface and negotiated link the last cycle went out over, and whether that was the home line at all. This is the "Now" dashboard view in one call.',
+        'Up/down now, any ongoing outage (gateway and/or wan scope), the most recent sample per configured target, the most recent speed test, and the current vantage — which interface and negotiated link the last cycle went out over, the ceiling that NIC advertises as supported, when its DHCP lease last started, and whether any of it was the home line at all. This is the "Now" dashboard view in one call.',
     },
   },
 )

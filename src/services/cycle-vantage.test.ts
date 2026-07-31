@@ -201,6 +201,55 @@ describe('recordCycleVantage', () => {
     expect(events(db)).toHaveLength(0)
   })
 
+  test('a changed NIC ceiling is a link change — different hardware in the path', () => {
+    // linkMaxMbit reframes every linkMbit reading after it: 100 negotiated on a
+    // NIC that supports 1000 is a cable, on a NIC that supports 100 it is the
+    // adapter. So the ceiling moving is itself a transition worth an event.
+    const db = createTestDb()
+    recordCycleVantage(db, { ts: T0, vantage: { ...ETHERNET, linkMaxMbit: 1000 }, homeGatewayAddr: HOME_GW })
+    recordCycleVantage(db, { ts: T0 + CYCLE_MS, vantage: { ...ETHERNET, linkMaxMbit: 2500 }, homeGatewayAddr: HOME_GW })
+
+    expect(events(db)[0]?.detail.changed).toEqual({ linkMaxMbit: { before: 1000, after: 2500 } })
+  })
+
+  test('null -> 1000 on linkMaxMbit is the collector gaining the field, not a NIC swap', () => {
+    // The collector is native under launchd and the API is in Docker, so the
+    // day the collector starts reporting the ceiling every host would otherwise
+    // emit a fabricated "the NIC changed" event on its very next cycle.
+    const db = createTestDb()
+    recordCycleVantage(db, { ts: T0, vantage: ETHERNET, homeGatewayAddr: HOME_GW })
+    recordCycleVantage(db, { ts: T0 + CYCLE_MS, vantage: { ...ETHERNET, linkMaxMbit: 1000 }, homeGatewayAddr: HOME_GW })
+
+    expect(events(db)).toHaveLength(0)
+    expect(db.select().from(probeCycle).all()[1]?.linkMaxMbit).toBe(1000)
+  })
+
+  test('a moved DHCP lease and a changed link_watch_s emit no event', () => {
+    // Deliberately unwatched. dhcpBoundAt moves on every ordinary lease renewal
+    // and linkWatchS is a per-cycle coverage counter; an event on either would
+    // fire constantly and bury the real transitions. Both are still stored.
+    const db = createTestDb()
+    recordCycleVantage(db, { ts: T0, vantage: { ...ETHERNET, dhcpBoundAt: T0 - 3600_000, linkWatchS: 30 }, homeGatewayAddr: HOME_GW })
+    recordCycleVantage(db, { ts: T0 + CYCLE_MS, vantage: { ...ETHERNET, dhcpBoundAt: T0, linkWatchS: 12 }, homeGatewayAddr: HOME_GW })
+
+    expect(events(db)).toHaveLength(0)
+    const rows = db.select().from(probeCycle).all()
+    expect(rows[1]?.dhcpBoundAt).toBe(T0)
+    expect(rows[1]?.linkWatchS).toBe(12)
+  })
+
+  test('an unreported link_watch_s stores null, never 0', () => {
+    // 0 is a measurement — "the sampler ran and covered no seconds". Null is
+    // the absence of one, and the verdict layer must refuse rather than assume.
+    const db = createTestDb()
+    recordCycleVantage(db, { ts: T0, vantage: ETHERNET, homeGatewayAddr: HOME_GW })
+
+    const row = db.select().from(probeCycle).all()[0]
+    expect(row?.linkWatchS).toBeNull()
+    expect(row?.linkMaxMbit).toBeNull()
+    expect(row?.dhcpBoundAt).toBeNull()
+  })
+
   test('value -> null is the collector going quiet, not a link change', () => {
     const db = createTestDb()
     recordCycleVantage(db, { ts: T0, vantage: ETHERNET, homeGatewayAddr: HOME_GW })

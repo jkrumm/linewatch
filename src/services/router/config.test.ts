@@ -95,13 +95,30 @@ describe('buildRouterConfig', () => {
   it('derives the poll interval and the staleness bound from the cron pattern', () => {
     const { env, cleanup } = withPasswordFile('secret-from-file')
     try {
-      const fiveMinutes = buildRouterConfig(env)
-      expect(fiveMinutes.pollIntervalMs).toBe(5 * 60 * 1000)
-      expect(fiveMinutes.staleAfterMs).toBe(10 * 60 * 1000)
+      // The default cadence: one fresh login per poll, 72 logins a day.
+      const byDefault = buildRouterConfig(env)
+      expect(byDefault.pollCron).toBe('*/10 * * * *')
+      expect(byDefault.pollIntervalMs).toBe(10 * 60 * 1000)
+      expect(byDefault.staleAfterMs).toBe(20 * 60 * 1000)
 
       const hourly = buildRouterConfig({ ...env, LINEWATCH_ROUTER_CRON: '0 * * * *' })
       expect(hourly.pollIntervalMs).toBe(60 * 60 * 1000)
       expect(hourly.staleAfterMs).toBe(2 * 60 * 60 * 1000)
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('takes the cadence from the environment, so it is configuration and not a literal', () => {
+    const { env, cleanup } = withPasswordFile('secret-from-file')
+    try {
+      // The scheduler builds its Cron from `pollCron` and nothing else, so this
+      // is the whole cadence contract: change the pattern, change the schedule.
+      const config = buildRouterConfig({ ...env, LINEWATCH_ROUTER_CRON: '*/2 * * * *' })
+      expect(config.pollCron).toBe('*/2 * * * *')
+      expect(config.pollIntervalMs).toBe(2 * 60 * 1000)
+      expect(config.staleAfterMs).toBe(4 * 60 * 1000)
+      expect(config.configWarning).toBeNull()
     } finally {
       cleanup()
     }
@@ -114,8 +131,8 @@ describe('buildRouterConfig', () => {
       // Still polling — degraded, not off. `new Cron` in the scheduler would
       // otherwise throw out of startRouterPoller and take the API with it.
       expect(config.enabled).toBe(true)
-      expect(config.pollCron).toBe('*/5 * * * *')
-      expect(config.pollIntervalMs).toBe(5 * 60 * 1000)
+      expect(config.pollCron).toBe('*/10 * * * *')
+      expect(config.pollIntervalMs).toBe(10 * 60 * 1000)
       expect(config.disabledReason).toBeNull()
       expect(config.configWarning).toContain('invalid cron pattern')
     } finally {

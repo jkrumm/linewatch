@@ -39,11 +39,21 @@ function defaultResponses(): Record<string, RawRows> {
 /** Stands in for the router. Responses go through the real redactor, as they do live. */
 class FakeRouter implements RouterReader {
   readonly calls: Array<{ oid: string; operation: RouterOperation }> = []
+  /** Counted, not just observed: one poll must be exactly one login. */
+  logins = 0
+  /** Set to make the login fail the way an unreachable or evicting router does. */
+  loginError: Error | null = null
 
   constructor(
     private responses: Record<string, RawRows> = defaultResponses(),
     private readonly errors: Record<string, Error> = {},
   ) {}
+
+  startSession(): Promise<void> {
+    if (this.loginError !== null) return Promise.reject(this.loginError)
+    this.logins += 1
+    return Promise.resolve()
+  }
 
   read(oid: string, operation: RouterOperation): Promise<Array<Record<string, string>>> {
     this.calls.push({ oid, operation })
@@ -91,6 +101,37 @@ function writeHostVantage(
 }
 
 describe('RouterPoller', () => {
+  it('logs in once per poll and stores the sample that login bought', async () => {
+    // The session is re-established per poll rather than held: holding it meant
+    // one eviction silently swallowed the next three polls.
+    const client = new FakeRouter()
+    let now = 1_000
+    const { db, poller } = makePoller(client, () => now)
+
+    await poller.poll()
+    now = 601_000
+    await poller.poll()
+
+    expect(client.logins).toBe(2)
+    expect(db.select().from(routerLineSample).all().map((row) => row.ts)).toEqual([1_000, 601_000])
+  })
+
+  it('stores nothing when the login fails, leaving the gap visible', async () => {
+    const client = new FakeRouter()
+    client.loginError = new RouterUnreachableError('connect timeout')
+    const { db, poller } = makePoller(client, () => 1_000)
+
+    // Absent, never carried forward: a poll that could not log in has no
+    // reading, and inventing one would be the fabrication this service exists
+    // not to make.
+    await expect(poller.poll()).rejects.toThrow(RouterUnreachableError)
+    expect(client.calls).toHaveLength(0)
+    expect(db.select().from(routerLineSample).all()).toHaveLength(0)
+    expect(db.select().from(routerIntfSample).all()).toHaveLength(0)
+    expect(db.select().from(routerEthPort).all()).toHaveLength(0)
+    expect(db.select().from(routerHost).all()).toHaveLength(0)
+  })
+
   it('reads the host list with `gl`, never `go`', () => {
     const client = new FakeRouter()
     const { poller } = makePoller(client, () => 1_000)
@@ -279,7 +320,11 @@ describe('RouterPoller', () => {
 
 describe('readRouterSnapshot', () => {
   const COLLECTOR_IP = '192.168.1.100'
-  /** Two 5-minute poll intervals, i.e. `routerConfig.staleAfterMs` in production. */
+  /**
+   * Two poll intervals, the shape of `routerConfig.staleAfterMs`. Pinned here
+   * rather than imported so these cases keep testing the bound itself if the
+   * default cadence moves again.
+   */
   const STALE_AFTER_MS = 10 * 60 * 1000
 
   /**

@@ -4,7 +4,13 @@ import { NavLink as MantineNavLink } from '@mantine/core'
 import { BasaltShell, ThemeToggle } from 'basalt-ui'
 import type { NavLinkRenderer, SidebarSection } from 'basalt-ui'
 import { useBasaltNav } from 'basalt-ui/router-tanstack'
-import { IconActivity, IconAlertTriangle, IconChartLine, IconGauge } from '@tabler/icons-react'
+import {
+  IconActivity,
+  IconAlertTriangle,
+  IconChartLine,
+  IconGauge,
+  IconRouter,
+} from '@tabler/icons-react'
 import { useCallback } from 'react'
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
@@ -75,6 +81,15 @@ function RootLayout() {
           icon: <IconGauge size={ICON} />,
           href: '/speed',
           active: isActive('/speed'),
+        },
+        {
+          key: 'vantage',
+          label: 'Vantage',
+          short: 'Vantage',
+          mobile: true,
+          icon: <IconRouter size={ICON} />,
+          href: '/vantage',
+          active: isActive('/vantage'),
         },
       ],
     },

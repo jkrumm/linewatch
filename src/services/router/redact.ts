@@ -22,9 +22,16 @@ const SECRET_KEY =
  * DS-Lite AFTR hostname identify the line's owner just as well. None of the
  * fields the poller actually reads match these patterns — the port alias it
  * stores is `X_TP_IfNameAlias`, which `^alias$` does not touch.
+ *
+ * Device names are here for a second reason: 20 of 102 host entries this line
+ * stored were vendor defaults of the form three-letter prefix + 12 hex digits,
+ * i.e. a MAC address with its separators stripped, which the value-level MAC
+ * pattern below cannot see. The name column is gone from `router_host`
+ * entirely, so this only has to stop a raw row reaching a log — but a key
+ * denylist is the cheaper of the two guards to keep.
  */
 const IDENTITY_KEY =
-  /user_?name|^user$|account|login|subscriber|circuit_?id|customconnname|^alias$|aftr/i
+  /user_?name|^user$|account|login|subscriber|circuit_?id|customconnname|^alias$|aftr|host_?name|device_?name|nick_?name|friendly_?name/i
 
 const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/
 const MAC = /^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/

@@ -63,13 +63,22 @@ The collector is the only native piece: ~870 lines across `probe.ts`,
 to beyond the system `ping`, `route`, `ifconfig`, `netstat` and `networksetup`.
 Most of it is parsing their output, kept in pure modules with fixture tests.
 Everything with a reason to change — schema, detection logic, API, dashboard,
-and the 5-minute read-only router poll — stays in the container with a restart
+and the 10-minute read-only router poll — stays in the container with a restart
 policy and rollhook deployment.
 
 **The collector spools.** If the API is down (redeploy, container restart) it
 appends batches to `collector/spool.jsonl` and replays them on the next
 successful cycle. A deploy must not punch a hole in the uptime record — that
 hole would read as an outage, which is precisely the thing being measured.
+
+**The collector bounds its own log, in place.** `~/Library/Logs/linewatch-collector.log`
+grows ~400 KB/day and is not disposable — 106 silently dropped vantage payloads
+were visible only there, in what the collector logged it had sent. It rotates at
+8 MiB keeping one previous generation (≤16 MiB, 21–42 days of history) by copying
+to `.log.1` and truncating the live file rather than renaming it: launchd opens
+`StandardOutPath` once with `O_APPEND` and never reopens it (verified with `lsof
++fg` — `1u REG R,W,AP`), so `newsyslog`, which rotates by rename, would leave the
+collector writing into the renamed inode and the visible log frozen at zero.
 
 ## Targets
 
@@ -166,6 +175,18 @@ gaining or losing the ability to report a field is silence rather than a
 fabricated link change. The router poller writes `link_change` rows too, from
 the carrier side.
 
+That diff compares 30 s snapshots, so a flap that restores to the same media
+token is invisible to it by construction — macOS logged a continuous 14.3 s
+`hasLink: false` on en0 inside a recorded 90 s WAN outage while the `event`
+table stayed empty. The collector therefore also samples `ifconfig <path_if>`
+at 1 Hz (1.71 ms per spawn, 0.17 % of one core) and ships the transitions with
+the cycle, where they become `link_change` rows carrying `detail.source:
+"link-sampler"`. `link_watch_s` records how many seconds of that cycle were
+actually sampled — null when the collector runs no sampler. **1 Hz resolves
+transitions of roughly 2 s and longer, so no recorded transition means "none
+longer than the sampling resolution was observed", never "the link was
+stable".**
+
 `outage` — written by the state machine on ingest, not derived on read.
 
 | Column | Type | Note |
@@ -216,31 +237,104 @@ bufferbloat, and it is the one the FRITZ!Box-era line is most likely to be bad a
 | `detail` | text | JSON |
 
 Two of the four kinds are now written. `link_change` is materialised on write —
-by the probe ingest when the host-side vantage changes, and by the router poller
-when the carrier side does. `intervention` is written by `POST
+by the probe ingest when the host-side vantage changes, by the same ingest for
+each sub-cycle transition the collector's 1 Hz sampler reports, and by the
+router poller when the carrier side does. `detail.source` is what tells them
+apart — `vantage-diff`, `link-sampler`, `router-poller` — and `GET /api/events`
+lifts it out of the JSON for that reason. It is not a byline: the three observe
+the same kind of fact from three distances (somewhere in the preceding 30 s
+cycle, the transition itself to ~1 s, the carrier's side up to a poll interval
+late), so a timeline showing them in one timestamp column without naming the
+source claims a precision two of them do not have. A row written before the
+field existed carries none, and is left unlabelled rather than attributed to the
+likeliest writer. `event.ts` deliberately carries no unique index — interventions legitimately
+share a timestamp — so replayed sampler transitions are de-duplicated by an
+explicit ts+kind check at ingest instead. `intervention` is written by `POST
 /api/interventions`, which exists for attribution: without it a recovery two
 minutes after a power-cycle is indistinguishable from one that would have
 happened anyway, and the record silently credits the ISP for a fix that was a
 human with a plug.
+
+`wifi_sample` — the radio, every 10th cycle (5 min).
+
+| Column | Type | Note |
+|-|-|-|
+| `id` | integer pk | |
+| `ts` | integer, **unique** | cycle start; unique so a spool replay is idempotent |
+| `iface` | text, nullable | the interface the sample was taken *through* |
+| `status` | text, nullable | `Connected` \| `Not Connected` \| …, verbatim |
+| `phy_mode`, `band` | text, nullable | e.g. `802.11ax`, `2GHz` |
+| `channel`, `width_mhz`, `rssi_dbm`, `noise_dbm`, `mcs_index` | integer, nullable | |
+| `tx_rate_mbps` | real, nullable | negotiated PHY/MCS rate — **not** throughput |
+| `rtt_med_ms`, `loss_pct` | real, nullable | from a ping bound to `iface` |
+
+Five minutes rather than 30 seconds because `system_profiler SPAirPortDataType`
+costs 4.8 s median here (six runs, 4.63–4.95 s), 2.4× the vantage capture's
+per-command budget; `-detailLevel mini` saves nothing and drops Signal/Noise,
+Transmit Rate, MCS Index and Channel outright. 288 rows/day, ~105k/year.
+
+It exists so **an alternate radio path currently attached** is measured rather
+than inferred — and that phrasing is the honest one.
+`networksetup -listnetworkserviceorder` here ranks Ethernet, then a **mobile
+hotspot**, then Wi-Fi; Wi-Fi is the effective alternate today only
+because no cellular device is attached, so "the standby path" would name the
+wrong hop. Nothing in this table is throughput: `tx_rate_mbps` is a PHY/MCS
+rate, and the radio's own round trip measured 9.99 ms against 5.24 ms on
+Ethernet.
+
+`ssid`, `bssid`, `mac`, `security`, `country_code`, every neighbour network and
+a derived `snr` column are deliberately absent (SNR is computed on read, only
+when both sides are non-null). The raw output prints two MAC addresses in the
+clear and enumerates every neighbour SSID with its channel and security, so the
+parser reads only the connected interface's `Current Network Information` block,
+stops at `Other Local Wi-Fi Networks`, and extracts a fixed whitelist of keys.
+The SSID currently prints as `<redacted>` only because Location Services is off
+— a side effect that can reverse, so the guard is the missing column, not the
+redaction. `ifconfig -v`'s `uplink rate`/`downlink rate` are omitted too: they
+disagree with the PHY rate by ~4× (53.95 vs 229 Mbit) and would only invite a
+fabricated single "wifi speed".
 
 `config_change` and `note` are still unwritten. They stay so that phase 2 —
 TP-Link reconnect, LAN↔WLAN failover, forced re-dial — can land without a
 migration.
 
 Four more tables hold the carrier-side view, written by the read-only router
-poller every 5 minutes. They answer *why* a line is slow, which no amount of
+poller every 10 minutes. They answer *why* a line is slow, which no amount of
 probing from the host can.
+
+**Every poll logs in fresh.** The first version held the single admin session
+between polls and answered an eviction with a 15-minute re-login backoff, which
+measured at 36% coverage: 20 of 55 due polls stored over 4.5 hours, gaps
+alternating 300 s and 1500 s, because one drop silently swallowed the next three
+polls. Re-establishing the session per poll costs 72 logins a day against ~144
+for repairing a held one, and removes the failure mode instead of tuning its
+constant. The cadence halved to pay for it and nothing measurable was lost —
+`down_sync_kbps` had zero variance across all 20 samples the old scheme stored.
+A failed login stores nothing at all; the gap is the honest record of a poll
+that did not happen.
 
 | Table | Holds |
 |-|-|
 | `router_line_sample` | sync and current rates, noise margin, attenuation, profile, showtime seconds, errored seconds |
 | `router_intf_sample` | per-interface rx/tx kbps and cumulative byte counters, one row per interface per poll |
 | `router_eth_port` | each LAN port's negotiated status, max bit rate and duplex |
-| `router_host` | which hosts were connected, for an outage's blast radius |
+| `router_host` | which addresses were connected, over which medium, for an outage's blast radius |
 
 Neither `router_eth_port` nor `router_host` carries a MAC column. The port alias
 already identifies the port, so a MAC would buy nothing and leak a stable device
 identifier out of a public repo.
+
+`router_host` carried a device-name column for its first 102 rows and no longer
+does (migration 0005 drops it). 20 of those rows held a vendor-default name of
+the form three-letter prefix + 12 hex digits — a MAC address with its separators
+stripped — so the table was storing the identifier the paragraph above says it
+does not. Redaction could not have saved it either way: the key matched neither
+denylist and the MAC pattern requires separators, and redacting at parse time
+cannot clean rows already written. The name was also never load-bearing. The
+collector host is looked up by its configured IP, not by name, and blast radius
+is answered by how many addresses were active on which medium. What replaces it
+is nothing; `redact.ts` now blanks name-shaped keys as a second guard, and
+`parseHosts` does not read them at all.
 
 ## API
 
@@ -256,17 +350,18 @@ in-process timer, so restarting the container cannot reset the budget.
 |-|-|
 | `GET /health` | container healthcheck |
 | `POST /api/probes` | batch ingest from the collector: one cycle, one sample per target, plus the optional `cycle` vantage (bearer) |
-| `GET /api/status` | now: up/down, ongoing outage, last sample per target, last speed test, latest vantage |
+| `GET /api/status` | now: up/down, ongoing outage, last sample per target, last speed test, latest vantage (negotiated link, the NIC's supported ceiling, DHCP bind time) |
 | `GET /api/probes?from&to&target&bucket` | server-bucketed timeseries: median of medians, max loss, p5/p95 band, plus a parallel per-bucket `vantage` series |
 | `GET /api/outages?from&to&minDuration` | list, plus a range `summary` when both bounds are given |
 | `GET /api/speedtests?from&to` | list |
 | `GET /api/speedtests/summary?days` | p50/p95 down/up, best, worst |
 | `POST /api/speedtests/run` | trigger one now (no bearer; 429 within 5 min of the last run) |
-| `GET /api/events?from&to` | timeline overlay |
+| `GET /api/events?from&to&kind` | timeline overlay, plus `linkSamplingSince` — without it an empty array reads as "the link held" |
 | `POST /api/interventions` | record a manual action — power-cycle, cable swap — as an `intervention` event (bearer) |
-| `GET /api/router` | latest line sample, WAN/LAN throughput, collector host, LAN ports |
+| `GET /api/router` | latest line sample, WAN/LAN throughput, the collector host's presence and medium, LAN ports |
 | `GET /api/router/line?from&to&limit` | carrier line history: sync rates, noise margin in real dB, attenuation, showtime |
 | `GET /api/router/throughput?from&to&role&limit` | per-interface rates, `role=wan` for the live internet-facing one |
+| `GET /api/wifi?from&to&bucket` | radio history, bucketed in SQL: signal/noise, SNR derived on read, PHY rate (not throughput), interface-bound RTT |
 
 Bucketing happens in SQL. The dashboard must never pull 4M rows to draw a year.
 
@@ -292,14 +387,44 @@ monitoring down with it.
 
 ## Dashboard
 
-basalt-ui (Mantine v9) + visx, per the `/dataviz` conventions. Four views:
+basalt-ui (Mantine v9) + visx, per the `/dataviz` conventions. Five views:
 
-- **Now** — current state, ongoing outage if any, last speed test, 24 h sparkline.
+- **Now** — current state, ongoing outage if any, the verdict set, last speed
+  test, 24 h availability strip. Two states are not derived from the absence of an outage
+  row: a collector that stopped reporting is its own non-green banner (no cycle
+  ingested means no outage row can ever open, so "no outage" is not "up"), and a
+  target whose newest sample is older than two probe cycles goes neutral instead
+  of green. The strip is one column per bucket over the whole window, because a
+  sparkline over a dense array closes over every unmeasured bucket and draws a
+  guaranteed-healthy trend. The verdict set comes from `GET /api/verdicts` and
+  is rendered whole, `uncertainty` included: that sentence is where a rule says
+  why it withheld a cause, and dropping it turns a deliberate refusal into
+  apparent silence, which reads as health. An empty result renders as "no
+  verdicts for this window", never as a green all-clear — no rule firing
+  includes every rule that fell silent for want of inputs.
 - **Uptime** — outage list plus a day/hour availability heatmap. The headline
   number is total downtime per period, not a 99.x% figure; on a home line the
-  percentage flatters and the minute count informs.
+  percentage flatters and the minute count informs. It counts an ongoing
+  outage from its start (`duration_s` is null while one is open, and reading
+  that as 0 printed "0 min" under a live outage banner) and clips an outage
+  straddling the window to its time inside it. Directly under it sits the
+  `GET /api/outages` range summary — coverage, degraded cycles and the vantage
+  verdict — because the headline is only true to the extent the window was
+  measured.
 - **Latency** — SmokePing-style band: median line, p5–p95 shaded, loss as colour.
 - **Speed** — download/upload over time, hourly heatmap, loaded-vs-idle latency.
+- **Vantage** — what the line is being measured *through*. The current cycle's
+  interface, path class, negotiated media/speed/duplex, the NIC's supported
+  ceiling, gateway and DHCP bind time, with `on_home_line: null` rendered as an
+  "unknown" chip and never a check mark. Then the carrier's sync rate beside the
+  host's negotiated link beside the last measured throughput, each with its own
+  age — and **no ratio at all while either side is stale**, because
+  `GET /api/router`'s parts age independently and dividing a 25-minute-old sync
+  figure by a 30-second-old link speed manufactures a disagreement between two
+  moments. Then link speed per bucket, where a bucket holding more than one
+  speed is marked as a renegotiation rather than averaged into a rate the link
+  never ran at. Then the transition timeline from `GET /api/events`, with the
+  observing source in its own column.
 
 ## Ports
 

@@ -171,8 +171,8 @@ export interface IntfSample {
    *
    * The router computes these over its own ~30-second window
    * (`X_TP_LastPeriod` reads 33), so two polls less than that apart return the
-   * identical value. At the 5-minute cadence each sample is therefore a 30s
-   * average taken at poll time, *not* a 5-minute mean — which is why the
+   * identical value. At the 10-minute cadence each sample is therefore a 30s
+   * average taken at poll time, *not* a 10-minute mean — which is why the
    * cumulative byte counters are stored alongside: they give the true average
    * between any two polls.
    */
@@ -266,19 +266,25 @@ export interface HostEntry {
   interfaceType: string | null
   active: number | null
   clientType: string | null
-  hostName: string | null
   /** `Device.Ethernet.Interface.N.` — the router's own pointer at the port. */
   layer1Interface: string | null
 }
 
-/** Connected devices (`DEV2_HOST_ENTRY`, which must be read with `gl`). */
+/**
+ * Connected devices (`DEV2_HOST_ENTRY`, which must be read with `gl`).
+ *
+ * The device name (`hostName`/`X_TP_HostName`) is deliberately not read. A fifth
+ * of the names this router hands out are vendor defaults of the form three-letter
+ * prefix + 12 hex digits — a MAC with its separators stripped — so storing the
+ * name stored the MAC. `redact.ts` now blanks the key as well, but the parser not
+ * asking is the guard that survives a firmware calling the field something else.
+ */
 export function parseHosts(rows: readonly RouterRow[]): HostEntry[] {
   return rows.map((row) => ({
     ip: str(row, 'IPAddress'),
     interfaceType: str(row, 'interfaceType'),
     active: int(row, 'active'),
     clientType: str(row, 'X_TP_ClientType'),
-    hostName: str(row, 'hostName') ?? str(row, 'X_TP_HostName'),
     layer1Interface: str(row, 'layer1Interface') ?? str(row, 'X_TP_Layer2Interface'),
   }))
 }

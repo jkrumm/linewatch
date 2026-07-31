@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { ADT_WAN_ROWS, ETH_INTF_ROWS, HOST_ENTRY_ROWS } from './fixtures.js'
+import { ADT_WAN_ROWS, ETH_INTF_ROWS, HOST_ENTRY_ROWS, HOST_NAME_CANARY } from './fixtures.js'
 import { redactRow, redactValue } from './redact.js'
 
 const PPPOE_CONNECTION = ADT_WAN_ROWS[1]!
@@ -14,13 +14,27 @@ describe('redactValue', () => {
     expect(redactValue('X_TP_DsliteAftrServer', 'aftr.isp.example')).toBe('<redacted:identity>')
   })
 
+  /**
+   * A device name is an identity too, and on this router it is often literally a
+   * MAC: the vendor default is a three-letter prefix plus the 12 hex digits of
+   * the address, which the MAC pattern below cannot match because it requires
+   * separators. `router_host` therefore stores no name at all; this keeps a raw
+   * row from carrying one into a log.
+   */
+  it('redacts device names under either spelling, including the MAC-shaped default', () => {
+    expect(redactValue('hostName', 'ABC001122334455')).toBe('<redacted:identity>')
+    expect(redactValue('X_TP_HostName', 'ABC001122334455')).toBe('<redacted:identity>')
+    expect(redactValue('deviceName', 'anything')).toBe('<redacted:identity>')
+    expect(redactValue('X_TP_NickName', 'anything')).toBe('<redacted:identity>')
+  })
+
   it('keeps the fields the poller actually reads', () => {
     for (const [key, value] of [
       ['status', 'Up'],
       ['name', 'ppp0'],
       ['ifName', 'ppp0'],
-      ['hostName', 'somehost'],
       ['interfaceType', 'Ethernet'],
+      ['hostNumberOfEntries', '3'],
       ['X_TP_IfNameAlias', 'LAN1'],
       ['maxBitRate', '1000'],
       ['duplexMode', 'Full'],
@@ -91,5 +105,12 @@ describe('redactRow', () => {
         expect(value).not.toMatch(/^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/)
       }
     }
+  })
+
+  // Same canary discipline as the credential above: prove the name is in the
+  // input before asserting it is not in the output.
+  it('removes the device name every host entry carries', () => {
+    expect(JSON.stringify(HOST_ENTRY_ROWS)).toContain(HOST_NAME_CANARY)
+    expect(JSON.stringify(HOST_ENTRY_ROWS.map(redactRow))).not.toContain(HOST_NAME_CANARY)
   })
 })

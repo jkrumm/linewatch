@@ -6,13 +6,13 @@
  * down, gateway down, en0 renegotiated to 100baseTX (a throughput *cap*, not
  * an outage), the host failed over to Wi-Fi, and the host failed over to
  * cellular (not the home line at all). The last one is real on this host: the
- * service order carries two cellular devices (an MR2100 hotspot and iPhone
- * USB tethering).
+ * service order carries two cellular egresses, a mobile hotspot and phone USB
+ * tethering, either of which macOS will use if the wired path goes away.
  *
  * Dependency-free by design, exactly like ping-parser.ts (see probe.ts's
  * header): pure string parsing plus one thin impure caller that shells out to
- * `route`, `ifconfig`, `netstat` and `networksetup`. No npm deps, no import of
- * src/config.ts or anything pulling in elysia/drizzle/zod.
+ * `route`, `ifconfig`, `netstat`, `networksetup` and `ipconfig`. No npm deps,
+ * no import of src/config.ts or anything pulling in elysia/drizzle/zod.
  *
  * Two rules the parsers exist to enforce:
  *
@@ -51,6 +51,17 @@ export interface Vantage {
    * something else; null = could not be determined. Never coalesce null to 1.
    */
   onHomeLine: 0 | 1 | null
+  /** Fastest *supported* media, from `ifconfig -m` — see parseSupportedMedia. */
+  linkMaxMbit: number | null
+  /** DHCP lease start on path_if, unix ms — see parseDhcpLeaseStart. */
+  dhcpBoundAt: number | null
+  /**
+   * Seconds of 1 Hz link sampling backing this cycle. Null here on purpose:
+   * this collector has no link sampler yet, and null reads as "link state
+   * unknown for this cycle" rather than "stable". The field is on the wire
+   * already so the server can store it the day the sampler lands.
+   */
+  linkWatchS: number | null
 }
 
 // ---------------------------------------------------------------------------
@@ -171,6 +182,87 @@ function duplexFromDescriptor(descriptor: string): LinkDuplex | null {
 }
 
 // ---------------------------------------------------------------------------
+// `ifconfig -m <if>` — supported media
+// ---------------------------------------------------------------------------
+
+/**
+ * Only lines that are part of a media list are considered, so a stray numeric
+ * token elsewhere in `ifconfig -m` output can never be read as a speed. Both
+ * spellings appear: the supported list prints `media 1000baseT mediaopt
+ * full-duplex`, the negotiated line prints `media: autoselect (1000baseT …)`.
+ */
+const MEDIA_ENTRY_LINE = /(?:^|\s)media[\s:]/
+
+/**
+ * The **ceiling** of the interface, from its supported-media list — not the
+ * speed it negotiated (that is `parseLinkState`). The two together are what
+ * make a 100 Mbit link actionable: a NIC that supports 1000 and negotiated 100
+ * is a cable or switch-port fault, while a NIC whose maximum *is* 100 is
+ * hardware, and the suggested fix is the opposite in each case.
+ *
+ * Measured on this host's en0: `10baseT/UTP`, `100baseTX`, `1000baseT`.
+ * The maximum recognised token wins; an unrecognised one contributes nothing
+ * rather than becoming a guess, and no recognised token at all — a failed
+ * command, Wi-Fi's bare `media: autoselect` — is `null`. A fabricated 1000
+ * would invent a cable fault out of a NIC that never had the capability.
+ */
+export function parseSupportedMedia(output: string): number | null {
+  let maxMbit: number | null = null
+
+  for (const line of output.split('\n')) {
+    if (!MEDIA_ENTRY_LINE.test(line)) continue
+    for (const candidate of line.split(MEDIA_DELIMITERS)) {
+      const mbit = mbitFromToken(MEDIA_TOKEN.exec(candidate))
+      if (mbit === null) continue
+      if (maxMbit === null || mbit > maxMbit) maxMbit = mbit
+    }
+  }
+
+  return maxMbit
+}
+
+// ---------------------------------------------------------------------------
+// `ipconfig getsummary <if>` — DHCP lease start
+// ---------------------------------------------------------------------------
+
+/**
+ * Local time, no zone marker — measured format `07/30/2026 15:48:29`. Appears
+ * exactly once in the summary.
+ */
+const DHCP_LEASE_START = /^\s*LeaseStartTime\s*:\s*(\d{2})\/(\d{2})\/(\d{4}) (\d{2}:\d{2}:\d{2})\s*$/m
+
+/**
+ * When the interface last took a DHCP lease, as unix ms. The host-side analogue
+ * of the router's `showtime_start_s`: an absolute instant the OS carries
+ * forward, so one sample dates the last re-bind retroactively instead of only
+ * from the moment the collector started watching.
+ *
+ * Asymmetric evidence, hence the field name. A *change* in this value proves
+ * the interface re-bound; an unchanged value proves nothing about link
+ * stability — measured on this host, two logged en0 link-downs left the lease
+ * untouched, so reading "same lease" as "the link held" would be an inference
+ * dressed as a measurement.
+ *
+ * Everything else `ipconfig getsummary` prints is deliberately ignored. The
+ * output embeds the raw DHCP packet — this host's MAC in `chaddr`, the DHCP
+ * server identifier — and this is a public repo, so only this one line is ever
+ * extracted, and the raw output is never logged, spooled or stored. The three
+ * `State :` lines (BOUND / InformComplete / Acquired) are not parsed either:
+ * which of them describes the interface is ambiguous, and no rule consumes it.
+ */
+export function parseDhcpLeaseStart(output: string): number | null {
+  const match = DHCP_LEASE_START.exec(output)
+  const [, month, day, year, time] = match ?? []
+  if (month === undefined || day === undefined || year === undefined || time === undefined) return null
+
+  // No trailing `Z`: a bare date-time is parsed as *local* time, which is what
+  // the OS printed and what handles DST correctly. Appending `Z` would shift
+  // every lease by the UTC offset and silently move re-binds across hours.
+  const ms = new Date(`${year}-${month}-${day}T${time}`).getTime()
+  return Number.isNaN(ms) ? null : ms
+}
+
+// ---------------------------------------------------------------------------
 // `netstat -I <if> -b` — cumulative error counters
 // ---------------------------------------------------------------------------
 
@@ -272,8 +364,11 @@ export function classifyHardwarePort(hardwarePort: string): PathClass {
 
   // Cellular first: the tell is the device, and these names would otherwise
   // fall through to `other`, which reads as "some LAN thing" rather than "not
-  // the home line at all". Measured on this host: `iPhone USB` (tethering) and
-  // `MR2100` (a Nighthawk hotspot).
+  // the home line at all". macOS names these ports after the product, not the
+  // category, so they have to be matched by family rather than by model: phone
+  // tethering appears as `iPhone USB`, and Netgear's mobile hotspots as an
+  // `MR`-prefixed model number. Matching the shape keeps a hardware swap from
+  // silently reclassifying a metered cellular egress as the home line.
   if (/iphone|ipad|modem|broadband|cellular|hotspot|tether|wwan|mifi|\bmr\d{3,4}\b/.test(port)) return 'cellular'
 
   if (/wi-?fi|airport|wireless/.test(port)) return 'wifi'
@@ -387,6 +482,9 @@ const NO_PATH: Vantage = {
   ifOerrs: null,
   ifColl: null,
   onHomeLine: null,
+  linkMaxMbit: null,
+  dhcpBoundAt: null,
+  linkWatchS: null,
 }
 
 /**
@@ -418,10 +516,15 @@ export async function captureVantage(options: CaptureVantageOptions): Promise<Va
     return { ...NO_PATH, gatewayAddr: route.gateway }
   }
 
-  const [ifconfigOut, netstatOut, serviceOrderOut] = await Promise.all([
-    run(['ifconfig', route.iface]),
+  // `ifconfig -m` prints the supported-media list *and* the negotiated `media:`
+  // line, so one call feeds both parsers. Measured at `real 0.00`, like
+  // `ipconfig getsummary`, and the whole bundle runs concurrently with the ~4 s
+  // ping phase — neither adds anything to the 30 s cycle.
+  const [ifconfigOut, netstatOut, serviceOrderOut, dhcpOut] = await Promise.all([
+    run(['ifconfig', '-m', route.iface]),
     run(['netstat', '-I', route.iface, '-b']),
     run(['networksetup', '-listnetworkserviceorder']),
+    run(['ipconfig', 'getsummary', route.iface]),
   ])
 
   const link = parseLinkState(ifconfigOut)
@@ -439,6 +542,12 @@ export async function captureVantage(options: CaptureVantageOptions): Promise<Va
     ifOerrs: counters.ifOerrs,
     ifColl: counters.ifColl,
     onHomeLine: deriveOnHomeLine({ pathClass, gatewayAddr: route.gateway, expectedGateway: options.expectedGateway }),
+    linkMaxMbit: parseSupportedMedia(ifconfigOut),
+    dhcpBoundAt: parseDhcpLeaseStart(dhcpOut),
+    // No link sampler in this collector yet. Null, not 0: 0 would claim a cycle
+    // that watched the link for zero seconds, which is a measurement; this is
+    // the absence of one.
+    linkWatchS: null,
   }
 }
 

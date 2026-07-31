@@ -80,8 +80,91 @@ export const probeCycle = sqliteTable(
     // Read paths that present data as "the home line" must treat null as
     // unknown and 0 as not-the-home-line. Never coalesce null to 1.
     onHomeLine: integer('on_home_line'),
+    // Fastest speed in the interface's *supported* media list (`ifconfig -m`),
+    // not the negotiated one in link_mbit. This is the column that separates
+    // "the NIC can only do 100" from "the NIC can do 1000 and negotiated 100" —
+    // the difference between buying an adapter and swapping a cable. Null when
+    // the command failed or no token parsed; a default of 1000 would fabricate
+    // a cable fault out of nothing.
+    linkMaxMbit: integer('link_max_mbit'),
+    // Unix ms of the DHCP lease start on path_if (`ipconfig getsummary`'s
+    // LeaseStartTime). An absolute instant the OS carries forward, so a single
+    // sample dates the last re-bind retroactively — the host-side analogue of
+    // router_line_sample.showtime_start_s. Named for what it is: a *change*
+    // proves a re-bind, an unchanged value proves nothing about link stability
+    // (measured — two link-downs on this host left the lease untouched).
+    dhcpBoundAt: integer('dhcp_bound_at'),
+    // Seconds of 1 Hz link sampling that backed this cycle (0…probeCycleSeconds).
+    // Null = the collector that wrote this row had no link sampler, which reads
+    // as "link state unknown for this cycle", never as "stable" — coverage is
+    // SUM(link_watch_s) / windowSeconds, and null everywhere must refuse the
+    // attribution rather than assume it.
+    linkWatchS: integer('link_watch_s'),
   },
   (t) => [uniqueIndex('probe_cycle_ts').on(t.ts)],
+)
+
+/**
+ * The state of the Wi-Fi radio, sampled every 10th probe cycle (5 min) rather
+ * than every cycle: `system_profiler SPAirPortDataType` costs 4.8 s median on
+ * this host (six runs, 4.63–4.95 s), which is 2.4× the vantage capture's 2 s
+ * per-command budget.
+ *
+ * It exists so **an alternate radio path currently attached** is measured
+ * rather than inferred. Not "the standby path" and not "the failover path":
+ * `networksetup -listnetworkserviceorder` on this host ranks Ethernet en0
+ * first, then a **mobile hotspot**, and only then Wi-Fi. Neither
+ * cellular device is attached today, so Wi-Fi is what an actual failover would
+ * reach right now — but the configured next hop above it is metered cellular,
+ * and calling this table "the failover path" would bake that error into the
+ * schema.
+ *
+ * Everything except id/ts is nullable, for a reason stronger than the usual
+ * independent-deploy one: this OS surface has already churned once (`airport`
+ * removed, `wdutil` now sudo-only), so the parser degrades to all-nulls instead
+ * of throwing, and a row of nulls says "we looked at the radio and learned
+ * nothing". `ts` is UNIQUE so a spool replay is idempotent, like probe_cycle.
+ *
+ * **Columns deliberately absent, and which must stay absent:** the network
+ * name, either hardware address, `security`, `country_code`, any
+ * neighbour-network row, and any derived `snr` (compute `rssi − noise` on read,
+ * only when both are non-null). This repo is public. The network name currently
+ * prints as `<redacted>` only because Location Services is off — a side effect
+ * that can reverse — so the guard is omitting the column, not trusting the
+ * redaction. `ifconfig -v en1`'s `uplink rate`/`downlink rate` kernel estimates
+ * are omitted too: they disagree with the PHY rate by ~4× (53.95 vs 229 Mbit)
+ * and no rule consumes them, so storing them would only invite a fabricated
+ * single "wifi speed".
+ */
+export const wifiSample = sqliteTable(
+  'wifi_sample',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    ts: integer('ts').notNull(),
+    iface: text('iface'),
+    // As printed: `Connected`, `Not Connected`, … Kept verbatim rather than
+    // mapped to a boolean, because a status this collector has never seen is
+    // recoverable from the record afterwards and a boolean would have to guess.
+    status: text('status'),
+    phyMode: text('phy_mode'),
+    channel: integer('channel'),
+    band: text('band'),
+    widthMhz: integer('width_mhz'),
+    rssiDbm: integer('rssi_dbm'),
+    noiseDbm: integer('noise_dbm'),
+    // The negotiated PHY/MCS rate, **not** throughput. Nothing may present it
+    // as a speed the alternate path would deliver: measured RTT bound to Wi-Fi
+    // was 9.99 ms against 5.24 ms on Ethernet, so there is no measurement here
+    // supporting a "faster" claim.
+    txRateMbps: real('tx_rate_mbps'),
+    mcsIndex: integer('mcs_index'),
+    // From a ping bound to `iface` in the same sample — the only end-to-end
+    // number here. Null when the run produced no timed replies, which is what
+    // 100 % loss looks like and is a valid measurement, not an error.
+    rttMedMs: real('rtt_med_ms'),
+    lossPct: real('loss_pct'),
+  },
+  (t) => [uniqueIndex('wifi_sample_ts').on(t.ts), index('wifi_ts').on(t.ts)],
 )
 
 /**
@@ -245,9 +328,15 @@ export const routerEthPort = sqliteTable(
  * Who was connected, per poll. Context for an outage's blast radius and for
  * correlating a throughput dip with a device that appeared.
  *
- * No MAC column here either, for the reason given on router_eth_port — and the
- * hostnames are already personal enough that this table should never be pasted
- * anywhere the rest of the data goes.
+ * No MAC column here either, for the reason given on router_eth_port — and a
+ * device-name column (`host_name`) was deliberately removed in 0005 rather than
+ * redacted: 20 of the 102 rows this line had stored held a vendor-default name
+ * of the form three-letter prefix + 12 hex digits, which is a MAC address with
+ * its separators stripped. That defeats a value-level MAC regex and any
+ * key-based denylist that has not been taught the exact key, so the column was
+ * the MAC column in all but name. Do not add a name, nickname or description
+ * field back; the IP already keys the collector host, and clientType already
+ * gives blast radius its categories.
  */
 export const routerHost = sqliteTable(
   'router_host',
@@ -258,7 +347,6 @@ export const routerHost = sqliteTable(
     interfaceType: text('interface_type'),
     active: integer('active'),
     clientType: text('client_type'),
-    hostName: text('host_name'),
   },
   (t) => [index('router_host_ts').on(t.ts)],
 )

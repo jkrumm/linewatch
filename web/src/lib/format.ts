@@ -16,9 +16,11 @@ export function fmtPct(value: number | null, digits = 1): string {
   return `${value.toFixed(digits)}%`
 }
 
-/** Minutes headline for the Uptime view — DESIGN.md deliberately headlines minutes, not a
- * percentage, so this is a first-class formatter rather than a one-off. */
-export function fmtDowntimeMinutes(totalSeconds: number): string {
+/** Coarse minutes headline — the Uptime view's downtime total (DESIGN.md deliberately headlines
+ * minutes, not a percentage) and the Now banner's "no data for N min". Rounds to whole minutes and
+ * rolls into hours, because both numbers are read at a glance and neither is a duration anyone
+ * measures to the second. */
+export function fmtMinutes(totalSeconds: number): string {
   const minutes = Math.round(totalSeconds / 60)
   if (minutes < 60) return `${minutes} min`
   const hours = Math.floor(minutes / 60)

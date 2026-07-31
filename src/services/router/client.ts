@@ -7,15 +7,32 @@ import { redactRow, type RouterRow } from './redact.js'
  * Deep module on purpose: callers get `read(oid, operation)` returning already
  * redacted rows, and every unpleasant property of this device stays in here —
  * the RSA/AES envelope, the TokenID minted out of the logged-in HTML shell, the
- * flaky `getGDPRParm`, the 406s, and the single-admin-session politeness rules.
+ * flaky `getGDPRParm`, the 406s, and the single admin session every login
+ * force-evicts.
  *
  * Two protocol facts this client refuses to let a caller get wrong:
  *
- * 1. **The session is held.** The router allows one admin session and a login
- *    force-evicts whoever holds it — including a human in the router UI. So a
- *    login happens on first use and then only after an eviction, and even then
- *    not before `reloginBackoffMs` has passed. Being polite here is a
- *    requirement, not a nicety.
+ * 1. **One poll, one fresh login.** The router allows a single admin session and
+ *    drops this one whenever it feels like it (a login from the router UI, an
+ *    idle timeout, a socket it simply closes). Holding the session across polls
+ *    was measured to cost most of the record: the client used to answer an
+ *    eviction with a 15-minute re-login backoff, so every drop silently killed
+ *    the next three polls and only 20 of 55 due polls over 4.5 hours were
+ *    stored — 36% coverage, with gaps alternating 300 s and 1500 s.
+ *
+ *    So the session is no longer repaired, it is re-established: `startSession()`
+ *    at the top of every poll, reads over that session, and the session simply
+ *    goes stale until the next poll. At the 10-minute cadence that is 72
+ *    logins/day against ~144 for keeping a session alive with a short repair
+ *    backoff, it removes the backoff failure mode rather than tuning it, and it
+ *    loses nothing measurable — `down_sync_kbps` had zero variance across all 20
+ *    stored samples, so 10-minute resolution is well inside what this line's
+ *    measured behaviour supports.
+ *
+ *    A login still force-evicts whoever holds the slot, including a human in the
+ *    router UI, so `read()` deliberately does *not* log in on its own: one poll
+ *    must never turn into eight logins.
+ *
  * 2. **`go` on a LIST object silently returns only the first instance.** It does
  *    not reliably answer errorcode 9003. Measured: `DEV2_HOST_ENTRY` under `go`
  *    returned exactly one host and looked completely healthy; under `gl` it
@@ -33,24 +50,16 @@ export interface RouterClientOptions {
   /** Not "admin": both the login payload and the MD5 hash use "user" on this firmware. */
   user: string
   password: string
-  /**
-   * How long to wait after an eviction before reclaiming the single admin
-   * session. A login kicks a human out of the router UI, so the poller yields
-   * for a while rather than fighting for it.
-   */
-  reloginBackoffMs: number
   requestTimeoutMs: number
 }
 
 export interface RouterClientStatus {
   loggedIn: boolean
-  /** Number of logins performed in this process — the evidence that the session is held. */
+  /** Logins performed in this process. One per poll: more than that is a bug. */
   logins: number
   /** Reads served since the current session was established. */
   readsThisSession: number
   sessionSince: number | null
-  /** Epoch ms before which no login will be attempted. */
-  nextLoginAllowedAt: number
 }
 
 const UA =
@@ -119,14 +128,6 @@ export class RouterUnreachableError extends Error {
   }
 }
 
-/** Login is deliberately deferred — the eviction backoff has not elapsed. */
-export class RouterBackingOffError extends Error {
-  constructor(readonly retryAt: number) {
-    super(`router login backing off for another ${Math.round((retryAt - Date.now()) / 1000)}s`)
-    this.name = 'RouterBackingOffError'
-  }
-}
-
 const md5 = (value: string) => createHash('md5').update(value, 'utf8').digest('hex')
 const b64 = (value: string) => Buffer.from(value, 'utf8').toString('base64')
 
@@ -145,7 +146,6 @@ function modPow(base: bigint, exponent: bigint, modulus: bigint): bigint {
 export class RouterClient {
   private session: Session | null = null
   private logins = 0
-  private nextLoginAllowedAt = 0
   /** Serialises everything: one held session cannot answer concurrent requests. */
   private tail: Promise<unknown> = Promise.resolve()
 
@@ -157,8 +157,36 @@ export class RouterClient {
       logins: this.logins,
       readsThisSession: this.session?.reads ?? 0,
       sessionSince: this.session?.since ?? null,
-      nextLoginAllowedAt: this.nextLoginAllowedAt,
     }
+  }
+
+  /**
+   * Logs in, discarding whatever session was held before. Every poll starts
+   * here — see fact 1 in the module doc for why the session is re-established
+   * rather than repaired.
+   *
+   * Throws rather than degrading: a caller that could not log in has no reading
+   * to record, and the honest record of that poll is its absence.
+   */
+  startSession(): Promise<void> {
+    return this.serialise(async () => {
+      this.session = null
+      let session: Session
+      try {
+        session = await this.login()
+      } catch (error) {
+        // A login that could not reach the device must surface as "unreachable",
+        // not as a generic failure: the caller distinguishes the two, and
+        // treating an unreachable router as a per-read problem lets a poll
+        // finish "successfully" having recorded nothing.
+        if (!(await this.isReachable())) {
+          throw new RouterUnreachableError(error instanceof Error ? error.message : String(error))
+        }
+        throw error
+      }
+      this.session = session
+      this.logins += 1
+    })
   }
 
   /**
@@ -169,7 +197,14 @@ export class RouterClient {
    */
   read(oid: string, operation: RouterOperation): Promise<RouterRow[]> {
     return this.serialise(async () => {
-      const session = await this.ensureSession()
+      const session = this.session
+      // Never logs in on its own. The session is either the one `startSession()`
+      // established for this poll, or it was dropped mid-poll — and a lazy login
+      // here would answer that by evicting the router's single admin slot once
+      // per remaining read.
+      if (session === null) {
+        throw new RouterSessionLostError(`no session held when reading ${oid}`)
+      }
       try {
         return await this.readWith(session, oid, operation)
       } catch (error) {
@@ -184,17 +219,13 @@ export class RouterClient {
   }
 
   /**
-   * Drops the held session and starts the politeness backoff. Called on
-   * eviction, and available to a caller that has independent evidence the
-   * session is gone.
+   * Drops the held session. The rest of this poll fails — every read needs a
+   * session and none is reclaimed mid-poll — and the next poll logs in fresh.
    */
   invalidate(reason: string): void {
     if (this.session === null) return
     this.session = null
-    this.nextLoginAllowedAt = Date.now() + this.options.reloginBackoffMs
-    console.warn(
-      `[router] session dropped (${reason}); not reclaiming it before ${new Date(this.nextLoginAllowedAt).toISOString()}`,
-    )
+    console.warn(`[router] session dropped (${reason}); the next poll logs in again`)
   }
 
   private serialise<T>(fn: () => Promise<T>): Promise<T> {
@@ -203,25 +234,6 @@ export class RouterClient {
     // unhandled rejection of its own.
     this.tail = run.catch(() => undefined)
     return run
-  }
-
-  private async ensureSession(): Promise<Session> {
-    if (this.session !== null) return this.session
-    if (Date.now() < this.nextLoginAllowedAt) throw new RouterBackingOffError(this.nextLoginAllowedAt)
-    try {
-      this.session = await this.login()
-    } catch (error) {
-      // A login that could not reach the device must surface as "unreachable",
-      // not as a generic failure: the caller distinguishes the two, and treating
-      // an unreachable router as a per-read problem lets a poll finish
-      // "successfully" having recorded nothing.
-      if (!(await this.isReachable())) {
-        throw new RouterUnreachableError(error instanceof Error ? error.message : String(error))
-      }
-      throw error
-    }
-    this.logins += 1
-    return this.session
   }
 
   private headers(session: Session | null, accept: string): Record<string, string> {

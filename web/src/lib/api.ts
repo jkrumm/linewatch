@@ -2,19 +2,25 @@ import {
   generateEvents,
   generateOutages,
   generateProbeBuckets,
+  generateRouterSnapshot,
   generateSpeedSummary,
   generateSpeedTests,
   generateStatus,
+  generateVerdicts,
 } from './mock/generate'
 import type {
-  LinewatchEvent,
+  EventsResponse,
   Outage,
   ProbeBucket,
   ProbeBucketSeconds,
+  RangeSummary,
+  RouterSnapshot,
   SpeedSummary,
   SpeedTest,
   StatusResponse,
   TargetName,
+  VantageBucket,
+  Verdict,
 } from './types'
 
 /**
@@ -41,13 +47,17 @@ export async function getStatus(): Promise<StatusResponse> {
 }
 
 /** `GET /api/probes?from&to&target&bucket` — server-bucketed timeseries. `bucket` is an integer
- * number of SECONDS. Response envelope is `{ buckets: [...] }`. */
+ * number of SECONDS. Response envelope is `{ buckets, vantage }` and BOTH halves are returned:
+ * `vantage[]` is the parallel per-bucket record of what those cycles measured *through*, and
+ * destructuring it away leaves the caller unable to tell a bucket measured over the home line from
+ * one measured over a phone tether. `target` filters `buckets` only — the vantage belongs to the
+ * cycle, so its series is the same whichever target is charted. */
 export async function getProbeBuckets(params: {
   from: number
   to: number
   target: TargetName
   bucket: ProbeBucketSeconds
-}): Promise<ProbeBucket[]> {
+}): Promise<{ buckets: ProbeBucket[]; vantage: VantageBucket[] }> {
   if (USE_MOCK) return generateProbeBuckets(params.target, params.from, params.to, params.bucket)
   const qs = new URLSearchParams({
     from: String(params.from),
@@ -55,21 +65,40 @@ export async function getProbeBuckets(params: {
     target: params.target,
     bucket: String(params.bucket),
   })
-  const { buckets } = await fetchJson<{ buckets: ProbeBucket[] }>(`/probes?${qs.toString()}`)
-  return buckets
+  return fetchJson<{ buckets: ProbeBucket[]; vantage: VantageBucket[] }>(`/probes?${qs.toString()}`)
 }
 
-/** `GET /api/outages?from&to&minDuration`. Response envelope is `{ outages: [...] }`. */
+/** `GET /api/outages?from&to&minDuration`. Response envelope is `{ outages, summary }` and both
+ * are returned: `summary` is the coverage/degradation/vantage envelope without which the outage
+ * list reads as a complete account of the window (see `RangeSummary`). It is null only when the
+ * server had no window to compute it over — never treat that as full coverage. */
 export async function getOutages(params: {
   from: number
   to: number
   minDuration?: number
-}): Promise<Outage[]> {
+}): Promise<{ outages: Outage[]; summary: RangeSummary | null }> {
   if (USE_MOCK) return generateOutages(params.from, params.to, params.minDuration)
   const qs = new URLSearchParams({ from: String(params.from), to: String(params.to) })
   if (params.minDuration !== undefined) qs.set('minDuration', String(params.minDuration))
-  const { outages } = await fetchJson<{ outages: Outage[] }>(`/outages?${qs.toString()}`)
-  return outages
+  return fetchJson<{ outages: Outage[]; summary: RangeSummary | null }>(`/outages?${qs.toString()}`)
+}
+
+/** `GET /api/router` — the latest carrier-side reading, each part with its own staleness envelope.
+ * No query params and no envelope: the object is the response body. Returned whole, envelopes
+ * intact, so a caller cannot mistake a two-hour-old sync rate for a current one. */
+export async function getRouter(): Promise<RouterSnapshot> {
+  if (USE_MOCK) return generateRouterSnapshot()
+  return fetchJson<RouterSnapshot>('/router')
+}
+
+/** `GET /api/verdicts?from&to` — the rule engine's conclusions over the window, with their
+ * evidence. Both bounds are required: a coverage-bearing verdict is meaningless without a window.
+ * Response envelope is `{ verdicts: [...] }`. */
+export async function getVerdicts(params: { from: number; to: number }): Promise<Verdict[]> {
+  if (USE_MOCK) return generateVerdicts(params.from, params.to)
+  const qs = new URLSearchParams({ from: String(params.from), to: String(params.to) })
+  const { verdicts } = await fetchJson<{ verdicts: Verdict[] }>(`/verdicts?${qs.toString()}`)
+  return verdicts
 }
 
 /** `GET /api/speedtests?from&to`. Response envelope is `{ speedTests: [...] }`. */
@@ -88,11 +117,17 @@ export async function getSpeedSummary(days: number): Promise<SpeedSummary> {
   return fetchJson<SpeedSummary>(`/speedtests/summary?days=${days}`)
 }
 
-/** `GET /api/events?from&to` — timeline overlay; nothing writes an event in v1 (see DESIGN.md).
- * Response envelope is `{ events: [...] }`. */
-export async function getEvents(params: { from: number; to: number }): Promise<LinewatchEvent[]> {
-  if (USE_MOCK) return generateEvents()
+/** `GET /api/events?from&to` — the timeline overlay. `link_change` IS materialised (by the probe
+ * ingest when the host-side vantage changes, by the router poller from the carrier side, and by
+ * the collector's link sampler) and `intervention` by `POST /api/interventions`; only
+ * `config_change` and `note` are still unwritten.
+ *
+ * Returned whole, `linkSamplingSince` included, for the same reason `getOutages` keeps its
+ * `summary`: an empty `events` array is the timeline's most dangerous response, because it reads
+ * as "the link held" when it usually means nothing was watching. Destructuring the array out
+ * leaves the caller unable to tell those apart. */
+export async function getEvents(params: { from: number; to: number }): Promise<EventsResponse> {
+  if (USE_MOCK) return generateEvents(params.from, params.to)
   const qs = new URLSearchParams({ from: String(params.from), to: String(params.to) })
-  const { events } = await fetchJson<{ events: LinewatchEvent[] }>(`/events?${qs.toString()}`)
-  return events
+  return fetchJson<EventsResponse>(`/events?${qs.toString()}`)
 }

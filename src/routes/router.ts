@@ -77,6 +77,14 @@ const EthPortSchema = z.object({
   duplexMode: z.string().nullable(),
 })
 
+/**
+ * The router's side of the collector host. No device name: `router_host` stores
+ * none, because this router's vendor-default names are MACs with the separators
+ * stripped. Nothing is lost here — the row is looked up by `collectorHostIp`, so
+ * the name was never what identified it, and what the route is actually asked is
+ * whether the router still sees this address attached, over which medium, and
+ * how old that reading is.
+ */
 const HostSchema = z.object({
   id: z.number().int(),
   ts: z.number().int(),
@@ -84,7 +92,6 @@ const HostSchema = z.object({
   interfaceType: z.string().nullable(),
   active: z.number().int().nullable(),
   clientType: z.string().nullable(),
-  hostName: z.string().nullable(),
 })
 
 const LineBucketSchema = z.object({
@@ -204,7 +211,7 @@ export const routerRoutes = new Elysia()
         tags: ['Router'],
         summary: 'Latest router reading',
         description:
-          'Most recent carrier-side line sample, WAN/LAN throughput, the router-side view of the collector host, and every LAN port from the latest poll. Each part comes from its own latest row and carries its own `observedAt`/`ageMs`/`stale`: a poll where one OID was refused writes some tables and not others, and during a WAN outage no `role: wan` row is written at all while the LAN bridge keeps updating. `stale: true` means the value is older than `staleAfterMs` (two poll intervals) and describes the past, not now — it is never silently substituted for a current reading. Disagreements between this and the host-side `probe_cycle` vantage are materialised into `GET /api/events` as `link_change` at poll time, not recomputed here.',
+          'Most recent carrier-side line sample, WAN/LAN throughput, the router-side view of the collector host — presence, medium and activity for `collectorHostIp`, with no device name, which this repo does not store — and every LAN port from the latest poll. Each part comes from its own latest row and carries its own `observedAt`/`ageMs`/`stale`: a poll where one OID was refused writes some tables and not others, and during a WAN outage no `role: wan` row is written at all while the LAN bridge keeps updating. `stale: true` means the value is older than `staleAfterMs` (two poll intervals) and describes the past, not now — it is never silently substituted for a current reading. Disagreements between this and the host-side `probe_cycle` vantage are materialised into `GET /api/events` as `link_change` at poll time, not recomputed here.',
       },
     },
   )
@@ -230,7 +237,7 @@ export const routerRoutes = new Elysia()
         tags: ['Router'],
         summary: 'Carrier line history',
         description:
-          'Sync rates, noise margin (real dB — the router reports tenths and the poller converts at the write site), attenuation, profile and line resyncs, bucketed in SQL by `floor(ts / (bucket*1000))`. Never raw rows: `router_line_sample` grows by ~105k rows a year. Defaults to the last 24 hours at hourly buckets. Sync rate and noise margin keep a `min` beside the average because the average is what hides a five-minute drop. A range needing more than 20000 buckets is refused with a 400 rather than truncated.',
+          'Sync rates, noise margin (real dB — the router reports tenths and the poller converts at the write site), attenuation, profile and line resyncs, bucketed in SQL by `floor(ts / (bucket*1000))`. Never raw rows: `router_line_sample` grows by ~53k rows a year. Defaults to the last 24 hours at hourly buckets. Sync rate and noise margin keep a `min` beside the average because the average is what hides a single poll\'s drop. A range needing more than 20000 buckets is refused with a 400 rather than truncated.',
       },
     },
   )

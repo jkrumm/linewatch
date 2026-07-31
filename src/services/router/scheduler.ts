@@ -1,11 +1,6 @@
 import { Cron } from 'croner'
 import { db } from '../../db/client.js'
-import {
-  RouterBackingOffError,
-  RouterClient,
-  RouterSessionLostError,
-  RouterUnreachableError,
-} from './client.js'
+import { RouterClient, RouterSessionLostError, RouterUnreachableError } from './client.js'
 import { routerConfig } from './config.js'
 import { RouterPoller } from './poll.js'
 
@@ -47,11 +42,10 @@ async function pollGuarded(): Promise<void> {
     )
     for (const warning of summary.warnings) console.warn(`[router] ${warning}`)
   } catch (error) {
-    if (error instanceof RouterBackingOffError) {
-      console.log(`[router] ${error.message}`)
-    } else if (error instanceof RouterSessionLostError || error instanceof RouterUnreachableError) {
+    if (error instanceof RouterSessionLostError || error instanceof RouterUnreachableError) {
       // Both are ordinary operating conditions for a consumer router, not
-      // faults of this service: log and let the next poll try again.
+      // faults of this service: log, store nothing for this cycle, and let the
+      // next poll log in again. The missing sample is the honest record.
       console.warn(`[router] poll abandoned: ${error.message}`)
     } else {
       console.error(`[router] poll failed: ${error instanceof Error ? error.message : String(error)}`)
@@ -62,7 +56,8 @@ async function pollGuarded(): Promise<void> {
 }
 
 /**
- * Starts the five-minute router poll, or returns null when no router password is
+ * Starts the router poll on the configured cadence (`LINEWATCH_ROUTER_CRON`,
+ * every 10 minutes by default), or returns null when no router password is
  * configured — an unconfigured poller logs why and the rest of the service runs
  * exactly as before.
  */
@@ -77,7 +72,6 @@ export function startRouterPoller(): Cron | null {
     baseUrl: routerConfig.baseUrl,
     user: routerConfig.user,
     password: routerConfig.password,
-    reloginBackoffMs: routerConfig.reloginBackoffMs,
     requestTimeoutMs: routerConfig.requestTimeoutMs,
   })
   poller = new RouterPoller({

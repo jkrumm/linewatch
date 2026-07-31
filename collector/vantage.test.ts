@@ -8,9 +8,11 @@ import {
   classifyPath,
   deriveOnHomeLine,
   parseDefaultRoute,
+  parseDhcpLeaseStart,
   parseIfCounters,
   parseLinkState,
   parseServiceOrder,
+  parseSupportedMedia,
   type Vantage,
 } from './vantage.js'
 
@@ -110,17 +112,57 @@ utun0      1500  <Link#22>                            0     0          0        
 utun0      1500  myhost.loca fe80:16::1808:370        0     -          0        1     -         80     -
 `
 
-// `networksetup -listnetworkserviceorder`, verbatim. Two cellular devices, and
-// they are not adjacent in the numbering: `en10` is iPhone tethering and `en11`
-// a Nighthawk hotspot, while `en1` (between them) is Wi-Fi. Any hardcoded
-// interface-name map would be one reboot away from calling one of them
-// something harmless.
+// `ifconfig -m en0`: the negotiated `media:` line first, then the *supported*
+// media list. Trimmed to one entry per speed (the real list repeats each speed
+// once per mediaopt combination) and with the same scrubbed MAC as above. The
+// three speeds are the ones this host's NIC really lists.
+const IFCONFIG_M_EN0 = `${IFCONFIG_EN0_FAST_ETHERNET}	supported media:
+		media none
+		media autoselect
+		media 10baseT/UTP mediaopt half-duplex
+		media 10baseT/UTP mediaopt full-duplex
+		media 100baseTX mediaopt half-duplex
+		media 100baseTX mediaopt full-duplex
+		media 1000baseT mediaopt full-duplex
+		media 1000baseT mediaopt full-duplex mediaopt flow-control
+`
+
+// `ipconfig getsummary en0`, **hand-synthesised**, not captured. The real output
+// embeds the raw DHCP packet — this host's MAC in `chaddr`, the DHCP server
+// identifier — and this repo is public, so the capture is never committed. What
+// is reproduced is the shape the parser has to survive: the `LeaseStartTime`
+// line in local time with no zone marker, and the three `State :` lines that
+// make DHCP state ambiguous and are therefore not parsed at all.
+const IPCONFIG_GETSUMMARY = `en0
+  Active : TRUE
+  LinkStatusActive : TRUE
+  IPv4 :
+    Addresses : 192.168.1.100
+    Router : 192.168.1.1
+  DHCPv4 :
+    State : BOUND
+    LeaseStartTime : 07/30/2026 15:48:29
+    LeaseExpirationTime : 07/31/2026 03:48:29
+  DHCPv6 :
+    State : InformComplete
+  IPv6 :
+    State : Acquired
+`
+
+// `networksetup -listnetworkserviceorder`. Two cellular devices, and they are
+// not adjacent in the numbering: `en10` is phone tethering and `en11` a mobile
+// hotspot, while `en1` (between them) is Wi-Fi. Any hardcoded interface-name map
+// would be one reboot away from calling one of them something harmless.
+//
+// The hotspot's model number is replaced with the synthetic `MR9999`: it still
+// exercises the `\bmr\d{3,4}\b` family match that classifies it as cellular,
+// without the fixture doubling as an inventory of what is actually on this line.
 const SERVICE_ORDER = `An asterisk (*) denotes that a network service is disabled.
 (1) Ethernet
 (Hardware Port: Ethernet, Device: en0)
 
-(2) MR2100
-(Hardware Port: MR2100, Device: en11)
+(2) MR9999
+(Hardware Port: MR9999, Device: en11)
 
 (3) Wi-Fi
 (Hardware Port: Wi-Fi, Device: en1)
@@ -240,6 +282,171 @@ describe('parseLinkState', () => {
   })
 })
 
+describe('parseSupportedMedia', () => {
+  test('reports the ceiling of the NIC, not the speed it negotiated', () => {
+    // The pair that makes a 100 Mbit link actionable: this fixture negotiated
+    // 100baseTX on a NIC that supports 1000, i.e. a cable or switch-port fault
+    // rather than hardware. Reading only the negotiated speed cannot tell the
+    // two apart, and they call for opposite fixes.
+    expect(parseSupportedMedia(IFCONFIG_M_EN0)).toBe(1000)
+    expect(parseLinkState(IFCONFIG_M_EN0).linkMbit).toBe(100)
+  })
+
+  test('takes the maximum, not the first or last entry', () => {
+    // The list is not sorted by speed on every driver, and `media none` /
+    // `media autoselect` bracket it at both ends.
+    expect(parseSupportedMedia('\t\tmedia 1000baseT\n\t\tmedia 100baseTX\n\t\tmedia none\n')).toBe(1000)
+    expect(parseSupportedMedia('\t\tmedia 10baseT/UTP\n\t\tmedia 2500Base-T\n\t\tmedia 100baseTX\n')).toBe(2500)
+  })
+
+  test('is null when nothing in the output is a media line', () => {
+    // A failed `ifconfig -m` (interface gone with the link) claims nothing.
+    expect(parseSupportedMedia('ifconfig: interface en0 does not exist\n')).toBeNull()
+    expect(parseSupportedMedia('')).toBeNull()
+  })
+
+  test('is null — never a fallback — when the only token is unrecognised', () => {
+    // The invariant the whole column exists for. A default of 1000 here would
+    // invent a cable fault out of a NIC whose capability was never measured,
+    // and the verdict layer would then tell the user to swap a working cable.
+    // No `base` in the token, so MEDIA_TOKEN does not recognise it — the same
+    // whole-token rule that keeps `full-duplex` from being read as a speed.
+    expect(parseSupportedMedia('\t\tmedia 10GbE\n')).toBeNull()
+    expect(parseSupportedMedia('\t\tmedia fddi mediaopt full-duplex\n')).toBeNull()
+    expect(parseSupportedMedia('\t\tmedia none\n\t\tmedia autoselect\n')).toBeNull()
+    // Wi-Fi lists no speed token at all.
+    expect(parseSupportedMedia(IFCONFIG_EN1_WIFI)).toBeNull()
+  })
+})
+
+describe('parseDhcpLeaseStart', () => {
+  /**
+   * `LeaseStartTime` carries no zone, so the parse is only defined against one.
+   *
+   * Restores by *name*, never by deleting `TZ`: measured on Bun 1.3.14, a
+   * `delete process.env.TZ` leaves the runtime pinned to whatever was set last
+   * and makes the next assignment a no-op — which quietly ran a UTC assertion in
+   * the previous zone and passed it for the wrong reason.
+   */
+  function inTimeZone<T>(tz: string, fn: () => T): T {
+    const previous = process.env['TZ'] ?? Intl.DateTimeFormat().resolvedOptions().timeZone
+    process.env['TZ'] = tz
+    try {
+      return fn()
+    } finally {
+      process.env['TZ'] = previous
+    }
+  }
+
+  /**
+   * The UTC instant a wall-clock reading names in `tz` — the expected value, derived rather than
+   * hardcoded.
+   *
+   * Two reasons it is computed instead of pinned as an epoch literal. It keeps the assertion an
+   * independent *oracle*: this goes through `Intl.DateTimeFormat`, whereas the parser under test
+   * goes through `new Date('YYYY-MM-DDTHH:mm:ss')`, so agreement means two different mechanisms
+   * agree rather than one restating itself. And it means no single zone is baked into the suite —
+   * a hardcoded epoch is only correct for the one zone it was computed in, so it silently
+   * documents where the machine that wrote it stood.
+   *
+   * Offset is resolved twice because the first lookup samples it at the wrong instant; the second
+   * pass settles any reading that is not itself inside a DST transition.
+   */
+  function wallClockToUtc(tz: string, y: number, mo: number, d: number, h: number, mi: number, s: number): number {
+    const naive = Date.UTC(y, mo - 1, d, h, mi, s)
+    const offsetAt = (guess: number): number => {
+      const parts = Object.fromEntries(
+        new Intl.DateTimeFormat('en-US', {
+          timeZone: tz,
+          hour12: false,
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        })
+          .formatToParts(new Date(guess))
+          .map((part) => [part.type, part.value]),
+      )
+      // `hour` can format as 24 under hour12:false; `% 24` keeps midnight on the right day.
+      const asUtc = Date.UTC(
+        Number(parts['year']),
+        Number(parts['month']) - 1,
+        Number(parts['day']),
+        Number(parts['hour']) % 24,
+        Number(parts['minute']),
+        Number(parts['second']),
+      )
+      return asUtc - guess
+    }
+    return naive - offsetAt(naive - offsetAt(naive))
+  }
+
+  test('reads the lease start as an absolute instant, in whatever zone the host runs in', () => {
+    // `Etc/GMT-5` is UTC+5 — the POSIX sign is inverted — and observes no DST, so it isolates the
+    // plain local-time interpretation from the DST question below.
+    for (const tz of ['UTC', 'Etc/GMT-5', 'Australia/Sydney']) {
+      expect(inTimeZone(tz, () => parseDhcpLeaseStart(IPCONFIG_GETSUMMARY))).toBe(
+        wallClockToUtc(tz, 2026, 7, 30, 15, 48, 29),
+      )
+    }
+  })
+
+  test('parses the reading as local, never as UTC', () => {
+    // The regression this exists for: appending a `Z` and parsing as UTC. In a zone five hours off
+    // that lands the re-bind five hours late — across hour boundaries, and potentially *after* the
+    // link-down it is supposed to explain. Asserted as an inequality so it cannot be satisfied by
+    // the implementation being copied into the oracle.
+    const asIfUtc = Date.UTC(2026, 6, 30, 15, 48, 29)
+    expect(inTimeZone('Etc/GMT-5', () => parseDhcpLeaseStart(IPCONFIG_GETSUMMARY))).not.toBe(asIfUtc)
+    expect(inTimeZone('UTC', () => parseDhcpLeaseStart(IPCONFIG_GETSUMMARY))).toBe(asIfUtc)
+  })
+
+  test('follows the host time zone, and gets DST right', () => {
+    // Same wall-clock string, two seasons, in a SOUTHERN-hemisphere zone: Sydney is UTC+10 in July
+    // and UTC+11 in January, so the offset moves the opposite way to the northern intuition. A
+    // fixed offset is wrong half the year, and a hardcoded "summer means +1" is wrong here in both.
+    const summer = '  LeaseStartTime : 07/30/2026 15:48:29\n'
+    const winter = '  LeaseStartTime : 01/30/2026 15:48:29\n'
+    expect(inTimeZone('Australia/Sydney', () => parseDhcpLeaseStart(summer))).toBe(
+      wallClockToUtc('Australia/Sydney', 2026, 7, 30, 15, 48, 29),
+    )
+    expect(inTimeZone('Australia/Sydney', () => parseDhcpLeaseStart(winter))).toBe(
+      wallClockToUtc('Australia/Sydney', 2026, 1, 30, 15, 48, 29),
+    )
+    // And the two really do differ by an hour of offset, or the assertions above would both hold
+    // under a parser that ignored DST entirely.
+    const offsetOf = (month: number) => wallClockToUtc('Australia/Sydney', 2026, month, 30, 15, 48, 29) - Date.UTC(2026, month - 1, 30, 15, 48, 29)
+    expect(offsetOf(1) - offsetOf(7)).toBe(-3_600_000)
+  })
+
+  test('is null when the summary carries no lease start', () => {
+    // An interface with no DHCP lease (static, or the command failed) has no
+    // re-bind to date, which is not the same as "it never re-bound".
+    expect(parseDhcpLeaseStart(IPCONFIG_GETSUMMARY.replace(/^.*LeaseStartTime.*$/m, ''))).toBeNull()
+    expect(parseDhcpLeaseStart('')).toBeNull()
+  })
+
+  test('is null for a malformed date, not a plausible one', () => {
+    // Right shape, impossible values — JS would happily roll `13/45` over into
+    // the following year. A rolled-over date reads as measured.
+    expect(parseDhcpLeaseStart('  LeaseStartTime : 13/45/2026 99:99:99\n')).toBeNull()
+    expect(parseDhcpLeaseStart('  LeaseStartTime : Jul 30 2026 15:48:29\n')).toBeNull()
+    expect(parseDhcpLeaseStart('  LeaseStartTime :\n')).toBeNull()
+  })
+
+  test('the committed DHCP fixture carries no MAC address', () => {
+    // Not decoration: the real `ipconfig getsummary` prints the DHCP packet,
+    // `chaddr` included, and this repo is public. The fixture is synthesised
+    // for exactly this reason and this test is what keeps a future "let me just
+    // paste the real output" from landing. (The Ethernet fixtures above carry
+    // the documented scrubbed placeholder instead, which is not this host's.)
+    expect(IPCONFIG_GETSUMMARY).not.toMatch(/([0-9a-f]{2}:){5}[0-9a-f]{2}/i)
+    expect(IPCONFIG_GETSUMMARY).not.toMatch(/chaddr/i)
+  })
+})
+
 describe('parseIfCounters', () => {
   test('takes the counters from the only row that has them', () => {
     // Four of the five rows print `-` for Ierrs/Oerrs/Coll. Picking the first or
@@ -269,7 +476,7 @@ describe('parseServiceOrder', () => {
   test('maps every device to its hardware port and drops device-less services', () => {
     expect(parseServiceOrder(SERVICE_ORDER)).toEqual([
       { hardwarePort: 'Ethernet', device: 'en0' },
-      { hardwarePort: 'MR2100', device: 'en11' },
+      { hardwarePort: 'MR9999', device: 'en11' },
       { hardwarePort: 'Wi-Fi', device: 'en1' },
       { hardwarePort: 'Thunderbolt Bridge', device: 'bridge0' },
       { hardwarePort: 'iPhone USB', device: 'en10' },
@@ -310,7 +517,7 @@ describe('classifyPath', () => {
     // to make impossible — purely because a dead Ethernet service still named
     // the same device. Order must not decide it, so both orderings are asserted.
     const stale = { hardwarePort: 'Thunderbolt Ethernet Slot 1', device: 'en11' }
-    const hotspot = { hardwarePort: 'MR2100', device: 'en11' }
+    const hotspot = { hardwarePort: 'MR9999', device: 'en11' }
     expect(classifyPath({ iface: 'en11', services: [stale, hotspot] })).toBe('cellular')
     expect(classifyPath({ iface: 'en11', services: [hotspot, stale] })).toBe('cellular')
 
@@ -466,6 +673,9 @@ describe('captureVantage', () => {
       // calling that "not the home line" would let a read path filter away the
       // very outage the collector exists to record.
       onHomeLine: null,
+      linkMaxMbit: null,
+      dhcpBoundAt: null,
+      linkWatchS: null,
     })
   })
 

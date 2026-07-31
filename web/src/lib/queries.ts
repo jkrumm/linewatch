@@ -1,5 +1,14 @@
 import { queryOptions } from '@tanstack/react-query'
-import { getOutages, getProbeBuckets, getSpeedSummary, getSpeedTests, getStatus } from './api'
+import {
+  getEvents,
+  getOutages,
+  getProbeBuckets,
+  getRouter,
+  getSpeedSummary,
+  getSpeedTests,
+  getStatus,
+  getVerdicts,
+} from './api'
 import type { ProbeBucketSeconds, TargetName } from './types'
 
 /** `staleTime` matches the collector's 30s probe cycle (DESIGN.md "Cadence") — no point polling
@@ -42,5 +51,31 @@ export const speedSummaryQuery = (days: number) =>
   queryOptions({
     queryKey: ['speedtests-summary', days],
     queryFn: () => getSpeedSummary(days),
+    staleTime: 60_000,
+  })
+
+/** The router poller runs every 10 minutes by default, but this refetches faster than that on
+ * purpose: `ageMs`/`stale` are computed server-side at request time, so a cached response keeps
+ * claiming the age it had when it was fetched. Staleness has to be the server's verdict, not a
+ * client cache's memory of one. */
+export const routerQuery = () =>
+  queryOptions({
+    queryKey: ['router'],
+    queryFn: getRouter,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+  })
+
+export const verdictsQuery = (params: { from: number; to: number }) =>
+  queryOptions({
+    queryKey: ['verdicts', params.from, params.to],
+    queryFn: () => getVerdicts(params),
+    staleTime: 60_000,
+  })
+
+export const eventsQuery = (params: { from: number; to: number }) =>
+  queryOptions({
+    queryKey: ['events', params.from, params.to],
+    queryFn: () => getEvents(params),
     staleTime: 60_000,
   })

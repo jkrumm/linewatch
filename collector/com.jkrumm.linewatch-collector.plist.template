@@ -25,6 +25,14 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <!-- Must stay identical to StandardOutPath below. The collector bounds its
+         own log by truncating it in place (collector/log-rotate.ts) — launchd
+         opens these paths once, with O_APPEND, and never reopens them, so an
+         external rotator that renames the file would leave the collector
+         writing into the renamed inode forever. It refuses to touch anything
+         unless fd 1 is provably this file, so a drift between these two lines
+         costs the size bound rather than the log. -->
+    <key>LINEWATCH_LOG_PATH</key><string>__HOME__/Library/Logs/linewatch-collector.log</string>
   </dict>
   <key>StandardOutPath</key><string>__HOME__/Library/Logs/linewatch-collector.log</string>
   <key>StandardErrorPath</key><string>__HOME__/Library/Logs/linewatch-collector.log</string>

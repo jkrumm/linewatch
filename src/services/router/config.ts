@@ -29,7 +29,11 @@ export interface RouterConfig {
   baseUrl: string
   user: string
   password: string | null
-  /** croner pattern. Every 5 minutes: enough resolution for sync-rate and margin drift. */
+  /**
+   * croner pattern. Every 10 minutes: one fresh login per poll (see the
+   * `RouterClient` module doc), which is 72 logins/day, and measured sync rates
+   * do not move fast enough for finer resolution to record anything more.
+   */
   pollCron: string
   /** Milliseconds between two consecutive runs of `pollCron`, derived from the pattern itself. */
   pollIntervalMs: number
@@ -39,7 +43,6 @@ export interface RouterConfig {
    * two means the reading is no longer describing now.
    */
   staleAfterMs: number
-  reloginBackoffMs: number
   requestTimeoutMs: number
   /** LAN address of the host running the native collector — the vantage to corroborate. */
   collectorHostIp: string
@@ -55,8 +58,8 @@ export interface RouterConfig {
 }
 
 const PASSWORD_FILE = join(homedir(), '.config', 'linewatch', 'router-password')
-const DEFAULT_CRON = '*/5 * * * *'
-const FALLBACK_INTERVAL_MS = 5 * 60 * 1000
+const DEFAULT_CRON = '*/10 * * * *'
+const FALLBACK_INTERVAL_MS = 10 * 60 * 1000
 
 /** How many poll intervals a reading may age before `GET /api/router` marks it stale. */
 const STALE_AFTER_INTERVALS = 2
@@ -115,7 +118,6 @@ export function buildRouterConfig(env: NodeJS.ProcessEnv): RouterConfig {
     pollCron: cron.cron,
     pollIntervalMs: cron.intervalMs,
     staleAfterMs: cron.intervalMs * STALE_AFTER_INTERVALS,
-    reloginBackoffMs: Number(env['LINEWATCH_ROUTER_RELOGIN_BACKOFF_MS'] ?? 15 * 60 * 1000),
     requestTimeoutMs: Number(env['LINEWATCH_ROUTER_TIMEOUT_MS'] ?? 10_000),
     collectorHostIp: env['LINEWATCH_COLLECTOR_HOST_IP'] ?? '192.168.1.100',
     disabledReason: switchedOff ? 'LINEWATCH_ROUTER_POLL=0' : reason,

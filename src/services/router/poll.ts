@@ -25,13 +25,14 @@ import {
 import type { RouterRow } from './redact.js'
 
 /**
- * One poll of the router: eight reads over the held session, then one atomic
- * write.
+ * One poll of the router: one login, eight reads over that session, then one
+ * atomic write.
  *
  * The reads are individually isolated — a firmware revision that drops one OID
- * costs that OID's columns, not the poll — but a lost session aborts the whole
- * poll, because continuing would write a half-empty record that looks like the
- * router reporting zeros.
+ * costs that OID's columns, not the poll — but a failed login or a lost session
+ * aborts the whole poll, because continuing would write a half-empty record that
+ * looks like the router reporting zeros. A poll that could not log in stores
+ * nothing at all: the gap in `router_line_sample` is the honest record of it.
  */
 
 /** Reads spaced out slightly: this device answers 406 under its own load. */
@@ -39,9 +40,10 @@ const READ_SPACING_MS = 250
 
 /**
  * How stale the host's own vantage may be before the corroboration is skipped.
- * One poll interval: probe cycles land every 30s, so anything older than this
- * means the collector is not running and a "disagreement" would be an artefact
- * of comparing a live router reading against a dead host reading.
+ * Deliberately tied to the collector's cadence, not the poll's: probe cycles
+ * land every 30s, so a vantage this old means the collector is not running and a
+ * "disagreement" would be an artefact of comparing a live router reading against
+ * a dead host reading.
  */
 const HOST_VANTAGE_MAX_AGE_MS = 5 * 60 * 1000
 
@@ -66,6 +68,12 @@ const READS = {
 } as const satisfies Record<string, ReadPlan>
 
 export interface RouterReader {
+  /**
+   * Establishes the session this poll reads over, discarding any earlier one.
+   * Throwing here is a poll that never happened, which is the point: see fact 1
+   * in `client.ts`.
+   */
+  startSession(): Promise<void>
   read(oid: string, operation: RouterOperation): Promise<RouterRow[]>
 }
 
@@ -124,6 +132,15 @@ export class RouterPoller {
   }
 
   async poll(): Promise<RouterPollSummary> {
+    // One fresh login per poll rather than a session kept alive between them.
+    // The held session cost 64% of the carrier-side record: an eviction put the
+    // client into a 15-minute re-login backoff, so 20 of 55 due polls over 4.5
+    // hours were stored. At the 10-minute cadence this is 72 logins/day against
+    // ~144 for repairing a session, it removes that failure mode instead of
+    // tuning it, and it loses nothing measurable — `down_sync_kbps` had zero
+    // variance across all 20 samples the old scheme did store.
+    await this.client.startSession()
+
     const ts = this.now()
     const warnings: string[] = []
 
@@ -262,7 +279,6 @@ export class RouterPoller {
             interfaceType: host.interfaceType,
             active: host.active,
             clientType: host.clientType,
-            hostName: host.hostName,
           })
           .run()
       }

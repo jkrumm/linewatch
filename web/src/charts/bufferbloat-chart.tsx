@@ -2,16 +2,20 @@ import { ChartCard, MultiLine, VX } from 'basalt-ui/charts'
 import type { SpeedTest } from '../lib/types'
 import { fmtMs } from '../lib/format'
 
+/** Idle vs loaded latency, per DESIGN.md's "Speed" view ("loaded-vs-idle latency"). The chart
+ * plots the three stored measurements and names none of them a verdict: whether the gap between
+ * them is a problem, and on which leg, is the verdict layer's sentence to write from the numbers,
+ * not a literal authored here. */
 export function BufferbloatChart({ tests }: { tests: SpeedTest[] }) {
   return (
     <ChartCard
-      title="Bufferbloat"
-      subtitle="Idle ping vs. latency under load"
-      tooltip="Idle ping is measured at rest; loaded latency is measured while the download/upload saturates the line. A wide gap between them is bufferbloat."
+      title="Latency under load"
+      subtitle="Idle ping vs. latency during the run · one point per run"
+      tooltip="Idle ping is measured at rest; loaded latency is measured while the download or upload saturates the line. One point per run, drawn at equal spacing regardless of the gap between runs."
     >
       <MultiLine
         data={tests}
-        chartId="bufferbloat"
+        chartId="speed-loaded-latency"
         getX={(t) => new Date(t.ts).toISOString()}
         series={[
           {

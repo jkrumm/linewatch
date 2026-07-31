@@ -6,6 +6,7 @@ import {
   FAST_LINE_ROW,
   HOSTS_ROW,
   HOST_ENTRY_ROWS,
+  HOST_NAME_CANARY,
   IP_INTF_ROWS,
   IP_INTF_STATS_ROWS,
 } from './fixtures.js'
@@ -160,10 +161,24 @@ describe('parseHosts', () => {
       interfaceType: 'Ethernet',
       active: 1,
       clientType: 'Other',
-      hostName: 'fixture-host',
       layer1Interface: 'Device.Ethernet.Interface.1.',
     })
     expect(hosts[2]?.active).toBe(0)
+  })
+
+  // The device name is the one field on this OID that must not survive parsing:
+  // this router's vendor defaults are a MAC with the separators stripped, and
+  // the column that used to hold them is gone. The raw rows still carry it under
+  // two spellings, so the assertion is against the whole parsed object.
+  it('carries no device name out of a row that has one', () => {
+    // Against the raw rows, not the redacted ones: the parser has to drop the
+    // name on its own rather than inherit the redactor's blanking.
+    expect(JSON.stringify(HOST_ENTRY_ROWS)).toContain(HOST_NAME_CANARY)
+    const hosts = parseHosts(HOST_ENTRY_ROWS)
+    expect(JSON.stringify(hosts)).not.toContain(HOST_NAME_CANARY)
+    for (const host of hosts) {
+      expect(Object.keys(host).some((key) => /name/i.test(key))).toBe(false)
+    }
   })
 })
 

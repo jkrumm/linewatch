@@ -1,0 +1,1 @@
+ALTER TABLE `router_host` DROP COLUMN `host_name`;

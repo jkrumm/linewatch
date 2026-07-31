@@ -23,8 +23,11 @@ import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { median, stddev } from '../src/lib/stats.js'
+import { createLinkSampler, type LinkSampler, type LinkTransition } from './link-sampler.js'
+import { DEFAULT_LOG_MAX_BYTES, inspectRotation, rotateLogIfNeeded } from './log-rotate.js'
 import { parsePingOutput, type PingResult } from './ping-parser.js'
 import { captureVantage, type Vantage } from './vantage.js'
+import { captureWifi, type WifiSampleInput } from './wifi.js'
 
 type TargetScope = 'gateway' | 'wan'
 
@@ -92,7 +95,56 @@ const config = {
   pingIntervalSeconds: Number(process.env['LINEWATCH_PING_INTERVAL_S'] ?? 0.2),
   spoolPath: process.env['LINEWATCH_SPOOL_PATH'] ?? join(moduleDir, 'spool.jsonl'),
   spoolMaxLines: 50_000,
+  /**
+   * Which interface the link sampler watches until the default route names one.
+   * Only a fallback: `pathIf` from the routing table wins the moment a cycle
+   * reports it (see `retargetLinkSampler`). It matters precisely when there is
+   * no default route — the link-down case — because that is when the physical
+   * link state is the whole question.
+   */
+  linkIface: process.env['LINEWATCH_LINK_IFACE'] ?? 'en0',
+  linkSampleIntervalMs: Number(process.env['LINEWATCH_LINK_SAMPLE_MS'] ?? 1000),
+  /** The Wi-Fi interface sampled by collector/wifi.ts — an alternate radio path currently attached. */
+  wifiIface: process.env['LINEWATCH_WIFI_IFACE'] ?? 'en1',
+  /**
+   * Cadence of that sample, in cycles. 10 × 30 s = 5 min, and it is not
+   * negotiable downward without measuring again: `system_profiler
+   * SPAirPortDataType` costs 4.8 s median on this host, so sampling every cycle
+   * would put a 5 s command inside a 30 s loop for a value that moves slowly.
+   */
+  wifiSampleEveryNCycles: Math.max(1, Number(process.env['LINEWATCH_WIFI_EVERY_N_CYCLES'] ?? 10)),
+  /** Per-command wall clock for the Wi-Fi sample. ~4.8 s of it is `system_profiler` alone. */
+  wifiTimeoutMs: 8000,
+  /**
+   * The file launchd captures this process's stdout *and* stderr into — the
+   * plist's `StandardOutPath`. Passed in through the environment by that same
+   * plist so the two are written next to each other and cannot drift apart
+   * unnoticed; the default here matches it for a hand-started run.
+   *
+   * Rotation refuses to touch this path unless fd 1 really is that file
+   * (collector/log-rotate.ts), so a wrong value costs the bound, never the log.
+   */
+  logPath: process.env['LINEWATCH_LOG_PATH'] ?? join(homedir(), 'Library', 'Logs', 'linewatch-collector.log'),
+  logMaxBytes: Number(process.env['LINEWATCH_LOG_MAX_BYTES'] ?? DEFAULT_LOG_MAX_BYTES),
 }
+
+/**
+ * Where the interface-bound Wi-Fi ping goes. Env override first, then the first
+ * `wan`-scoped target — same shape as `resolveExpectedGateway`, so the Wi-Fi
+ * spot check and the cycle's own probes measure toward the same place instead
+ * of a second hardcoded address.
+ *
+ * `null` (no WAN target configured) disables the Wi-Fi sample entirely rather
+ * than falling back to some plausible anchor: a round trip to an address nobody
+ * chose is not a measurement of this line's alternate path.
+ */
+function resolveWifiPingTarget(targets: Target[]): string | null {
+  const explicit = process.env['LINEWATCH_WIFI_PING_TARGET']
+  if (explicit) return explicit
+  return targets.find((target) => target.scope === 'wan')?.addr ?? null
+}
+
+const wifiPingTarget = resolveWifiPingTarget(config.targets)
 
 /**
  * The gateway a cycle must be talking to for it to count as the home line.
@@ -159,6 +211,61 @@ interface Batch {
    * `captureVantage` threw, which it is written not to do.
    */
   cycle?: Vantage
+  /**
+   * Sub-cycle link transitions seen by the 1 Hz sampler during this cycle
+   * (collector/link-sampler.ts). Omitted when there were none — an empty array
+   * and an absent key would mean the same thing on the wire, and the absent one
+   * is cheaper. "No transitions" is *not* "the link was stable": `cycle
+   * .linkWatchS` is what says how much of the cycle was actually watched.
+   *
+   * Rides the existing batch on purpose, so it inherits the spool and the
+   * bearer token — no second route, no second auth surface.
+   */
+  linkEvents?: LinkTransition[]
+  /**
+   * The Wi-Fi radio sample (collector/wifi.ts). Present on every 10th cycle
+   * only — 5 min, because `system_profiler` costs ~4.8 s — so an absent key is
+   * the normal case here and means "this cycle did not look at the radio",
+   * never "there is no radio". Rides the batch for the same reason
+   * `linkEvents` does: it inherits the spool and the bearer token.
+   */
+  wifi?: WifiSampleInput
+}
+
+/**
+ * The link sampler, re-created rather than reconfigured when the default route
+ * moves to another interface. Module-level because the cycle loop and the
+ * signal handlers both have to reach it.
+ */
+let linkSampler: LinkSampler | null = null
+let linkIface = config.linkIface
+
+function startLinkSampler(iface: string): void {
+  linkSampler?.stop()
+  linkIface = iface
+  linkSampler = createLinkSampler({
+    iface,
+    intervalMs: config.linkSampleIntervalMs,
+    // So a cycle that overruns cannot report more seconds of link coverage
+    // than the cycle it is attached to has.
+    maxWatchS: config.probeCycleSeconds,
+  })
+  linkSampler.start()
+}
+
+/**
+ * Follow the default route. `pathIf` is authoritative for what the cycle
+ * measured through (vantage.ts rule 2), so the sampler watches whatever it
+ * names.
+ *
+ * A null `pathIf` — no default route, i.e. the link-down case — deliberately
+ * changes nothing: the configured interface stays under observation, which is
+ * exactly where the answer is when there is no route to read.
+ */
+function retargetLinkSampler(pathIf: string | null | undefined): void {
+  if (pathIf === null || pathIf === undefined || pathIf === linkIface) return
+  log('link.retarget', { from: linkIface, to: pathIf })
+  startLinkSampler(pathIf)
 }
 
 function log(event: string, fields: Record<string, unknown> = {}): void {
@@ -205,20 +312,62 @@ async function pingTarget(target: Target): Promise<TargetSample> {
   }
 }
 
+/** Cycles run since start, the counter the Wi-Fi cadence is measured against. */
+let cycleCount = 0
+
 async function runCycle(): Promise<Batch> {
   const ts = Date.now()
+  // The first cycle samples (0 % N === 0), so a freshly started collector puts
+  // a wifi_sample row on record within one cycle rather than five minutes.
+  const sampleWifi = wifiPingTarget !== null && cycleCount % config.wifiSampleEveryNCycles === 0
+  cycleCount += 1
+
   // Captured concurrently with the pings so it describes the path the pings
   // actually went out over, and so it adds nothing to the cycle's wall clock.
   // `captureVantage` is written not to throw; the catch is the second belt —
   // the vantage must never be able to cost us the uptime record.
-  const [samples, vantage] = await Promise.all([
+  const [samples, vantage, wifi] = await Promise.all([
     Promise.all(config.targets.map((target) => pingTarget(target))),
     captureVantage({ expectedGateway, report: log }).catch((err: unknown) => {
       log('vantage.error', { error: err instanceof Error ? err.message : String(err) })
       return null
     }),
+    // Same belt-and-braces as the vantage, and the same reason: `captureWifi`
+    // is written not to throw, and a radio sample must never be able to cost
+    // the cycle its measurements. Its own timeout keeps a wedged
+    // `system_profiler` from stretching the cycle past its 30 s budget.
+    sampleWifi && wifiPingTarget !== null
+      ? captureWifi({ iface: config.wifiIface, pingTarget: wifiPingTarget, timeoutMs: config.wifiTimeoutMs, report: log }).catch(
+          (err: unknown) => {
+            log('wifi.error', { error: err instanceof Error ? err.message : String(err) })
+            return null
+          },
+        )
+      : Promise.resolve(null),
   ])
-  return { ts, samples, ...(vantage === null ? {} : { cycle: vantage }) }
+
+  // Logged here rather than folded into the cycle line: it happens on one cycle
+  // in ten. Safe to log in full — `WifiSampleInput` carries no SSID, BSSID or
+  // MAC by construction (collector/wifi.ts), which is why those columns do not
+  // exist.
+  if (wifi !== null) log('wifi', { ...wifi })
+
+  // Drained after the pings and *before* the retarget below, so the seconds it
+  // reports belong to the interface that actually carried this cycle rather
+  // than to whichever one the next cycle will watch. `linkWatchS` stays null
+  // when there is no sampler at all: null is "link state unknown for this
+  // cycle", where 0 would claim a cycle that watched and saw nothing.
+  const link = linkSampler?.drain() ?? null
+  if (vantage !== null && link !== null) vantage.linkWatchS = link.watchedS
+  retargetLinkSampler(vantage?.pathIf)
+
+  return {
+    ts,
+    samples,
+    ...(vantage === null ? {} : { cycle: vantage }),
+    ...(link === null || link.transitions.length === 0 ? {} : { linkEvents: link.transitions }),
+    ...(wifi === null ? {} : { wifi }),
+  }
 }
 
 /**
@@ -229,14 +378,32 @@ async function runCycle(): Promise<Batch> {
  */
 function vantageFields(batch: Batch): Record<string, unknown> {
   const cycle = batch.cycle
-  if (cycle === undefined) return { path: null, onHomeLine: null }
+  // The link sampler is independent of the vantage capture — it can have
+  // watched the whole cycle even when `captureVantage` returned nothing — so
+  // its transition count is logged either way.
+  const transitions = { linkTransitions: batch.linkEvents?.length ?? 0 }
+  if (cycle === undefined) return { path: null, onHomeLine: null, linkWatchS: null, ...transitions }
   return {
     path: `${cycle.pathIf ?? 'none'}/${cycle.pathClass ?? 'unknown'}/${cycle.linkMedia ?? 'unknown'}`,
     onHomeLine: cycle.onHomeLine,
+    linkWatchS: cycle.linkWatchS,
+    ...transitions,
   }
 }
 
-async function postBatch(batch: Batch): Promise<boolean> {
+/**
+ * What the server said about a batch it accepted. Both fields are `undefined`
+ * against an API too old to report them — which is exactly the situation they
+ * exist to detect, so "did not say" must stay distinguishable from "said false"
+ * and never be coalesced.
+ */
+interface PostOutcome {
+  ok: boolean
+  skipped?: boolean | undefined
+  cycleStored?: boolean | undefined
+}
+
+async function postBatch(batch: Batch): Promise<PostOutcome> {
   try {
     const response = await fetch(`${config.apiUrl}/api/probes`, {
       method: 'POST',
@@ -247,9 +414,18 @@ async function postBatch(batch: Batch): Promise<boolean> {
       body: JSON.stringify(batch),
       signal: AbortSignal.timeout(10_000),
     })
-    return response.ok
+    if (!response.ok) return { ok: false }
+    // A body that will not parse does not undo an accepted batch: the samples
+    // are stored either way, and re-sending them would duplicate work the
+    // server already did. The outcome is simply unknown.
+    const body = (await response.json().catch(() => ({}))) as { skipped?: unknown; cycleStored?: unknown }
+    return {
+      ok: true,
+      skipped: typeof body.skipped === 'boolean' ? body.skipped : undefined,
+      cycleStored: typeof body.cycleStored === 'boolean' ? body.cycleStored : undefined,
+    }
   } catch {
-    return false
+    return { ok: false }
   }
 }
 
@@ -300,7 +476,7 @@ async function replaySpool(batches: Batch[]): Promise<boolean> {
   for (let i = 0; i < batches.length; i++) {
     const batch = batches[i]
     if (!batch) continue
-    const ok = await postBatch(batch)
+    const { ok } = await postBatch(batch)
     if (!ok) {
       const remaining = batches.slice(i)
       const tmpPath = `${config.spoolPath}.tmp`
@@ -326,7 +502,17 @@ async function processCycle(batch: Batch): Promise<void> {
   }
 
   const posted = await postBatch(batch)
-  if (posted) {
+  if (posted.ok) {
+    // The failure this catches has already happened: an API predating the
+    // `cycle` field parsed the batch leniently, dropped the unknown key and
+    // answered 200, so 106 consecutive vantages were discarded while the spool
+    // never engaged — nothing had failed. A log line only, deliberately: the
+    // samples *were* stored, so spooling or retrying the batch would duplicate
+    // work and re-drop the same vantage. Only an explicit `false` is a warning;
+    // an API too old to report `cycleStored` says nothing either way.
+    if (batch.cycle !== undefined && posted.skipped === false && posted.cycleStored === false) {
+      log('cycle.vantage_dropped', { ts: batch.ts })
+    }
     log('cycle', {
       ts: batch.ts,
       status: 'ok',
@@ -361,10 +547,12 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
 const shutdown = new AbortController()
 process.on('SIGTERM', () => {
   log('shutdown', { signal: 'SIGTERM' })
+  linkSampler?.stop()
   shutdown.abort()
 })
 process.on('SIGINT', () => {
   log('shutdown', { signal: 'SIGINT' })
+  linkSampler?.stop()
   shutdown.abort()
 })
 
@@ -376,10 +564,39 @@ async function main(): Promise<void> {
     probeCycleSeconds: config.probeCycleSeconds,
     pingCount: config.pingCount,
     pingIntervalSeconds: config.pingIntervalSeconds,
+    linkIface: config.linkIface,
+    linkSampleIntervalMs: config.linkSampleIntervalMs,
+    wifiIface: config.wifiIface,
+    wifiSampleEveryNCycles: config.wifiSampleEveryNCycles,
+    // Null means no `wan`-scoped target, which disables the Wi-Fi sample —
+    // worth seeing at startup rather than inferring from missing rows.
+    wifiPingTarget,
   })
+
+  // Said once, at startup, because the failure mode of log rotation is silence:
+  // if `LINEWATCH_LOG_PATH` and the plist's StandardOutPath ever drift apart the
+  // bound stops applying and nothing else would ever say so. `active: false` on
+  // a hand-started run is normal — stdout is a terminal, not the launchd log.
+  const rotation = inspectRotation({ logPath: config.logPath, maxBytes: config.logMaxBytes })
+  log('log.rotation', {
+    path: config.logPath,
+    maxBytes: config.logMaxBytes,
+    bytes: rotation.sizeBytes,
+    active: rotation.decision.rotate || rotation.decision.reason === 'under-threshold',
+    ...(rotation.decision.rotate ? {} : { reason: rotation.decision.reason }),
+  })
+
+  // Started before the first cycle, so the first drain covers the ping phase
+  // only (~4 s of a 30 s cycle) and reports that honestly. Every cycle after it
+  // covers a full interval.
+  startLinkSampler(config.linkIface)
 
   while (!shutdown.signal.aborted) {
     const cycleStart = Date.now()
+    // Between cycles, never mid-cycle: this truncates the file both fds write
+    // to, and doing it here means it can never land between the two halves of a
+    // line. One `stat` per 30 s is not worth measuring.
+    rotateLogIfNeeded({ logPath: config.logPath, maxBytes: config.logMaxBytes, report: log })
     const batch = await runCycle()
     await processCycle(batch)
 
@@ -389,6 +606,7 @@ async function main(): Promise<void> {
     await sleep(remaining, shutdown.signal)
   }
 
+  linkSampler?.stop()
   log('stopped')
 }
 

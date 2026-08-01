@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { LiveExecutor, NullExecutor } from './actions.js'
+import { RouterUnreachableError } from './client.js'
 import type { RouterActionIntent, RouterActionResponse } from './client.js'
 import { ADT_WAN_ROWS } from './fixtures.js'
 import { redactRow } from './redact.js'
@@ -186,15 +187,73 @@ describe('LiveExecutor.reconnect', () => {
 
 describe('LiveExecutor.reboot', () => {
   /**
-   * The one action whose transport error the firmware deliberately swallows,
-   * because the device dies before answering — so a wrong operation name and a
-   * successful reboot are the same observation from here: silence. Shipping it
-   * on an unconfirmed name would mean "no answer" could not be read either way.
+   * This used to refuse outright, on two grounds. Both are now settled from the
+   * device rather than reasoned about, so the refusal would be superstition.
+   *
+   * The name: `gdprProxy.js` on the live router declares
+   * `var ACT_OP_REBOOT = "ACT_REBOOT"` — the same identifier-versus-value rule
+   * that already cost one live request on the PPP pair, so `restart.htm` and
+   * `sysMode.htm` were never in disagreement.
+   *
+   * The silence: an operation the firmware does not recognise comes back HTTP
+   * 200 with errorcode 1, measured. A reboot that goes through kills the
+   * transport. Those are opposite observations, not the same one.
    */
-  it('refuses, because the operation name is unconfirmed and its failure is silent', async () => {
+  it('sends the reboot against the device stack, not a connection instance', async () => {
     const fake = new FakeClient()
+    const result = await executor(fake).reboot()
+
+    expect(result.outcome).toBe('executed')
+    // 0,0,0,0,0,0 is the root of the object tree. A reboot addresses the device,
+    // so unlike the WAN instance's 3,0,0,0,0,0 this cannot drift.
+    expect(fake.sent).toEqual([{ intent: 'reboot', stack: '0,0,0,0,0,0' }])
+  })
+
+  it('takes the pre-action snapshot the reboot is about to destroy', async () => {
+    // Showtime, every byte counter and the host table are reset by a reboot,
+    // and they are precisely what diagnosed the 2026-08-01 incident. No
+    // snapshot, no action.
+    const result = await executor(new FakeClient()).reboot()
+    expect(result.before?.connType).toBe('PPPoE')
+    expect(result.before?.uptimeV6S).not.toBeNull()
+  })
+
+  it('refuses when the WAN state cannot be read at all', async () => {
+    const fake = new FakeClient([])
     const result = await executor(fake).reboot()
     expect(result.outcome).toBe('refused')
     expect(fake.sent).toEqual([])
+  })
+
+  it('reads a rejected operation as a failure, because nothing rebooted', async () => {
+    // The wrong-name signature, and the reason this is shippable: the device
+    // validates the operation before acting on it.
+    const fake = new FakeClient(ADT_WAN_ROWS, () => ({ ok: false, errorcode: '1', httpStatus: 200, oid: 'X' }))
+    const result = await executor(fake).reboot()
+    expect(result.outcome).toBe('failed')
+    expect(result.ok).toBe(false)
+    expect(result.detail).toContain('nothing rebooted')
+  })
+
+  it('reads a dead transport as unknown — the expected signature of success', async () => {
+    const fake = new FakeClient(ADT_WAN_ROWS, () => {
+      throw new RouterUnreachableError('socket closed')
+    })
+    const result = await executor(fake).reboot()
+    // Not `executed`: that would claim knowledge this process does not have.
+    // Not `failed`: that claims the opposite. The probe record settles it.
+    expect(result.outcome).toBe('unknown')
+    expect(result.ok).toBe(true)
+    expect(result.before).not.toBeNull()
+    // No step is recorded, because naming the operation here would put the only
+    // OID literal outside client.ts — the boundary the whitelist rests on.
+    expect(result.steps).toEqual([])
+  })
+
+  it('lets a genuine transport fault through rather than calling it a reboot', async () => {
+    const fake = new FakeClient(ADT_WAN_ROWS, () => {
+      throw new Error('TLS handshake failed')
+    })
+    await expect(executor(fake).reboot()).rejects.toThrow('TLS handshake')
   })
 })

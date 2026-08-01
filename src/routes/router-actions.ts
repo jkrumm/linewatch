@@ -5,12 +5,13 @@ import { db } from '../db/client.js'
 import { event, routerLineSample } from '../db/schema.js'
 import { hasValidBearer } from '../lib/auth.js'
 import { routerConfig } from '../services/router/config.js'
+import type { ActionResult } from '../services/router/actions.js'
 import { getRouterExecutor, getRouterPoller, pollOnDemand } from '../services/router/scheduler.js'
 
 /**
- * The two routes that reach the router rather than its record.
+ * The three routes that reach the router rather than its record.
  *
- * **Both are bearer-gated, and the actions carry a second, independent gate.**
+ * **All are bearer-gated, and the two actions carry a second, independent gate.**
  * The bearer is the same one `POST /api/probes` and `POST /api/interventions`
  * use — these write to the historical record too, and one of them writes to the
  * line itself. `grep -rn hasValidBearer src/` is the source of truth for that
@@ -23,9 +24,10 @@ import { getRouterExecutor, getRouterPoller, pollOnDemand } from '../services/ro
  * wrong, a bad deploy, or a test pointed at the wrong host. It is the switch
  * that matters when the thing that broke is the thing holding the token.
  *
- * Neither route is on the dashboard. `POST /api/speedtests/run` is unauthenticated
+ * None of them is on the dashboard. `POST /api/speedtests/run` is unauthenticated
  * because its only abuse is saturating the line; these can drop the household's
- * internet, and there is no such argument to make.
+ * internet — the reboot takes the LAN with it, Tailscale included — and there is
+ * no such argument to make.
  */
 
 /**
@@ -49,7 +51,11 @@ function secondsSinceLastPoll(now: number): number | null {
 const ActionResultSchema = z.object({
   ok: z.boolean(),
   capability: z.enum(['live', 'null']).describe('`null` means nothing was sent — the write capability is off'),
-  outcome: z.enum(['executed', 'failed', 'not_executed', 'refused']),
+  outcome: z
+    .enum(['executed', 'failed', 'not_executed', 'refused', 'unknown'])
+    .describe(
+      '`unknown` is reachable only for a reboot: the device stops answering because it is rebooting, so a verb that went out and a transport that died are the same observation. It is the expected signature of success, and only the probe record over the next few minutes settles it.',
+    ),
   detail: z.string(),
   steps: z.array(
     z.object({
@@ -60,6 +66,63 @@ const ActionResultSchema = z.object({
     }),
   ),
 })
+
+/**
+ * Write the attempt down, then answer. Shared by both actions so they cannot
+ * drift in how they record — the reboot is the one whose evidence matters most
+ * and the one most likely to be added carelessly later.
+ *
+ * `intervention` only when something actually reached the line. `unknown` counts:
+ * the device stopped answering because it was rebooting, so the line was
+ * touched even though the acknowledgement never came, and recording that as a
+ * `note` would leave a reboot invisible in the attribution the table exists for.
+ * A refusal or a suppressed write reached nothing and stays a `note`.
+ *
+ * An action attempted and not recorded is exactly the failure
+ * `POST /api/interventions` was built to prevent, and it has already happened
+ * once to a human: the router reboot that ended the 21.5-minute outage on
+ * 2026-08-01 was never written down, so the record shows an outage that ended
+ * on its own.
+ */
+function recordAndAnswer(action: 'router_reconnect' | 'router_reboot', result: ActionResult) {
+  const touchedTheLine = result.outcome === 'executed' || result.outcome === 'failed' || result.outcome === 'unknown'
+  db.insert(event)
+    .values({
+      ts: Date.now(),
+      kind: touchedTheLine ? 'intervention' : 'note',
+      detail: JSON.stringify({
+        source: 'api',
+        action,
+        outcome: result.outcome,
+        capability: result.capability,
+        steps: result.steps,
+        // The pre-action snapshot. A reboot resets showtime, zeroes every byte
+        // counter and empties the host table, so this is the only surviving
+        // description of what it was done to.
+        before:
+          result.before === null
+            ? null
+            : {
+                connType: result.before.connType,
+                stack: result.before.stack,
+                connStatusV4: result.before.connStatusV4,
+                connStatusV6: result.before.connStatusV6,
+                uptimeV6S: result.before.uptimeV6S,
+                lastConnError: result.before.lastConnError,
+              },
+        note: result.detail,
+      }),
+    })
+    .run()
+
+  return {
+    ok: result.ok,
+    capability: result.capability,
+    outcome: result.outcome,
+    detail: result.detail,
+    steps: result.steps,
+  }
+}
 
 export const routerActionRoutes = new Elysia()
   .post(
@@ -108,46 +171,7 @@ export const routerActionRoutes = new Elysia()
         })
       }
 
-      const result = await getRouterExecutor().reconnect()
-
-      // Recorded whatever happened, including a refusal. An action attempted
-      // and not recorded is the failure POST /api/interventions exists to
-      // prevent, and it already happened once to a human on 2026-08-01: the
-      // router reboot that ended a 21.5-minute outage was never written down,
-      // so the record shows an outage that ended on its own.
-      db.insert(event)
-        .values({
-          ts: Date.now(),
-          kind: result.outcome === 'executed' || result.outcome === 'failed' ? 'intervention' : 'note',
-          detail: JSON.stringify({
-            source: 'api',
-            action: 'router_reconnect',
-            outcome: result.outcome,
-            capability: result.capability,
-            steps: result.steps,
-            before:
-              result.before === null
-                ? null
-                : {
-                    connType: result.before.connType,
-                    stack: result.before.stack,
-                    connStatusV4: result.before.connStatusV4,
-                    connStatusV6: result.before.connStatusV6,
-                    uptimeV6S: result.before.uptimeV6S,
-                    lastConnError: result.before.lastConnError,
-                  },
-            note: result.detail,
-          }),
-        })
-        .run()
-
-      return {
-        ok: result.ok,
-        capability: result.capability,
-        outcome: result.outcome,
-        detail: result.detail,
-        steps: result.steps,
-      }
+      return recordAndAnswer('router_reconnect', await getRouterExecutor().reconnect())
     },
     {
       response: {
@@ -160,6 +184,34 @@ export const routerActionRoutes = new Elysia()
         summary: 'Re-dial the WAN connection',
         description:
           'Reads DEV2_ADT_WAN on the session it acts over, takes that instance\'s own stack — which is not the interface\'s — and branches on connType exactly as the firmware\'s WAN page does: a PPP disconnect/connect pair, or a DHCP renew. An unrecognised connType is refused rather than guessed. **This drops the line**: it changes the public IPv4 address and can change the delegated IPv6 prefix, and on a DS-Lite line IPv4 rides the v6 session being bounced. Whatever happens is written to the event table with the pre-action connection state.',
+        security: [{ BearerAuth: [] }],
+      },
+    },
+  )
+  .post(
+    '/api/router/actions/reboot',
+    async ({ headers, status }) => {
+      if (!hasValidBearer(headers)) return status(401, 'Unauthorized')
+      if (!routerConfig.writeEnabled) {
+        return status(403, {
+          error: 'router writes are disabled',
+          hint: 'set LINEWATCH_ROUTER_WRITE=1 to enable; it is off by default and independent of the poller',
+        })
+      }
+
+      return recordAndAnswer('router_reboot', await getRouterExecutor().reboot())
+    },
+    {
+      response: {
+        200: ActionResultSchema,
+        401: z.string(),
+        403: z.object({ error: z.string(), hint: z.string() }),
+      },
+      detail: {
+        tags: ['Router'],
+        summary: 'Reboot the router',
+        description:
+          'The destructive rung. Snapshots DEV2_ADT_WAN first — a reboot resets showtime, zeroes every byte counter and empties the host table, which is exactly the evidence that diagnosed the 2026-08-01 incident — then sends the reboot against the device stack `0,0,0,0,0,0`. **This takes the whole LAN down for roughly two minutes**, Tailscale included, so the machine issuing it loses its own route back. The outcome is deliberately three-valued: `executed` when the device acknowledged, `failed` when it rejected the operation (nothing rebooted), and `unknown` when the transport died — which is the expected signature of success and is settled only by the probe record over the following minutes, never by this reply.',
         security: [{ BearerAuth: [] }],
       },
     },

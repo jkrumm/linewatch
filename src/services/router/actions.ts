@@ -1,4 +1,4 @@
-import { RouterClient, type RouterActionIntent } from './client.js'
+import { RouterClient, RouterUnreachableError, type RouterActionIntent } from './client.js'
 import { parseLiveWan, type LiveWan } from './parse.js'
 
 /**
@@ -52,8 +52,17 @@ export interface ActionResult {
   ok: boolean
   /** `live` = it was sent. `null` = the executor is not wired to the router at all. */
   capability: 'live' | 'null'
-  /** `executed` | `failed` | `not_executed` | `refused` — what actually happened. */
-  outcome: 'executed' | 'failed' | 'not_executed' | 'refused'
+  /**
+   * `executed` | `failed` | `not_executed` | `refused` | `unknown`.
+   *
+   * `unknown` exists for the reboot and only the reboot: the device stops
+   * answering because it is rebooting, so the verb going out successfully and
+   * the transport dying are the same observation. Reporting that as `executed`
+   * would claim knowledge this process does not have, and as `failed` would
+   * claim the opposite. Whether it worked is a question for the record over the
+   * next few minutes, not for the reply.
+   */
+  outcome: 'executed' | 'failed' | 'not_executed' | 'refused' | 'unknown'
   /** The operations sent, in order, with what the router answered. */
   steps: Array<{ oid: string; ok: boolean; errorcode: string | null; httpStatus: number | null }>
   /** The connection state read immediately before acting — the pre-action snapshot. */
@@ -115,6 +124,15 @@ const RECONNECT_PLAN: Readonly<Record<string, readonly RouterActionIntent[]>> = 
 /** Between the disconnect and the connect. The firmware's own page reloads 1.5 s after a click. */
 const STEP_SPACING_MS = 1_500
 
+/**
+ * The root of the router's object tree. A reboot addresses the device itself,
+ * so unlike a WAN instance's stack this is structural and cannot drift.
+ * Confirmed against the live device: `DEV2_SYS_CFG` has exactly one instance
+ * and carries this stack.
+ */
+const DEVICE_STACK = '0,0,0,0,0,0'
+
+
 export class LiveExecutor implements RouterActionExecutor {
   readonly capability = 'live' as const
 
@@ -139,12 +157,12 @@ export class LiveExecutor implements RouterActionExecutor {
     const rows = await this.client.read('DEV2_ADT_WAN', 'gl')
     const wan = parseLiveWan(rows)
     if (wan === null || wan.stack === null) {
-      return this.refused(null, 'the router reports no connected WAN instance — nothing was sent')
+      return this.refused('reconnect', null, 'the router reports no connected WAN instance — nothing was sent')
     }
 
     const plan = wan.connType === null ? undefined : RECONNECT_PLAN[wan.connType]
     if (plan === undefined) {
-      return this.refused(wan, `unrecognised connType ${JSON.stringify(wan.connType)} — refusing to guess a reconnect verb`)
+      return this.refused('reconnect', wan, `unrecognised connType ${JSON.stringify(wan.connType)} — refusing to guess a reconnect verb`)
     }
 
     const steps: ActionResult['steps'] = []
@@ -171,31 +189,96 @@ export class LiveExecutor implements RouterActionExecutor {
   }
 
   /**
-   * Not implemented, deliberately, and this is the honest state rather than an
-   * oversight. The operation name is the one thing §7's evidence does not
-   * settle — `restart.htm` says `ACT_OP_REBOOT`, `sysMode.htm` says
-   * `ACT_REBOOT` — and a reboot is the one action whose transport error the
-   * firmware swallows, because the device dies before answering. So a wrong
-   * name and a successful reboot look identical from here: no reply either way.
+   * Reboots the device. The destructive rung, and the one whose result cannot
+   * be read from its own reply.
    *
-   * Sending an unverified destructive constant and reading "no answer" as
-   * success is exactly the class of mistake the whitelist exists to prevent.
-   * The name has to be confirmed from the device before this does anything.
+   * ## The name, settled from the device rather than from two pages
+   *
+   * This used to refuse on the grounds that the operation name was ambiguous —
+   * `restart.htm` writes `ACT_OP_REBOOT`, `sysMode.htm` writes `ACT_REBOOT`.
+   * There was never a disagreement: `gdprProxy.js` on this device declares
+   * `var ACT_OP_REBOOT = "ACT_REBOOT"`, the same identifier-versus-value rule
+   * that already cost one live request on the PPP pair. Read off the live
+   * device 2026-08-01. The two factory-reset constants, plain and deep, are
+   * declared two lines below it under the same naming rule — the whitelist's
+   * justification made literal rather than argued. They are named here without
+   * quotes on purpose: a test in this module greps every file for a quoted one.
+   *
+   * ## Why a wrong name is in fact distinguishable
+   *
+   * The other half of the old refusal was that a wrong name and a successful
+   * reboot both look like silence. They do not. An OID the firmware does not
+   * recognise comes back **HTTP 200 with `errorcode: 1`** — measured, on the
+   * PPP identifier — because the device validates the operation before doing
+   * anything with it. A reboot that goes through kills the transport instead.
+   * Those are opposite observations, so:
+   *
+   * - `errorcode 0` → `executed`, the device acknowledged before going down.
+   * - `errorcode 1` (or any non-zero) → `failed`. Nothing rebooted.
+   * - the transport dying → `unknown`, which is the honest answer and the
+   *   expected signature of success. What actually happened is settled by the
+   *   probe record over the settle window, never by this reply.
+   *
+   * ## Why the stack is a constant here and read fresh in `reconnect`
+   *
+   * A reboot addresses the device, not an instance of anything: `0,0,0,0,0,0`
+   * is the root of the object tree, not an address that could drift. Confirmed
+   * — `DEV2_SYS_CFG` has exactly one instance and it carries that stack. That
+   * object is deliberately *not* read here, because it holds the flash MAC,
+   * serial number and label MAC, and this repo does not put those in memory to
+   * learn a constant it already knows.
+   *
+   * The pre-action snapshot still comes from `DEV2_ADT_WAN`, and is a hard
+   * precondition rather than a nicety: a reboot resets showtime, zeroes every
+   * byte counter and empties the host table — precisely the evidence that
+   * diagnosed the 2026-08-01 incident. Failing to read it means failing to act.
    */
-  reboot(): Promise<ActionResult> {
-    return Promise.resolve({
-      ok: false,
+  async reboot(): Promise<ActionResult> {
+    await this.client.startSession()
+
+    const rows = await this.client.read('DEV2_ADT_WAN', 'gl')
+    const wan = parseLiveWan(rows)
+    if (wan === null) {
+      return this.refused('reboot', null, 'could not read the WAN state to snapshot before rebooting — refusing to write to a control path we cannot read')
+    }
+
+    let response
+    try {
+      response = await this.client.sendAction({ intent: 'reboot', stack: DEVICE_STACK })
+    } catch (error) {
+      // The device stopped answering. For every other operation that is a
+      // failure; for this one it is what success looks like from the outside.
+      if (error instanceof RouterUnreachableError) {
+        return {
+          ok: true,
+          capability: 'live',
+          outcome: 'unknown',
+          // Deliberately empty. A step records what the router answered, and it
+          // answered nothing; naming the operation here would also be the only
+          // OID literal outside client.ts, which is the boundary the whole
+          // whitelist design rests on.
+          steps: [],
+          before: wan,
+          detail: `reboot sent and the device stopped answering (${error.message}) — the expected signature of success, but only the probe record can confirm it`,
+        }
+      }
+      throw error
+    }
+
+    return {
+      ok: response.ok,
       capability: 'live',
-      outcome: 'refused',
-      steps: [],
-      before: null,
-      detail:
-        'reboot is not implemented: the firmware operation name is unconfirmed, and a reboot swallows its own transport error, so a wrong name is indistinguishable from a successful one',
-    })
+      outcome: response.ok ? 'executed' : 'failed',
+      steps: [{ oid: response.oid, ok: response.ok, errorcode: response.errorcode, httpStatus: response.httpStatus }],
+      before: wan,
+      detail: response.ok
+        ? 'reboot acknowledged (errorcode 0) — the device is going down; expect ~130s before it answers again'
+        : `reboot was rejected by the device (errorcode ${response.errorcode ?? 'none'}, HTTP ${response.httpStatus ?? 'none'}) — nothing rebooted`,
+    }
   }
 
-  private refused(before: LiveWan | null, detail: string): ActionResult {
-    console.warn(`[router] reconnect refused — ${detail}`)
+  private refused(kind: ActionKind, before: LiveWan | null, detail: string): ActionResult {
+    console.warn(`[router] ${kind} refused — ${detail}`)
     return { ok: false, capability: 'live', outcome: 'refused', steps: [], before, detail }
   }
 }

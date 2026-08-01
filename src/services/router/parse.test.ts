@@ -85,9 +85,59 @@ describe('parseLiveWan', () => {
     expect(wan?.connStatusV6).toBe('Connected')
   })
 
-  it('returns null when nothing is connected', () => {
+  it('returns null when nothing is connected and there is nothing to carry forward', () => {
     const allDown = adtWan.map((row) => ({ ...row, connStatusV4: 'Disconnected', connStatusV6: 'Disconnected' }))
     expect(parseLiveWan(allDown)).toBeNull()
+  })
+
+  it('takes the connection stack, which is not the interface stack', () => {
+    // The trap: DEV2_IP_INTF's ppp0 is stack 4, this connection is stack 3.
+    // Anything addressing the connection needs this one.
+    expect(parseLiveWan(adtWan)?.stack).toBe('3,0,0,0,0,0')
+  })
+
+  it('reads the DS-Lite state and both session uptimes', () => {
+    const wan = parseLiveWan(adtWan)
+    expect(wan).toMatchObject({
+      connType: 'PPPoE',
+      accessMode: 'VDSL',
+      dsliteEnabled: 1,
+      // The v4 stack is disabled, so its uptime is pinned at 0 and its status
+      // reads Connecting forever. Preserved as measured, not normalised away —
+      // a consumer that reads 0 as "just came up" is the bug this documents.
+      connIpv4Enabled: 0,
+      uptimeV4S: 0,
+      connIpv6Enabled: 1,
+      uptimeV6S: 4761,
+      lastConnError: 'ERROR_NONE',
+      selectedBy: 'status',
+    })
+  })
+
+  /**
+   * The failure the fallback exists for. With every instance disconnected,
+   * status-based selection yields nothing — so no WAN row is written, no
+   * interface is given the `wan` role, and `ppp0`'s byte counters stop being
+   * recorded at exactly the moment they diagnose the fault. Those counters
+   * resetting to zero are what identified the 2026-08-01 incident.
+   */
+  it('carries the previous connection forward when the router disconnects them all', () => {
+    const allDown = adtWan.map((row) => ({ ...row, connStatusV4: 'Disconnected', connStatusV6: 'Disconnected' }))
+    const wan = parseLiveWan(allDown, { previousName: 'ipoe_ptm_0_0_d' })
+    expect(wan?.ifName).toBe('ppp0')
+    expect(wan?.connStatusV4).toBe('Disconnected')
+    // And says so, so nothing reads as a connection the router vouched for.
+    expect(wan?.selectedBy).toBe('continuity')
+  })
+
+  it('does not carry forward a name the router no longer lists', () => {
+    expect(parseLiveWan([], { previousName: 'ipoe_ptm_0_0_d' })).toBeNull()
+  })
+
+  it('prefers a live connection over the remembered one', () => {
+    const wan = parseLiveWan(adtWan, { previousName: 'pppoe_40_2' })
+    expect(wan?.name).toBe('ipoe_ptm_0_0_d')
+    expect(wan?.selectedBy).toBe('status')
   })
 })
 

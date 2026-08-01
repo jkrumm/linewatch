@@ -274,6 +274,79 @@ export const routerLineSample = sqliteTable(
 )
 
 /**
+ * The WAN *connection* — one row per poll, the layer between the carrier line
+ * and the IP interface. Its own table rather than columns on
+ * `router_line_sample`, because that insert is gated on a line reading having
+ * arrived: a poll where only `DEV2_ADT_WAN` answered would silently drop the
+ * connection state, which is exactly the partial poll worth keeping.
+ *
+ * This exists because the 2026-08-01 outage could not be diagnosed. All four
+ * probe targets are IPv4, `parseLiveWan` parsed five fields and threw four
+ * away, and the layer that failed had to be inferred from byte counters
+ * resetting. Every column here was already on the wire.
+ *
+ * **Read `conn_status_v4` on this line as a constant, not a signal.** Measured
+ * against the live device 2026-08-01: `conn_ipv4_enabled` is 0 and the
+ * connection's IPv4 address is 0.0.0.0, because IPv4 is carried entirely over
+ * the DS-Lite softwire (`dslite_enabled` = 1, confirmed from the router's own
+ * data model rather than inferred). So `connStatusV4` reads `Connecting`
+ * forever, in health and in failure alike, and `uptime_v4_s` is permanently 0.
+ * `conn_status_v6` and `uptime_v6_s` are the live ones.
+ *
+ * `uptime_v6_s` is the field this table was worth adding for on its own: it is
+ * the WAN session's own age, so a *decrease* between two polls proves the
+ * session was torn down and re-established. On 08-01 that fact had to be
+ * reconstructed from `ppp0`'s byte counters resetting to zero, and the poll that
+ * would have shown it directly is the one that failed.
+ *
+ * The AFTR hostname, the connection's addresses and the PPP credentials all
+ * arrive in the same rows and none of them are here: `redact.ts` blanks them by
+ * key and by value before a parser ever sees them, and this repo is public.
+ */
+export const routerWanSample = sqliteTable(
+  'router_wan_sample',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    ts: integer('ts').notNull(),
+    /** The connection profile's configured name, e.g. `ipoe_ptm_0_0_d`. */
+    connName: text('conn_name'),
+    /** The interface it runs over — the join key into `router_intf_sample`. */
+    ifName: text('if_name'),
+    connType: text('conn_type'),
+    accessMode: text('access_mode'),
+    /**
+     * The instance's own stack, verbatim (`"3,0,0,0,0,0"`), not the leading
+     * integer `router_intf_sample.stack` keeps. Stored whole because it is the
+     * addressing a write against this connection would use, and the trap is
+     * that it is *not* the interface's: `DEV2_IP_INTF`'s `ppp0` is stack 4 while
+     * this connection is stack 3. Evidence only — an action path must re-read it
+     * live and take the value it finds, never a stored one.
+     */
+    stack: text('stack'),
+    connStatusV4: text('conn_status_v4'),
+    connStatusV6: text('conn_status_v6'),
+    connIpv4Enabled: integer('conn_ipv4_enabled'),
+    connIpv6Enabled: integer('conn_ipv6_enabled'),
+    dsliteEnabled: integer('dslite_enabled'),
+    /** Seconds since each stack came up. A decrease is a re-established session. */
+    uptimeV4S: integer('uptime_v4_s'),
+    uptimeV6S: integer('uptime_v6_s'),
+    /** `ERROR_NONE` when healthy. The firmware's own name for why a dial failed. */
+    lastConnError: text('last_conn_error'),
+    /**
+     * How the row was picked out of `DEV2_ADT_WAN`'s six instances. `status`
+     * means the router reported it as not-disconnected; `continuity` means
+     * nothing was, and this is the profile that was live at the previous poll.
+     * Recorded rather than hidden because the second case is precisely a WAN
+     * failure, and a row that says "connected" by inheritance must not read like
+     * one the router vouched for.
+     */
+    selectedBy: text('selected_by', { enum: ['status', 'continuity'] }),
+  },
+  (t) => [index('router_wan_ts').on(t.ts)],
+)
+
+/**
  * Per-interface throughput as the router sees it, one row per interface per
  * poll. This is the counterpart to the speed tests: it shows load on the WAN
  * without generating any, so a latency spike can be attributed to the household

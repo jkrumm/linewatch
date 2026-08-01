@@ -55,6 +55,36 @@ const LineSampleSchema = z.object({
   severelyErroredSecs: z.number().int().nullable(),
 })
 
+/**
+ * The WAN connection as the router describes it. Read `connStatusV4` on a
+ * DS-Lite line as a constant, not a signal: `connIpv4Enabled` is 0 there and
+ * IPv4 rides the softwire, so it says `Connecting` in health and in failure
+ * alike and `uptimeV4S` is pinned at 0. `connStatusV6` and `uptimeV6S` are the
+ * live pair, and a drop in `uptimeV6S` between polls is the session having been
+ * re-established — surfaced as a `link_change` event, not derived here.
+ */
+const WanSampleSchema = z.object({
+  id: z.number().int(),
+  ts: z.number().int(),
+  connName: z.string().nullable(),
+  ifName: z.string().nullable(),
+  connType: z.string().nullable(),
+  accessMode: z.string().nullable(),
+  stack: z.string().nullable().describe("The connection's own stack, which is not the interface's — evidence, never the source for a write"),
+  connStatusV4: z.string().nullable(),
+  connStatusV6: z.string().nullable(),
+  connIpv4Enabled: z.number().int().nullable(),
+  connIpv6Enabled: z.number().int().nullable(),
+  dsliteEnabled: z.number().int().nullable(),
+  uptimeV4S: z.number().int().nullable(),
+  uptimeV6S: z.number().int().nullable(),
+  lastConnError: z.string().nullable(),
+  selectedBy: z
+    .enum(['status', 'continuity'])
+    .nullable()
+    .describe('`continuity` means the router reported every connection disconnected and this is the one that was live at the previous poll — it did not vouch for this row'),
+})
+
 const IntfSampleSchema = z.object({
   id: z.number().int(),
   ts: z.number().int(),
@@ -186,6 +216,7 @@ export const routerRoutes = new Elysia()
         now: snapshot.now,
         staleAfterMs: snapshot.staleAfterMs,
         line: snapshot.line,
+        wanConnection: snapshot.wanConnection,
         wan: snapshot.wan,
         lan: snapshot.lan,
         collectorHost: snapshot.collector,
@@ -202,6 +233,7 @@ export const routerRoutes = new Elysia()
         now: z.number().int(),
         staleAfterMs: z.number().int(),
         line: observation(LineSampleSchema).nullable(),
+        wanConnection: observation(WanSampleSchema).nullable(),
         wan: observation(IntfSampleSchema).nullable(),
         lan: observation(IntfSampleSchema).nullable(),
         collectorHost: observation(HostSchema).nullable(),
@@ -211,7 +243,7 @@ export const routerRoutes = new Elysia()
         tags: ['Router'],
         summary: 'Latest router reading',
         description:
-          'Most recent carrier-side line sample, WAN/LAN throughput, the router-side view of the collector host — presence, medium and activity for `collectorHostIp`, with no device name, which this repo does not store — and every LAN port from the latest poll. Each part comes from its own latest row and carries its own `observedAt`/`ageMs`/`stale`: a poll where one OID was refused writes some tables and not others, and during a WAN outage no `role: wan` row is written at all while the LAN bridge keeps updating. `stale: true` means the value is older than `staleAfterMs` (two poll intervals) and describes the past, not now — it is never silently substituted for a current reading. Disagreements between this and the host-side `probe_cycle` vantage are materialised into `GET /api/events` as `link_change` at poll time, not recomputed here.',
+          'Most recent carrier-side line sample, WAN/LAN throughput, the router-side view of the collector host — presence, medium and activity for `collectorHostIp`, with no device name, which this repo does not store — and every LAN port from the latest poll. Each part comes from its own latest row and carries its own `observedAt`/`ageMs`/`stale`: a poll where one OID was refused writes some tables and not others, `wanConnection` is the WAN session (established, for how long, last dial error); `wan` is throughput on the interface under it, and the two fail independently. `stale: true` means the value is older than `staleAfterMs` (two poll intervals) and describes the past, not now — it is never silently substituted for a current reading. Disagreements between this and the host-side `probe_cycle` vantage are materialised into `GET /api/events` as `link_change` at poll time, not recomputed here.',
       },
     },
   )

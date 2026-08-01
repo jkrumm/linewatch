@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import { createTestDb } from '../../db/test-db.js'
-import { event, probeCycle, routerEthPort, routerHost, routerIntfSample, routerLineSample } from '../../db/schema.js'
+import { event, probeCycle, routerEthPort, routerHost, routerIntfSample, routerLineSample, routerWanSample } from '../../db/schema.js'
 import {
   RouterBusyError,
   RouterOidError,
@@ -44,10 +44,36 @@ class FakeRouter implements RouterReader {
   /** Set to make the login fail the way an unreachable or evicting router does. */
   loginError: Error | null = null
 
+  /**
+   * The device's uptime counters advance with the wall clock, and the fake has
+   * to as well. Measured over 168 consecutive poll pairs in the real record:
+   * 166 advance within ±3 s of the elapsed time, one goes backwards (the
+   * 10:10:01 resync) and exactly one stays put — the 23 → 23 pair either side
+   * of the 2026-08-01 router reboot, which was a second resync and not a stuck
+   * counter. Nothing in the record freezes.
+   *
+   * That matters because `detectRestart` back-solves start epochs, so a static
+   * fixture read at two different times is indistinguishable from a restart —
+   * it *is* one, arithmetically. A fake that never ages its counters would make
+   * every multi-poll test fabricate a resync, which is a defect in the fake and
+   * would have been read as one in the detector.
+   */
+  private clock: () => number = () => 0
+  /** Per OID, because `replace` re-baselines only the OID it replaces. */
+  private clockedAt: Record<string, number> = {}
+  private baselineAt = 0
+
   constructor(
     private responses: Record<string, RawRows> = defaultResponses(),
     private readonly errors: Record<string, Error> = {},
   ) {}
+
+  /** Share the test's clock, and take the current responses as "the values right now". */
+  useClock(now: () => number): void {
+    this.clock = now
+    this.baselineAt = now()
+    this.clockedAt = {}
+  }
 
   startSession(): Promise<void> {
     if (this.loginError !== null) return Promise.reject(this.loginError)
@@ -59,15 +85,32 @@ class FakeRouter implements RouterReader {
     this.calls.push({ oid, operation })
     const error = this.errors[oid]
     if (error !== undefined) return Promise.reject(error)
-    return Promise.resolve((this.responses[oid] ?? []).map(redactRow))
+    return Promise.resolve((this.responses[oid] ?? []).map((row) => redactRow(this.aged(oid, row))))
   }
 
+  /** A counter reading 0 is a stack that is not running; it does not age. */
+  private aged(oid: string, row: Record<string, string>): Record<string, string> {
+    const elapsedS = Math.floor((this.clock() - (this.clockedAt[oid] ?? this.baselineAt)) / 1000)
+    if (elapsedS <= 0) return row
+    const fields = oid === 'DEV2_DSL_LINE_STATS' ? ['showtimeStart'] : oid === 'DEV2_ADT_WAN' ? ['X_TP_Uptime', 'X_TP_UptimeV6'] : []
+    if (fields.length === 0) return row
+    const out = { ...row }
+    for (const field of fields) {
+      const base = Number(row[field])
+      if (Number.isFinite(base) && base > 0) out[field] = String(base + elapsedS)
+    }
+    return out
+  }
+
+  /** New device state as of now — so the aging above restarts from these values. */
   replace(oid: string, rows: RawRows): void {
     this.responses = { ...this.responses, [oid]: rows }
+    this.clockedAt[oid] = this.clock()
   }
 }
 
 function makePoller(client: RouterReader, now: () => number) {
+  if (client instanceof FakeRouter) client.useClock(now)
   const db = createTestDb()
   const poller = new RouterPoller({
     db,
@@ -243,8 +286,10 @@ describe('RouterPoller', () => {
     const { db, poller } = makePoller(client, () => now)
 
     await poller.poll()
-    client.replace('DEV2_DSL_LINE_STATS', [{ ...DSL_LINE_STATS_ROW, showtimeStart: '17' }])
+    // The clock moves first: `replace` means "this is the device's state as of
+    // now", so setting it before the jump would age the 17 back up by 300 s.
     now = 301_000
+    client.replace('DEV2_DSL_LINE_STATS', [{ ...DSL_LINE_STATS_ROW, showtimeStart: '17' }])
     const summary = await poller.poll()
 
     expect(summary.resync).toBe(true)
@@ -364,18 +409,65 @@ describe('readRouterSnapshot', () => {
     expect(snapshot.collector?.value.ip).toBe(COLLECTOR_IP)
   })
 
-  it('marks the WAN reading stale through an outage while the LAN half stays current', async () => {
+  /**
+   * This case used to assert the opposite — that a disconnected `DEV2_ADT_WAN`
+   * wrote no WAN row at all, so `Observation.stale` reported "last seen 15
+   * minutes ago". That was honest about the *label* and expensive about the
+   * *record*: it stopped storing `ppp0`'s byte counters, the WAN session's
+   * uptime and `PPPLastConnError` at the one moment they diagnose anything.
+   * Those counters resetting to zero are what identified the 2026-08-01 fault,
+   * and a poller that goes quiet exactly when the WAN goes down is the wrong
+   * trade.
+   *
+   * So the connection that was live at the previous poll is carried forward,
+   * and nothing is fabricated to do it: the interface counters are read live
+   * this poll, and `router_wan_sample.selected_by = 'continuity'` records that
+   * the router did not vouch for the connection. The staleness mechanism is
+   * unchanged and still covers the case below, where there is no WAN
+   * connection to carry forward at all.
+   */
+  it('keeps recording the WAN interface through an outage, marked as carried forward', async () => {
     const client = new FakeRouter()
     let now = 1_000_000
     const { db, poller } = makePoller(client, () => now)
 
-    // One healthy poll, then the line goes down and three more polls land.
     await poller.poll()
+    now = 1_300_000
     client.replace('DEV2_ADT_WAN', wanDownRows())
+    const summary = await poller.poll()
+
+    expect(summary.wanIfName).toBe('ppp0')
+    expect(summary.intfRows).toBe(2)
+
+    const wanRows = db.select().from(routerWanSample).orderBy(routerWanSample.ts).all()
+    expect(wanRows).toHaveLength(2)
+    expect(wanRows[0]).toMatchObject({ selectedBy: 'status', connStatusV6: 'Connected', uptimeV6S: 4761 })
+    // The row the old behaviour did not write, and the reason to write it.
+    expect(wanRows[1]).toMatchObject({
+      selectedBy: 'continuity',
+      connName: 'ipoe_ptm_0_0_d',
+      connStatusV4: 'Disconnected',
+      connStatusV6: 'Disconnected',
+    })
+
+    const snapshot = readRouterSnapshot(db, { collectorHostIp: COLLECTOR_IP, staleAfterMs: STALE_AFTER_MS, now })
+    expect(snapshot.wan?.stale).toBe(false)
+    expect(snapshot.wan?.observedAt).toBe(now)
+  })
+
+  it('marks the WAN reading stale when the router stops listing the connection at all', async () => {
+    const client = new FakeRouter()
+    let now = 1_000_000
+    const { db, poller } = makePoller(client, () => now)
+
+    await poller.poll()
+    // No instances at all — nothing to select by status and nothing to carry
+    // forward by name. Absence here is the honest record, and staleness is how
+    // the read path says so.
+    client.replace('DEV2_ADT_WAN', [])
     for (const minutes of [5, 10, 15]) {
       now = 1_000_000 + minutes * 60_000
       const summary = await poller.poll()
-      // Reproduces the reported symptom: no WAN row is written at all.
       expect(summary.wanIfName).toBeNull()
       expect(summary.wanRxKbps).toBeNull()
       expect(summary.intfRows).toBe(1)

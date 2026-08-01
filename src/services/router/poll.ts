@@ -8,9 +8,10 @@ import {
   routerHost,
   routerIntfSample,
   routerLineSample,
+  routerWanSample,
 } from '../../db/schema.js'
 import { RouterReadError, type RouterOperation } from './client.js'
-import { compareVantage, detectResync, disagreementSignature, type Disagreement, type HostVantage, type RouterVantage } from './derive.js'
+import { compareVantage, detectResync, detectRestart, disagreementSignature, type Disagreement, type HostVantage, type RouterVantage } from './derive.js'
 import {
   checkListLength,
   parseEthPorts,
@@ -172,7 +173,18 @@ export class RouterPoller {
     }
 
     const line = parseLineSample({ fastLine: rows.fastLine[0], lineStats: rows.lineStats[0] })
-    const wan = parseLiveWan(rows.adtWan)
+    // The previous WAN row does two jobs: it names the connection to carry
+    // forward when the router reports every instance disconnected (so the WAN
+    // interface keeps a `wan` role and its byte counters keep being recorded
+    // through the outage), and it is the other half of the session-restart
+    // comparison below.
+    const previousWan = this.db
+      .select()
+      .from(routerWanSample)
+      .orderBy(desc(routerWanSample.ts))
+      .limit(1)
+      .all()[0]
+    const wan = parseLiveWan(rows.adtWan, { previousName: previousWan?.connName ?? null })
     const interfaces = parseIntfSamples({
       intf: rows.ipIntf,
       stats: rows.ipIntfStats,
@@ -203,7 +215,25 @@ export class RouterPoller {
       .orderBy(desc(routerLineSample.ts))
       .limit(1)
       .all()[0]
-    const resync = detectResync(previousShowtime?.showtimeStartS ?? null, line.showtimeStartS)
+    const resync = detectResync(
+      previousShowtime === undefined ? null : { ts: previousShowtime.ts, seconds: previousShowtime.showtimeStartS },
+      { ts, seconds: line.showtimeStartS },
+    )
+
+    // The WAN session's own age, which is a stronger signal than the byte
+    // counters the 2026-08-01 diagnosis had to fall back on: a decrease proves
+    // the session was torn down and re-established, and it says which stack.
+    // Both are checked because only one of them is live on any given line — on
+    // this DS-Lite line `uptimeV4S` is pinned at 0 and `uptimeV6S` carries the
+    // session, and that flips on a line with native IPv4.
+    const sessionRestarts = (['v4', 'v6'] as const).filter((stack) => {
+      const previousSeconds = stack === 'v4' ? (previousWan?.uptimeV4S ?? null) : (previousWan?.uptimeV6S ?? null)
+      const currentSeconds = stack === 'v4' ? wan?.uptimeV4S ?? null : wan?.uptimeV6S ?? null
+      return detectRestart(
+        previousWan === undefined ? null : { ts: previousWan.ts, seconds: previousSeconds },
+        { ts, seconds: currentSeconds },
+      )
+    })
 
     const collectorHost = hosts.find((host) => host.ip === this.collectorHostIp)
     const collectorPort = resolveHostPort({ host: collectorHost, ports })
@@ -239,6 +269,31 @@ export class RouterPoller {
             showtimeStartS: line.showtimeStartS,
             erroredSecs: line.erroredSecs,
             severelyErroredSecs: line.severelyErroredSecs,
+          })
+          .run()
+      }
+
+      // Deliberately NOT gated on `hasLineReading`. A poll where only
+      // DEV2_ADT_WAN answered is exactly the partial poll worth keeping, and
+      // folding these columns into router_line_sample would have thrown it away.
+      if (wan !== null) {
+        tx.insert(routerWanSample)
+          .values({
+            ts,
+            connName: wan.name,
+            ifName: wan.ifName,
+            connType: wan.connType,
+            accessMode: wan.accessMode,
+            stack: wan.stack,
+            connStatusV4: wan.connStatusV4,
+            connStatusV6: wan.connStatusV6,
+            connIpv4Enabled: wan.connIpv4Enabled,
+            connIpv6Enabled: wan.connIpv6Enabled,
+            dsliteEnabled: wan.dsliteEnabled,
+            uptimeV4S: wan.uptimeV4S,
+            uptimeV6S: wan.uptimeV6S,
+            lastConnError: wan.lastConnError,
+            selectedBy: wan.selectedBy,
           })
           .run()
       }
@@ -294,6 +349,30 @@ export class RouterPoller {
               showtimeStartS: line.showtimeStartS,
               previousShowtimeStartS: previousShowtime?.showtimeStartS ?? null,
               previousPollTs: previousShowtime?.ts ?? null,
+            }),
+          })
+          .run()
+      }
+
+      // Materialised on write like the resync above, and for the same reason:
+      // a WAN session that came back between two polls is a fact about an
+      // instant, and deriving it on read means re-deriving it from a table
+      // whose rows may since have been pruned.
+      for (const stack of sessionRestarts) {
+        tx.insert(event)
+          .values({
+            ts,
+            kind: 'link_change',
+            detail: JSON.stringify({
+              source: 'router-poller',
+              reason: 'wan_session_restart',
+              stack,
+              uptimeS: stack === 'v4' ? wan?.uptimeV4S : wan?.uptimeV6S,
+              previousUptimeS: stack === 'v4' ? previousWan?.uptimeV4S : previousWan?.uptimeV6S,
+              previousPollTs: previousWan?.ts ?? null,
+              connStatusV4: wan?.connStatusV4 ?? null,
+              connStatusV6: wan?.connStatusV6 ?? null,
+              lastConnError: wan?.lastConnError ?? null,
             }),
           })
           .run()
@@ -429,6 +508,7 @@ export interface RouterSnapshotParams {
 }
 
 type LineRow = typeof routerLineSample.$inferSelect
+type WanRow = typeof routerWanSample.$inferSelect
 type IntfRow = typeof routerIntfSample.$inferSelect
 type HostRow = typeof routerHost.$inferSelect
 type EthPortRow = typeof routerEthPort.$inferSelect
@@ -438,6 +518,13 @@ export interface RouterSnapshot {
   now: number
   staleAfterMs: number
   line: Observation<LineRow> | null
+  /**
+   * The WAN *connection* (`router_wan_sample`), not the interface below it.
+   * Separate because they answer different questions and fail independently:
+   * `wan` is throughput on `ppp0`, this is whether the session is established,
+   * how long it has been up and what the last dial error was.
+   */
+  wanConnection: Observation<WanRow> | null
   wan: Observation<IntfRow> | null
   lan: Observation<IntfRow> | null
   collector: Observation<HostRow> | null
@@ -503,5 +590,18 @@ export function readRouterSnapshot(
       ? null
       : observe(db.select().from(routerEthPort).where(eq(routerEthPort.ts, latestPortTs.ts)).all(), latestPortTs.ts)
 
-  return { now, staleAfterMs, line, wan: latestIntfByRole('wan'), lan: latestIntfByRole('lan'), collector, ports }
+  const wanConnection = observeRow(
+    db.select().from(routerWanSample).orderBy(desc(routerWanSample.ts)).limit(1).all()[0],
+  )
+
+  return {
+    now,
+    staleAfterMs,
+    line,
+    wanConnection,
+    wan: latestIntfByRole('wan'),
+    lan: latestIntfByRole('lan'),
+    collector,
+    ports,
+  }
 }

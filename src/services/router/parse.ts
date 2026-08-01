@@ -125,8 +125,24 @@ export interface LiveWan {
   /** The interface it runs over, e.g. `ppp0` — the join key into DEV2_IP_INTF. */
   ifName: string | null
   connType: string | null
+  accessMode: string | null
+  /**
+   * The instance's own stack string, verbatim. Not the interface's: measured
+   * live 2026-08-01, this connection is `3,0,0,0,0,0` while `DEV2_IP_INTF`'s
+   * `ppp0` is stack 4. Anything addressing the *connection* needs this one.
+   */
+  stack: string | null
   connStatusV4: string | null
   connStatusV6: string | null
+  connIpv4Enabled: number | null
+  connIpv6Enabled: number | null
+  dsliteEnabled: number | null
+  /** Seconds since each stack came up. A decrease across polls is a new session. */
+  uptimeV4S: number | null
+  uptimeV6S: number | null
+  lastConnError: string | null
+  /** Whether the router vouched for this row, or it was carried over. See `parseLiveWan`. */
+  selectedBy: 'status' | 'continuity'
 }
 
 /**
@@ -136,24 +152,58 @@ export interface LiveWan {
  * contract, and the other five instances are configured-but-idle profiles
  * (USB 3G/4G, SFP, two spare PPPoE profiles for the fibre migration).
  *
- * `connStatusV4` reads `Connecting` on this line as its steady state — IPv4 is
- * carried over DS-Lite (`X_TP_DsliteEnable=1`) while `connStatusV6` reads
- * `Connected` and the line passes traffic. So "not Disconnected" is the test,
- * and a v6-connected instance qualifies too.
+ * `connStatusV4` reads `Connecting` on this line as its steady state and there
+ * is now a measured reason rather than an inference: `connIPv4Enabled` is 0 and
+ * the connection's IPv4 address is 0.0.0.0, because IPv4 is carried entirely
+ * over the DS-Lite softwire (`X_TP_DsliteEnable=1`, read from the device
+ * 2026-08-01). The v4 status never reaches `Connected` on this line in any
+ * condition, so "not Disconnected" is the test and a v6-connected instance
+ * qualifies too.
+ *
+ * **`previousName` is the fallback that keeps the record from going blind
+ * during the failure it exists to describe.** When every instance reports
+ * disconnected, status-based selection yields nothing — so no WAN row is
+ * written, no interface is given the `wan` role, and `ppp0`'s byte counters
+ * stop being recorded. Those counters resetting to zero are what identified the
+ * 2026-08-01 fault; losing them precisely while the WAN is down is the wrong
+ * trade. So the connection that was live at the previous poll is carried
+ * forward, and `selectedBy: 'continuity'` says the router did not vouch for it.
+ * Nothing reads as measured that was not.
  */
-export function parseLiveWan(rows: readonly RouterRow[]): LiveWan | null {
+export function parseLiveWan(
+  rows: readonly RouterRow[],
+  options: { previousName?: string | null } = {},
+): LiveWan | null {
   const candidates = rows.filter(
     (row) => str(row, 'connStatusV4') !== 'Disconnected' || str(row, 'connStatusV6') === 'Connected',
   )
-  const chosen =
-    candidates.find((row) => str(row, 'connStatusV4') === 'Connected') ?? candidates[0] ?? null
-  if (chosen === null) return null
+  const byStatus = candidates.find((row) => str(row, 'connStatusV4') === 'Connected') ?? candidates[0] ?? null
+  const previousName = options.previousName ?? null
+  const byContinuity =
+    previousName === null ? null : (rows.find((row) => str(row, 'name') === previousName) ?? null)
+
+  const chosen = byStatus ?? byContinuity
+  if (chosen === undefined || chosen === null) return null
+
   return {
     name: str(chosen, 'name'),
     ifName: str(chosen, 'ifName'),
     connType: str(chosen, 'connType'),
+    accessMode: str(chosen, 'accessMode'),
+    stack: str(chosen, 'stack'),
     connStatusV4: str(chosen, 'connStatusV4'),
     connStatusV6: str(chosen, 'connStatusV6'),
+    connIpv4Enabled: int(chosen, 'connIPv4Enabled'),
+    connIpv6Enabled: int(chosen, 'connIPv6Enabled'),
+    dsliteEnabled: int(chosen, 'X_TP_DsliteEnable'),
+    // Named for the stack they measure, not for the field they came from. On a
+    // DS-Lite line `X_TP_Uptime` is pinned at 0 forever because the v4 stack is
+    // disabled — which is why a consumer must never read 0 here as "just came
+    // up". Null and 0 mean different things and both are preserved.
+    uptimeV4S: int(chosen, 'X_TP_Uptime'),
+    uptimeV6S: int(chosen, 'X_TP_UptimeV6'),
+    lastConnError: str(chosen, 'PPPLastConnError'),
+    selectedBy: byStatus === null || byStatus === undefined ? 'continuity' : 'status',
   }
 }
 

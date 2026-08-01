@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import {
   compareVantage,
   detectResync,
+  detectRestart,
   disagreementSignature,
   type HostVantage,
   type RouterVantage,
@@ -114,10 +115,69 @@ describe('disagreementSignature', () => {
 })
 
 describe('detectResync', () => {
-  it('fires only when showtime seconds go backwards', () => {
-    expect(detectResync(3589, 3889)).toBe(false)
-    expect(detectResync(3589, 12)).toBe(true)
-    expect(detectResync(null, 12)).toBe(false)
-    expect(detectResync(3589, null)).toBe(false)
+  const at = (ts: number, seconds: number | null) => ({ ts, seconds })
+
+  it('fires when showtime seconds go backwards', () => {
+    expect(detectResync(at(0, 3589), at(300_000, 3889))).toBe(false)
+    expect(detectResync(at(0, 3589), at(300_000, 12))).toBe(true)
+  })
+
+  it('treats a missing reading on either side as unknown', () => {
+    expect(detectResync(null, at(0, 12))).toBe(false)
+    expect(detectResync(at(0, null), at(300_000, 12))).toBe(false)
+    expect(detectResync(at(0, 3589), at(300_000, null))).toBe(false)
+  })
+
+  /**
+   * 2026-08-01, and the reason this compares epochs rather than counters. The
+   * line resynced at 10:09:38 and again at 10:29:37; the 10:10:01 and 10:30:00
+   * polls both read `showtimeStart = 23`. Under `current < previous` the second
+   * resync produced no event at all and had to be back-solved by hand from the
+   * 10:40 / 10:50 / 11:00 readings — the one event of the incident that the
+   * record simply did not contain.
+   */
+  it('sees two resyncs that were read at the identical showtime counter', () => {
+    const firstPoll = at(Date.UTC(2026, 7, 1, 10, 10, 1), 23)
+    const secondPoll = at(Date.UTC(2026, 7, 1, 10, 30, 0), 23)
+    expect(detectResync(firstPoll, secondPoll)).toBe(true)
+  })
+
+  it('does not fire across an ordinary interval on one unbroken showtime', () => {
+    const firstPoll = at(Date.UTC(2026, 7, 1, 10, 10, 1), 23)
+    const laterPoll = at(Date.UTC(2026, 7, 1, 10, 20, 1), 623)
+    expect(detectResync(firstPoll, laterPoll)).toBe(false)
+  })
+
+  it('absorbs the second or two between a poll timestamp and its reads', () => {
+    expect(detectResync(at(0, 100), at(600_000, 703))).toBe(false)
+  })
+})
+
+describe('detectRestart on a session counter', () => {
+  const at = (ts: number, seconds: number | null) => ({ ts, seconds })
+
+  /**
+   * The guard that keeps a DS-Lite line from reporting a WAN restart every ten
+   * minutes forever. `X_TP_Uptime` measures the v4 stack, which is disabled on
+   * this line (`connIPv4Enabled = 0`), so it reads 0 on every poll — and a
+   * back-solved start epoch of "now" advances with every poll.
+   */
+  it('reads a counter pinned at zero as not running, not as restarting', () => {
+    expect(detectRestart(at(0, 0), at(600_000, 0))).toBe(false)
+    expect(detectRestart(at(600_000, 0), at(1_200_000, 0))).toBe(false)
+  })
+
+  /** Zero is "not running" only while it stays zero. A stack that came up in between did restart. */
+  it('still sees a stack that came up, or went down, either side of a zero', () => {
+    expect(detectRestart(at(0, 0), at(600_000, 42))).toBe(true)
+    expect(detectRestart(at(0, 4761), at(600_000, 0))).toBe(true)
+  })
+
+  it('sees a session re-established between two polls', () => {
+    expect(detectRestart(at(0, 4761), at(600_000, 23))).toBe(true)
+  })
+
+  it('does not fire on a session that simply kept running', () => {
+    expect(detectRestart(at(0, 4761), at(600_000, 5361))).toBe(false)
   })
 })

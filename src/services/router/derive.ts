@@ -134,12 +134,54 @@ export function disagreementSignature(disagreements: readonly Disagreement[]): s
   return disagreements.map((d) => `${d.field}:${d.host}|${d.router}`).join(';')
 }
 
+/** One reading of a "seconds since X started" counter, with when it was read. */
+export interface UptimeObservation {
+  /** Unix ms of the poll that produced it. */
+  ts: number
+  /** The router's own seconds-since-start, or null when it did not report. */
+  seconds: number | null
+}
+
 /**
- * True when the line resynced between two polls. `showtimeStart` counts seconds
- * since the line reached showtime, so it only ever decreases by resyncing —
- * which makes a decrease the honest signal, and a missed poll harmless.
+ * Poll timestamps are taken at the start of a poll and the reads follow over the
+ * next second or two, so two back-solved start epochs for the *same* event
+ * differ slightly. Wide enough to absorb that, far below any real interval.
  */
-export function detectResync(previous: number | null, current: number | null): boolean {
-  if (previous === null || current === null) return false
-  return current < previous
+const RESTART_TOLERANCE_S = 10
+
+/**
+ * True when a "seconds since X started" counter shows a **new** X between two
+ * observations.
+ *
+ * Compares back-solved start epochs (`ts − seconds`), not the raw counters, and
+ * that is the whole point. The obvious test — did the number go down — misses
+ * the case that matters: on 2026-08-01 the line resynced at 10:09:38 and again
+ * at 10:29:37, and both the 10:10:01 and the 10:30:00 poll read
+ * `showtimeStart = 23`. A strict `current < previous` recorded the first and
+ * not the second, so the resync that mattered — the one the router reboot
+ * caused — is missing from the event table entirely and had to be back-solved
+ * by hand from three later readings. Epochs 20 minutes apart cannot collide
+ * that way.
+ *
+ * Two guards, both load-bearing:
+ * - A counter pinned at 0 across both readings is *not running*, not
+ *   restarting every poll. Without this, `X_TP_Uptime` on a DS-Lite line —
+ *   permanently 0, because the v4 stack is disabled — would fire a fabricated
+ *   restart on every single poll forever.
+ * - A missing reading on either side is unknown, never a restart.
+ */
+export function detectRestart(previous: UptimeObservation | null, current: UptimeObservation): boolean {
+  if (previous === null || previous.seconds === null || current.seconds === null) return false
+  if (previous.seconds === 0 && current.seconds === 0) return false
+  const previousStart = previous.ts - previous.seconds * 1000
+  const currentStart = current.ts - current.seconds * 1000
+  return currentStart > previousStart + RESTART_TOLERANCE_S * 1000
+}
+
+/**
+ * True when the carrier line resynced between two polls — `detectRestart` over
+ * `showtimeStart`, which counts seconds since the line reached showtime.
+ */
+export function detectResync(previous: UptimeObservation | null, current: UptimeObservation): boolean {
+  return detectRestart(previous, current)
 }

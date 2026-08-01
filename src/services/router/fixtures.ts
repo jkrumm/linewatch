@@ -67,6 +67,15 @@ export const ADT_WAN_ROWS: Array<Record<string, string>> = [
     accessMode: 'VDSL',
     connStatusV4: 'Connecting',
     connStatusV6: 'Connected',
+    // Measured against the live device 2026-08-01, and the pair that explains
+    // why connStatusV4 is not a health signal on this line: the v4 stack is
+    // disabled outright and IPv4 rides the DS-Lite softwire, so `Connecting`
+    // and an uptime of 0 are its permanent healthy state.
+    connIPv4Enabled: '0',
+    connIPv6Enabled: '1',
+    X_TP_Uptime: '0',
+    X_TP_UptimeV6: '4761',
+    PPPLastConnError: 'ERROR_NONE',
     connIPv4Address: '0.0.0.0',
     connIPv6Address: '2001:db8:1234:5678::1',
     MACAddr: '00:11:22:33:44:55',

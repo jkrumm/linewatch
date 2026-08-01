@@ -255,29 +255,97 @@ describe('RouterPoller', () => {
     expect(db.select().from(routerLineSample).all()).toHaveLength(1)
   })
 
-  it('abandons the poll when the router cannot be reached, rather than recording absences', async () => {
-    // The failure mode this guards: eight reads each failing individually would
-    // otherwise "succeed" as a poll that wrote nothing, which reads like a
-    // healthy router with nothing to say.
+  it('stops reading when the router goes away, and records nothing it did not read', async () => {
+    // Read 1 fails, so nothing was ever read. The failure mode this still
+    // guards: eight reads each failing individually must not "succeed" as a
+    // poll that wrote nothing, which reads like a healthy router with nothing
+    // to say. It stops after the first, and it says so.
     const client = new FakeRouter(defaultResponses(), {
       DEV2_FAST_LINE: new RouterUnreachableError('connect timeout'),
     })
     const { db, poller } = makePoller(client, () => 1_000)
 
-    await expect(poller.poll()).rejects.toThrow(RouterUnreachableError)
+    const summary = await poller.poll()
     expect(client.calls).toHaveLength(1)
+    expect(summary.outcome).toBe('partial')
+    expect(summary.readsOk).toBe(0)
+    expect(summary.abandonedAt).toMatchObject({ oid: 'DEV2_FAST_LINE' })
+    expect(db.select().from(routerLineSample).all()).toHaveLength(0)
     expect(db.select().from(routerEthPort).all()).toHaveLength(0)
+    expect(db.select().from(routerWanSample).all()).toHaveLength(0)
   })
 
-  it('writes nothing at all when the session is lost mid-poll', async () => {
+  /**
+   * This used to assert the opposite, and the opposite was measurably
+   * expensive. Of the ten polls in the only container-log window that survived
+   * a deploy, two were abandoned — at reads 3 and 7 — and `router_line_sample`
+   * needs only reads 1 and 2. Both had a complete line sample in hand and threw
+   * it away, so observed coverage was 7/10 where 9/10 had already been paid
+   * for, in router traffic that had already happened.
+   */
+  it('keeps what the reads before a lost session bought', async () => {
     const client = new FakeRouter(defaultResponses(), {
+      // Read 3 of 8. Reads 1 and 2 are the whole line sample.
       DEV2_ADT_WAN: new RouterSessionLostError('socket closed'),
     })
     const { db, poller } = makePoller(client, () => 1_000)
 
-    await expect(poller.poll()).rejects.toThrow(RouterSessionLostError)
-    expect(db.select().from(routerLineSample).all()).toHaveLength(0)
+    const summary = await poller.poll()
+    expect(summary.outcome).toBe('partial')
+    expect(summary.readsOk).toBe(2)
+    expect(summary.abandonedAt).toMatchObject({ oid: 'DEV2_ADT_WAN', reason: 'router session lost: socket closed' })
+
+    expect(db.select().from(routerLineSample).all()).toHaveLength(1)
+    // Nothing downstream of the failed read is invented.
+    expect(db.select().from(routerWanSample).all()).toHaveLength(0)
     expect(db.select().from(routerIntfSample).all()).toHaveLength(0)
+    expect(db.select().from(routerEthPort).all()).toHaveLength(0)
+    expect(db.select().from(routerHost).all()).toHaveLength(0)
+  })
+
+  it('writes the partial poll into the record, because stdout does not survive a deploy', async () => {
+    const client = new FakeRouter(defaultResponses(), {
+      DEV2_ADT_WAN: new RouterSessionLostError('socket closed'),
+    })
+    const { db, poller } = makePoller(client, () => 1_000)
+    await poller.poll()
+
+    const notes = db.select().from(event).all().filter((row) => row.kind === 'note')
+    expect(notes).toHaveLength(1)
+    expect(JSON.parse(notes[0]!.detail)).toMatchObject({
+      source: 'router-poller',
+      reason: 'poll_partial',
+      readsOk: 2,
+      readsPlanned: 8,
+      abandonedAt: { oid: 'DEV2_ADT_WAN' },
+      stored: { line: true, wan: false, interfaces: 0 },
+    })
+  })
+
+  it('writes no outcome note for a clean poll, which evidences itself', async () => {
+    const { db, poller } = makePoller(new FakeRouter(), () => 1_000)
+    await poller.poll()
+    expect(db.select().from(event).all().filter((row) => row.kind === 'note')).toHaveLength(0)
+  })
+
+  /**
+   * An abandoned poll never reaches DEV2_HOST_ENTRY, so the router-side view of
+   * the collector is empty — not because the router lost sight of it, but
+   * because nobody asked. Comparing against that empty view manufactures a
+   * `host_presence` disagreement out of a question that was never put.
+   */
+  it('does not read an unasked host list as the router losing the collector', async () => {
+    const client = new FakeRouter(defaultResponses(), {
+      DEV2_HOST_ENTRY: new RouterSessionLostError('socket closed'),
+    })
+    const { db, poller } = makePoller(client, () => 1_000)
+    writeHostVantage(db, 1_000)
+
+    const summary = await poller.poll()
+    expect(summary.abandonedAt).toMatchObject({ oid: 'DEV2_HOST_ENTRY' })
+    expect(summary.disagreements).toEqual([])
+    const linkChanges = db.select().from(event).all().filter((row) => row.kind === 'link_change')
+    expect(linkChanges).toHaveLength(0)
   })
 
   it('records a resync when showtime seconds go backwards between polls', async () => {

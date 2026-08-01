@@ -29,11 +29,24 @@ import type { RouterRow } from './redact.js'
  * One poll of the router: one login, eight reads over that session, then one
  * atomic write.
  *
- * The reads are individually isolated — a firmware revision that drops one OID
- * costs that OID's columns, not the poll — but a failed login or a lost session
- * aborts the whole poll, because continuing would write a half-empty record that
- * looks like the router reporting zeros. A poll that could not log in stores
- * nothing at all: the gap in `router_line_sample` is the honest record of it.
+ * **A poll that dies partway through still stores what it already read.** It
+ * used to throw the lot away, and that was measurably expensive: of ten polls in
+ * the only log window that survived a deploy, two were abandoned at reads 3 and
+ * 7, and `router_line_sample` needs only reads 1 and 2 — so both had a complete
+ * line sample in hand and discarded it. Observed coverage went 7/10 where 9/10
+ * was already paid for.
+ *
+ * The original objection to continuing was that a poll made of absences reads exactly
+ * like a router reporting zeros. That is answered by *what* gets written rather
+ * than by refusing to write: an OID that did not answer produces no rows at all,
+ * never rows of zeros, and every insert below is gated on its own source having
+ * answered. The one place absence could still have been read as a measurement is
+ * the host/router vantage cross-check — an unread host list would have looked
+ * like the router no longer seeing the collector — so that comparison is gated
+ * on the read having succeeded, not on the list being non-empty.
+ *
+ * A failed *login* is still a poll that never happened: it throws, nothing is
+ * stored, and the gap in `router_line_sample` is the honest record of it.
  */
 
 /** Reads spaced out slightly: this device answers 406 under its own load. */
@@ -104,6 +117,18 @@ export interface RouterPollSummary {
   hostRows: number
   disagreements: Disagreement[]
   resync: boolean
+  /** Which stacks of the WAN connection were re-established since the previous poll. */
+  sessionRestarts: Array<'v4' | 'v6'>
+  /**
+   * `complete` = all eight reads answered. `partial` = at least one did not,
+   * either refused individually or because the poll was abandoned partway.
+   * Never a synonym for "stored nothing": a partial poll usually stores most of
+   * a complete one.
+   */
+  outcome: 'complete' | 'partial'
+  /** The read the poll stopped at, when the session or the device went away mid-poll. */
+  abandonedAt: { oid: string; reason: string } | null
+  readsOk: number
   /** Non-fatal problems: a refused OID, a list that failed its count cross-check. */
   warnings: string[]
 }
@@ -156,19 +181,29 @@ export class RouterPoller {
       hostEntry: [] as RouterRow[],
     }
 
+    /** Which reads actually answered. Distinct from "returned rows": an OID that
+     * answered with an empty list is a measurement, an unread one is not. */
+    const answered = new Set<keyof typeof READS>()
+    let abandonedAt: { oid: string; reason: string } | null = null
+
     let first = true
     for (const [key, plan] of Object.entries(READS) as Array<[keyof typeof READS, ReadPlan]>) {
       if (!first) await this.sleep(READ_SPACING_MS)
       first = false
       try {
         rows[key] = await this.client.read(plan.oid, plan.operation)
+        answered.add(key)
       } catch (error) {
-        // Only a genuinely per-OID failure degrades to a warning. Anything else
-        // — no session, no route to the device, backing off — invalidates every
-        // remaining read too, and continuing would record a poll made of
-        // absences that reads exactly like a router reporting zeros.
-        if (!(error instanceof RouterReadError)) throw error
-        warnings.push(`${plan.oid}: ${error.message}`)
+        // A per-OID failure costs that OID's columns and nothing else.
+        if (error instanceof RouterReadError) {
+          warnings.push(`${plan.oid}: ${error.message}`)
+          continue
+        }
+        // Anything else — no session, no route to the device — invalidates every
+        // remaining read, so stop asking. What the earlier reads bought is still
+        // a set of real values read at `ts`, and it gets persisted below.
+        abandonedAt = { oid: plan.oid, reason: error instanceof Error ? error.message : String(error) }
+        break
       }
     }
 
@@ -238,14 +273,19 @@ export class RouterPoller {
     const collectorHost = hosts.find((host) => host.ip === this.collectorHostIp)
     const collectorPort = resolveHostPort({ host: collectorHost, ports })
     const hostVantage = this.latestHostVantage(ts)
-    const disagreements =
-      hostVantage === null
-        ? []
-        : compareVantage(hostVantage, this.routerVantage(collectorHost, collectorPort))
+    // Gated on the read, not on the rows. Without this an abandoned poll that
+    // never reached DEV2_HOST_ENTRY would compare the collector's live vantage
+    // against an empty router-side view and record a `host_presence`
+    // disagreement — the router losing sight of the collector — from a question
+    // that was never asked.
+    const comparable = hostVantage !== null && answered.has('hostEntry')
+    const disagreements = comparable
+      ? compareVantage(hostVantage, this.routerVantage(collectorHost, collectorPort))
+      : []
 
     const hasLineReading = rows.fastLine.length > 0 || rows.lineStats.length > 0
     const signature = disagreementSignature(disagreements)
-    const signatureChanged = hostVantage !== null && signature !== this.lastDisagreementSignature
+    const signatureChanged = comparable && signature !== this.lastDisagreementSignature
 
     this.db.transaction((tx) => {
       if (hasLineReading) {
@@ -378,6 +418,37 @@ export class RouterPoller {
           .run()
       }
 
+      // Poll telemetry into the record, because stdout does not survive a
+      // deploy: `make up` runs --force-recreate, which destroys the previous
+      // container's json-file log, so every failure-reason tally in this repo
+      // was bounded by time-since-last-deploy — ten attempts, once. Only
+      // non-complete polls are written. A clean poll already evidences itself
+      // in the rows it stored, and one note per poll would be 52k rows a year
+      // in the table the UI timeline reads.
+      if (answered.size < Object.keys(READS).length) {
+        tx.insert(event)
+          .values({
+            ts,
+            kind: 'note',
+            detail: JSON.stringify({
+              source: 'router-poller',
+              reason: 'poll_partial',
+              readsOk: answered.size,
+              readsPlanned: Object.keys(READS).length,
+              abandonedAt,
+              warnings,
+              stored: {
+                line: hasLineReading,
+                wan: wan !== null,
+                interfaces: persistedInterfaces.length,
+                ports: ports.length,
+                hosts: activeHosts.length,
+              },
+            }),
+          })
+          .run()
+      }
+
       // The `event.kind` enum is fixed by the schema, so the precise reason
       // lives in `detail.reason`; both readings are kept and neither side is
       // declared correct.
@@ -416,6 +487,10 @@ export class RouterPoller {
     const lanIntf = interfaces.find((intf) => intf.role === 'lan')
     return {
       ts,
+      outcome: answered.size === Object.keys(READS).length ? 'complete' : 'partial',
+      abandonedAt,
+      readsOk: answered.size,
+      sessionRestarts,
       lineStatus: line.status,
       downSyncKbps: line.downSyncKbps,
       upSyncKbps: line.upSyncKbps,

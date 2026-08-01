@@ -19,6 +19,7 @@ import { verdictRoutes } from './routes/verdict.js'
 import { wifiRoutes } from './routes/wifi.js'
 import { startSpeedtestScheduler } from './services/speedtest-runner.js'
 import { startRouterPoller } from './services/router/scheduler.js'
+import { recordServiceStart } from './services/service-start.js'
 
 // Resolved against this source file, not the process cwd, so it works both for
 // `bun run src/index.ts` from the repo root and for the container's /app.
@@ -123,6 +124,10 @@ export const app = new Elysia()
     { detail: { hide: true } },
   )
   .listen({ port: config.port })
+
+// Written before the schedulers, so a start that crashes on the way up is still
+// on record as a start — which is the shape a restart loop has.
+recordServiceStart('0.1.0')
 
 startSpeedtestScheduler()
 // Read-only 10-minute router poll. Returns null (and says why) when no router

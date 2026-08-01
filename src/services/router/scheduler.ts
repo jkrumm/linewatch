@@ -35,7 +35,11 @@ async function pollGuarded(): Promise<void> {
         wan: { name: summary.wanIfName, rxKbps: summary.wanRxKbps, txKbps: summary.wanTxKbps },
         lan: { rxKbps: summary.lanRxKbps, txKbps: summary.lanTxKbps },
         rows: { intf: summary.intfRows, ports: summary.portRows, hosts: summary.hostRows },
+        outcome: summary.outcome,
+        reads: `${summary.readsOk}/8`,
+        ...(summary.abandonedAt === null ? {} : { abandonedAt: summary.abandonedAt }),
         resync: summary.resync,
+        ...(summary.sessionRestarts.length === 0 ? {} : { sessionRestarts: summary.sessionRestarts }),
         disagreements: summary.disagreements,
         logins: client.status().logins,
       })}`,
@@ -43,10 +47,11 @@ async function pollGuarded(): Promise<void> {
     for (const warning of summary.warnings) console.warn(`[router] ${warning}`)
   } catch (error) {
     if (error instanceof RouterSessionLostError || error instanceof RouterUnreachableError) {
-      // Both are ordinary operating conditions for a consumer router, not
-      // faults of this service: log, store nothing for this cycle, and let the
-      // next poll log in again. The missing sample is the honest record.
-      console.warn(`[router] poll abandoned: ${error.message}`)
+      // Reaching here now means the *login* failed, so no read ever happened and
+      // there is nothing to keep. A session lost partway through a poll no
+      // longer arrives here at all — `poll()` stops reading, stores what the
+      // earlier reads bought, and reports `outcome: 'partial'`.
+      console.warn(`[router] login failed, poll never started: ${error.message}`)
     } else {
       console.error(`[router] poll failed: ${error instanceof Error ? error.message : String(error)}`)
     }

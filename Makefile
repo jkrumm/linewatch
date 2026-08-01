@@ -666,14 +666,18 @@ watchdog-readiness: ## Measure the conditions for arming: poll coverage, p90 spa
 	@# stressed, which is when it is needed.
 	@echo "  Arming conditions over the last 48h"
 	@echo "  -----------------------------------"
+	@# One statement, not several: sqlite3 scopes a WITH clause to the statement
+	@# it heads, so a second `select` referencing the CTE fails with "no such
+	@# table" - which it did, silently reporting only the first line.
 	@docker exec linewatch sqlite3 -readonly $(DB) "\
 		with gaps as (select (ts - lag(ts) over (order by ts))/1000 g from router_line_sample where ts > (strftime('%s','now')-172800)*1000), \
 		     ranked as (select g, row_number() over (order by g) r, count(*) over () n from gaps where g is not null) \
-		select 'poll coverage      ' || round(100.0 * (select count(*) from gaps where g is not null) / (172800.0/600), 1) || '%  (want >= 80%)' from gaps limit 1; \
-		select 'p90 poll spacing   ' || (select g from ranked where r = cast(0.9*n as int)) || 's  (want <= 1200s)'; \
-		select 'worst poll gap     ' || (select max(g) from ranked) || 's'; \
-		select 'shadow would_* notes ' || (select count(*) from event where kind='note' and ts > (strftime('%s','now')-172800)*1000 and detail like '%would_%') || '  (read them before arming)'; \
-		select 'watchdog notes     ' || (select count(*) from event where ts > (strftime('%s','now')-172800)*1000 and detail like '%\"source\":\"watchdog\"%');"
+		select 'poll coverage        ' || round(100.0 * (select count(*) from ranked) / (172800.0/600), 1) || '%  (want >= 80%)' \
+		union all select 'p90 poll spacing     ' || coalesce((select g from ranked where r = cast(0.9*n as int)), -1) || 's  (want <= 1200s)' \
+		union all select 'worst poll gap       ' || coalesce((select max(g) from ranked), -1) || 's' \
+		union all select 'shadow would_* notes ' || (select count(*) from event where kind='note' and ts > (strftime('%s','now')-172800)*1000 and detail like '%would\_%' escape '\\') || '  (read every one before arming)' \
+		union all select 'watchdog notes       ' || (select count(*) from event where ts > (strftime('%s','now')-172800)*1000 and detail like '%\"source\":\"watchdog\"%') \
+		union all select 'reboots recorded     ' || (select count(*) from event where kind='intervention' and ts > (strftime('%s','now')-172800)*1000 and detail like '%router\_reboot%' escape '\\');"
 	@echo "  -----------------------------------"
 	@echo "  Still manual: the mini's LAN address pinned by DHCP reservation, and a human"
 	@echo "  agreeing with every would_* trigger. 'make watchdog-state' shows the budgets."

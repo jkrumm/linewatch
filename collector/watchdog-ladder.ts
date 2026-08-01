@@ -161,10 +161,13 @@ export const DEFAULT_POLICY: WatchdogPolicy = {
   // a reboot could fix is demonstrably working, and a reboot is a household-wide
   // LAN outage bought with evidence pointing elsewhere.
   rebootAtSv4Only: 600,
-  // 1.55x the 193 s worst measured reboot-to-IPv4, and it has to cover the
-  // multi-phase reality: on 2026-08-01 the reboot produced link flaps at
-  // 10:27:21/:38/:42, 10:28:13, 10:29:44/:47 and three DHCP re-binds — 147 s of
-  // churn before the line even resynced.
+  // 1.49x the worst measured reboot-to-IPv4, which is now 201 s rather than the
+  // 193 s this was scaled from — a controlled reboot on 2026-08-01 19:08:46 put
+  // the gateway back at +111 s (the firmware budgets 130) and every WAN anchor
+  // at +201 s. It also has to cover the multi-phase reality: the morning's
+  // reboot produced link flaps at 10:27:21/:38/:42, 10:28:13, 10:29:44/:47 and
+  // three DHCP re-binds — 147 s of churn before the line even resynced. The
+  // margin is thinner than it reads; two observations is not a distribution.
   rebootSettleS: 300,
   // Strictly after every rung's fire time, so no rung races the give-up.
   exhaustAtS: 900,

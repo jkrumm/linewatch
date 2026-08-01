@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.jkrumm.linewatch-heartbeat</string>
+  <!-- Pushes one Uptime Kuma heartbeat per run (collector/heartbeat.ts). Kuma
+       is on the homelab's WAN and the Tailscale ACL has no tag:homelab ->
+       tag:mac grant, so it cannot probe this line; the mini reports on itself
+       and a missed heartbeat IS the outage alert.
+
+       StartInterval + RunAtLoad, NOT KeepAlive: this is a one-shot, not a
+       daemon. Each run is independent, so a crash or a wedged push costs one
+       heartbeat rather than leaving a dead daemon and a monitor that is green
+       purely because nothing is left to contradict it. The 60 s cadence sits
+       four heartbeats inside the monitor's 240 s interval, so a single skipped
+       run cannot page — the same margin the other MacMini push monitors keep. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>__BUN__</string>
+    <string>run</string>
+    <string>__REPO_DIR__/collector/heartbeat.ts</string>
+  </array>
+  <key>WorkingDirectory</key><string>__REPO_DIR__</string>
+  <key>RunAtLoad</key><true/>
+  <key>StartInterval</key><integer>60</integer>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- launchd starts this with no shell profile at all. Nothing here spawns a
+         subprocess today, but the collector's plist documents the same trap and
+         a divergence between the two would be the surprising thing. -->
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <!-- Must stay identical to StandardOutPath below: heartbeat.ts bounds this
+         file by truncating it in place, and collector/log-rotate.ts refuses to
+         touch anything unless fd 1 is provably this path. A drift costs the
+         size bound, never the log. -->
+    <key>LINEWATCH_HEARTBEAT_LOG_PATH</key><string>__HOME__/Library/Logs/linewatch-heartbeat.log</string>
+  </dict>
+  <key>StandardOutPath</key><string>__HOME__/Library/Logs/linewatch-heartbeat.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/Library/Logs/linewatch-heartbeat.log</string>
+</dict>
+</plist>

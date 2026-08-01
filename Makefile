@@ -1,4 +1,5 @@
 .PHONY: help env up down rebuild logs collector-setup collector-teardown collector-logs check \
+	heartbeat-setup heartbeat-teardown heartbeat-status heartbeat-logs \
 	marker db-counts db-shell db-backup db-restore db-import
 .DEFAULT_GOAL := help
 
@@ -67,6 +68,78 @@ DB_TOOL = docker compose run --rm --no-deps -T --user 0:0 -v "$(VOLUME):/app/dat
 DB_READ = docker compose run --rm --no-deps -T -v "$(VOLUME):/app/data" --entrypoint sh linewatch -c
 
 REQUIRE_UP = @docker ps --format '{{.Names}}' | grep -qx linewatch || { echo "  ✗ linewatch is down — the database lives in the $(VOLUME) Docker volume and only a container can open it. Run 'make up' first."; exit 1; }
+
+HEARTBEAT_LABEL := com.jkrumm.linewatch-heartbeat
+HEARTBEAT_LOG   := $(LOG_DIR)/linewatch-heartbeat.log
+# The Uptime Kuma push URL, resolved by collector/heartbeat.ts. A plain
+# chmod-600 host file for the same reason as the bearer token and the router
+# password, and one this repo shares with every other heartbeat on this machine
+# (dotfiles/scripts/lib/kuma-push.sh): a monitor must not depend on the thing it
+# monitors, so resolving it through the secrets cache would let a stale cache —
+# itself an alert condition — take the monitor down with it.
+KUMA_URL_DIR    := $(HOME)/.config/uptime-kuma
+KUMA_URL_FILE   := $(KUMA_URL_DIR)/linewatch-push-url
+
+# Renders collector/$(1).plist.template into ~/Library/LaunchAgents and
+# (re)bootstraps it. $(1) = plist label, $(2) = log file to point at on failure.
+# Shared by both agents so the launchd handling below cannot drift between them —
+# it is subtle enough that one copy is the only maintainable number.
+define install_agent
+	@command -v bun >/dev/null 2>&1 || { echo "  ✗ bun not installed — run: brew bundle install"; exit 1; }
+	@mkdir -p "$(LAUNCHAGENTS)" "$(LOG_DIR)"
+	@BUN_BIN=$$(command -v bun); \
+	TMP=$$(mktemp); \
+	sed -e "s|__BUN__|$$BUN_BIN|g" \
+		-e "s|__REPO_DIR__|$(REPO_DIR)|g" \
+		-e "s|__HOME__|$(HOME)|g" \
+		"collector/$(1).plist.template" > "$$TMP"; \
+	DST="$(LAUNCHAGENTS)/$(1).plist"; \
+	if [ -f "$$DST" ] && diff -q "$$TMP" "$$DST" >/dev/null 2>&1; then \
+		rm "$$TMP"; \
+		echo "  · $(1) up to date"; \
+	else \
+		mv "$$TMP" "$$DST"; \
+		echo "  ✓ $(1) rendered ($$DST)"; \
+	fi; \
+	: "Modern domain-target form, not the legacy load/unload pair it replaced."; \
+	: "The legacy launchctl load cannot clear a DISABLED OVERRIDE: launchd keeps"; \
+	: "a per-user enabled/disabled database separate from the plist, and a job"; \
+	: "disabled there is skipped SILENTLY at every login - no error, no log line,"; \
+	: "nothing in the job own StandardErrorPath, because the job is never even"; \
+	: "considered. Measured, not theoretical: after the 2026-08-01 reboot the"; \
+	: "collector was the only one of 22 in ~/Library/LaunchAgents that did not"; \
+	: "come back, log show over the boot window had no launchd mention of it at"; \
+	: "all, and its plist, permissions and xattrs were identical to agents that"; \
+	: "did load. enable is the only step that addresses that state, and it is"; \
+	: "idempotent, so it is cheap insurance even if the cause was something else"; \
+	UID_N=$$(id -u); \
+	launchctl bootout gui/$$UID_N/$(1) 2>/dev/null || true; \
+	launchctl enable gui/$$UID_N/$(1) 2>/dev/null || true; \
+	launchctl bootstrap gui/$$UID_N "$$DST" || { echo "  ✗ launchctl bootstrap failed"; exit 1; }; \
+	sleep 2; \
+	if launchctl print gui/$$UID_N/$(1) >/dev/null 2>&1; then \
+		echo "  ✓ $(1) loaded and enabled"; \
+	else \
+		echo "  ✗ $(1) failed to load — check $(2)"; \
+		exit 1; \
+	fi
+endef
+
+# `bootout`, never the legacy `unload`, for the same reason install_agent uses
+# `bootstrap`: they address the same domain. `unload` here left the job's
+# disabled-override state untouched, which is the half of the trap above that
+# does not announce itself.
+define teardown_agent
+	@DST="$(LAUNCHAGENTS)/$(1).plist"; \
+	UID_N=$$(id -u); \
+	launchctl bootout gui/$$UID_N/$(1) 2>/dev/null || true; \
+	if [ -f "$$DST" ]; then \
+		rm "$$DST"; \
+		echo "  ✓ $(1) removed"; \
+	else \
+		echo "  · $(1) not installed"; \
+	fi
+endef
 
 help: ## Show targets
 	@awk 'BEGIN{FS=":.*##"; printf "Targets:\n"} /^[a-zA-Z_-]+:.*##/ {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -442,54 +515,10 @@ collector-setup: ## Generate the bearer token (if absent), render + load the nat
 	else \
 		echo "  · token already exists at $(TOKEN_FILE)"; \
 	fi
-	@command -v bun >/dev/null 2>&1 || { echo "  ✗ bun not installed — run: brew bundle install"; exit 1; }
-	@mkdir -p "$(LAUNCHAGENTS)" "$(LOG_DIR)"
-	@BUN_BIN=$$(command -v bun); \
-	TMP=$$(mktemp); \
-	sed -e "s|__BUN__|$$BUN_BIN|g" \
-		-e "s|__REPO_DIR__|$(REPO_DIR)|g" \
-		-e "s|__HOME__|$(HOME)|g" \
-		"collector/$(PLIST_LABEL).plist.template" > "$$TMP"; \
-	DST="$(LAUNCHAGENTS)/$(PLIST_LABEL).plist"; \
-	if [ -f "$$DST" ] && diff -q "$$TMP" "$$DST" >/dev/null 2>&1; then \
-		rm "$$TMP"; \
-		echo "  · LaunchAgent up to date"; \
-	else \
-		mv "$$TMP" "$$DST"; \
-		echo "  ✓ LaunchAgent rendered ($$DST)"; \
-	fi; \
-	: "Modern domain-target form, not the legacy load/unload pair it replaced."; \
-	: "The legacy launchctl load cannot clear a DISABLED OVERRIDE: launchd keeps"; \
-	: "a per-user enabled/disabled database separate from the plist, and a job"; \
-	: "disabled there is skipped SILENTLY at every login - no error, no log line,"; \
-	: "nothing in the job own StandardErrorPath, because the job is never even"; \
-	: "considered. Measured, not theoretical: after the 2026-08-01 reboot this"; \
-	: "agent was the only one of 22 in ~/Library/LaunchAgents that did not come"; \
-	: "back, log show over the boot window had no launchd mention of it at all,"; \
-	: "and its plist, permissions and xattrs were identical to agents that did"; \
-	: "load. enable is the only step that addresses that state, and it is"; \
-	: "idempotent, so it is cheap insurance even if the cause was something else"; \
-	UID_N=$$(id -u); \
-	launchctl bootout gui/$$UID_N/$(PLIST_LABEL) 2>/dev/null || true; \
-	launchctl enable gui/$$UID_N/$(PLIST_LABEL) 2>/dev/null || true; \
-	launchctl bootstrap gui/$$UID_N "$$DST" || { echo "  ✗ launchctl bootstrap failed"; exit 1; }; \
-	sleep 2; \
-	if launchctl print gui/$$UID_N/$(PLIST_LABEL) >/dev/null 2>&1; then \
-		echo "  ✓ collector loaded and enabled (RunAtLoad + KeepAlive)"; \
-	else \
-		echo "  ✗ LaunchAgent failed to load — check $(COLLECTOR_LOG)"; \
-		exit 1; \
-	fi
+	$(call install_agent,$(PLIST_LABEL),$(COLLECTOR_LOG))
 
 collector-teardown: ## Unload and remove the collector's LaunchAgent (does not delete the token or spool)
-	@DST="$(LAUNCHAGENTS)/$(PLIST_LABEL).plist"; \
-	if [ -f "$$DST" ]; then \
-		launchctl unload "$$DST" 2>/dev/null || true; \
-		rm "$$DST"; \
-		echo "  ✓ collector LaunchAgent removed"; \
-	else \
-		echo "  · nothing to remove"; \
-	fi
+	$(call teardown_agent,$(PLIST_LABEL))
 
 collector-logs: ## Tail the native collector's log (the previous generation is the same path + .1)
 	@touch "$(COLLECTOR_LOG)"
@@ -500,6 +529,32 @@ collector-logs: ## Tail the native collector's log (the previous generation is t
 		echo "  · older window kept at $(COLLECTOR_LOG).1"; \
 	fi
 	tail -f "$(COLLECTOR_LOG)"
+
+heartbeat-setup: ## Render + load the Uptime Kuma heartbeat LaunchAgent (needs the push URL file)
+	@# Fails closed here, at setup, because a human is present to fix it. At run
+	@# time it fails the other way — loud and non-zero without pushing — so Kuma's
+	@# own missed-heartbeat alert fires rather than a silent green.
+	@if [ ! -s "$(KUMA_URL_FILE)" ]; then \
+		echo "  ✗ no push URL at $(KUMA_URL_FILE)"; \
+		echo "    Create the 'Home Line - Push' monitor in Uptime Kuma (homelab/uptime-kuma/monitors.yaml,"; \
+		echo "    then 'make uk-sync' there), copy its push URL, and:"; \
+		echo "      mkdir -p $(KUMA_URL_DIR) && printf '%s' '<push-url>' > $(KUMA_URL_FILE) && chmod 600 $(KUMA_URL_FILE)"; \
+		exit 1; \
+	fi
+	@PERMS=$$(stat -f '%Lp' "$(KUMA_URL_FILE)"); \
+	if [ "$$PERMS" != "600" ]; then echo "  ! $(KUMA_URL_FILE) is mode $$PERMS — tightening to 600"; chmod 600 "$(KUMA_URL_FILE)"; fi
+	$(call install_agent,$(HEARTBEAT_LABEL),$(HEARTBEAT_LOG))
+
+heartbeat-teardown: ## Unload and remove the heartbeat LaunchAgent (Kuma will alert on the missed heartbeat)
+	$(call teardown_agent,$(HEARTBEAT_LABEL))
+
+heartbeat-status: ## Compute the heartbeat verdict and print it WITHOUT pushing
+	@LINEWATCH_HEARTBEAT_DRY_RUN=1 bun run collector/heartbeat.ts
+
+heartbeat-logs: ## Tail the heartbeat log (the previous generation is the same path + .1)
+	@touch "$(HEARTBEAT_LOG)"
+	@if [ -f "$(HEARTBEAT_LOG).1" ]; then echo "  · older window kept at $(HEARTBEAT_LOG).1"; fi
+	tail -f "$(HEARTBEAT_LOG)"
 
 check: ## Typecheck (API + collector, then the dashboard) + run the test suite
 	bun run typecheck

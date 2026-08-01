@@ -11,6 +11,11 @@ data
 # `make db-backup` snapshots, and the pre-volume archive left by `make db-import`.
 backups
 collector/spool.jsonl
+# The watchdog's two spools. Separate from each other because they drain over
+# different networks — events against localhost, notifications across the WAN
+# that is down when there is something to say — and both are runtime state.
+collector/watchdog-events.jsonl
+collector/watchdog-notify.jsonl
 web/dist
 *.log
 

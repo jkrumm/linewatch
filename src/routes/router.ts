@@ -209,6 +209,7 @@ export const routerRoutes = new Elysia()
       })
       return {
         pollerEnabled: routerConfig.enabled,
+        writeEnabled: routerConfig.writeEnabled,
         disabledReason: routerConfig.disabledReason,
         configWarning: routerConfig.configWarning,
         collectorHostIp: routerConfig.collectorHostIp,
@@ -226,6 +227,11 @@ export const routerRoutes = new Elysia()
     {
       response: z.object({
         pollerEnabled: z.boolean(),
+        writeEnabled: z
+          .boolean()
+          .describe(
+            'Whether `LINEWATCH_ROUTER_WRITE=1` *and* a password are both present, i.e. whether the two action routes would do anything. Exposed so an automated caller can report "would reconnect, suppressed" truthfully rather than inferring the container\'s capability from its own environment — the watchdog runs natively under launchd and the executor lives in Docker, so the two configurations are genuinely separate.',
+          ),
         disabledReason: z.string().nullable(),
         configWarning: z.string().nullable(),
         collectorHostIp: z.string(),

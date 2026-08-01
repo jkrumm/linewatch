@@ -22,6 +22,21 @@ async function runGuarded(): Promise<void> {
   }
 }
 
+/**
+ * Whether a run — cron or manual — is in flight right now.
+ *
+ * Exported for `GET /api/status`, and the only honest source for it. The
+ * alternative an outside reader would reach for is "the newest `speed_test` row
+ * is younger than a minute", which is exactly backwards: the row is written when
+ * a run *ends*, so that test reads false for the entire duration of a run and
+ * true only after it is safely over. The watchdog refuses to touch the line
+ * while this is true, so getting it backwards would mean acting during the one
+ * window whose measurement an action destroys.
+ */
+export function isSpeedtestRunning(): boolean {
+  return running
+}
+
 /** Starts the hourly (jittered) speed-test cron. Call once at boot. */
 export function startSpeedtestScheduler(): Cron {
   return new Cron(config.speedtestCron, () => {

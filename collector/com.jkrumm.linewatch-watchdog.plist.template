@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.jkrumm.linewatch-watchdog</string>
+  <!-- Evaluates the ladder every 15 s and, once armed, acts on it
+       (collector/watchdog.ts). Ships DISARMED: LINEWATCH_WATCHDOG_ARMED is
+       absent below, so the machine walks the whole ladder and writes `would_*`
+       notes without touching the line. That is shadow mode, and it is meant to
+       run for weeks before anything here changes.
+
+       KeepAlive, NOT StartInterval — the opposite of the heartbeat agent, and
+       for the opposite reason. The heartbeat is a one-shot because a crash
+       there should cost one heartbeat. Here the confirmation counting and the
+       process-age floor are both claims about continuity of observation ("this
+       process has itself watched N consecutive ticks"), which a fresh process
+       per tick cannot make. minProcessAgeS then turns a crash loop into a
+       permanent stand-down rather than a fire loop: a job launchd keeps
+       restarting never reaches the age at which it may act. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>__BUN__</string>
+    <string>run</string>
+    <string>__REPO_DIR__/collector/watchdog.ts</string>
+  </array>
+  <key>WorkingDirectory</key><string>__REPO_DIR__</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <!-- launchd's own restart floor. Without it a job that exits immediately is
+       respawned as fast as the kernel allows; with it, a crash loop costs one
+       start per ten seconds and shows up in the log as such. -->
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- launchd starts this with no shell profile at all, and this one spawns
+         `ping`, `ping6`, `route`, `ifconfig` and `netstat`. An incomplete PATH
+         here reads as a line that is down. -->
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <!-- Must stay identical to StandardOutPath below: watchdog.ts bounds this
+         file by truncating it in place, and collector/log-rotate.ts refuses to
+         touch anything unless fd 1 is provably this path. -->
+    <key>LINEWATCH_WATCHDOG_LOG_PATH</key><string>__HOME__/Library/Logs/linewatch-watchdog.log</string>
+    <!-- Deliberately absent, all three, and adding one here is the entire arming
+         procedure — which is why they are documented rather than present:
+
+           LINEWATCH_WATCHDOG_ARMED         perform authorised rungs
+           LINEWATCH_WATCHDOG_REBOOT        allow the destructive rung at all
+           LINEWATCH_WATCHDOG_REBOOT_V4_ONLY  …even when IPv6 still works
+
+         The conditions each requires are in docs/watchdog-spec.md §6. Note that
+         arming this is necessary but not sufficient: the executor lives in the
+         container behind LINEWATCH_ROUTER_WRITE, and the watchdog reads that
+         capability from the API rather than assuming it. -->
+  </dict>
+  <key>StandardOutPath</key><string>__HOME__/Library/Logs/linewatch-watchdog.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/Library/Logs/linewatch-watchdog.log</string>
+</dict>
+</plist>

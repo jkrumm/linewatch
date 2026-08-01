@@ -276,6 +276,26 @@ export interface LadderInput {
   canRecord: boolean
 }
 
+/**
+ * The decision, plus the ledger it implies.
+ *
+ * These are one return value rather than two calls because the split was where
+ * the mitigations went to die. `latchClearAfterCleanS` and `postActionCooldownS`
+ * were policy fields nothing read: the latch is failure mode #1's entire
+ * defence against a reboot loop locking the house out of the mini, and its
+ * clear condition existed only as a sentence inside a note string. So did the
+ * rung advance, the T0 capture and the write-ahead. All of it would have lived
+ * in the runner — imperative code exercised for real about once a month, which
+ * is the exact thing the pure/impure split was drawn to prevent.
+ *
+ * `ledger` is what must be on disk, fsynced, **before** anything is performed.
+ * `collector/watchdog.ts` persists it and then acts; `recordOutcome` closes the
+ * loop afterwards.
+ */
+export interface LadderOutcome extends LadderDecision {
+  ledger: Ledger
+}
+
 export interface LadderDecision {
   state: WatchdogState
   outageClass: OutageClass
@@ -373,6 +393,29 @@ const ACTIONABLE: ReadonlySet<OutageClass> = new Set<OutageClass>([
   'full_wan_down',
   'v4_only_down',
   'wan_down_v6_unknown',
+])
+
+/**
+ * Which classes are worth waking a human for once the ladder has nothing left.
+ *
+ * Wider than `ACTIONABLE` on purpose — a dead gateway or a line out of showtime
+ * is a real fault this cannot fix, and "I cannot fix it" is exactly when a
+ * person is needed. But two classes are deliberately excluded, and both were
+ * pages this would otherwise have sent:
+ *
+ * - `off_home_line` — the mini is measuring a hotspot or a travel router.
+ *   Nothing is known about the home line at all, so a page claiming it is down
+ *   would be a fabrication. Take the mini out for the afternoon and the old
+ *   shape paged after fifteen minutes, every time.
+ * - `no_evidence` — the API or the collector is unreadable. That is already an
+ *   explicit `down` heartbeat from `collector/heartbeat-verdict.ts`, which can
+ *   say so precisely because the WAN is up. A second page for one fact trains
+ *   the reader to ignore both.
+ */
+const ESCALATABLE: ReadonlySet<OutageClass> = new Set<OutageClass>([
+  ...ACTIONABLE,
+  'local_link_down',
+  'carrier_down',
 ])
 
 function actionsWithin(ledger: Ledger, now: number, windowMs: number, kind: 'reconnect' | 'reboot'): number {
@@ -516,9 +559,13 @@ function rebootBlockers(input: LadderInput, t0: number, outageClass: OutageClass
   return blocked
 }
 
-export function decide(input: LadderInput): LadderDecision {
+/**
+ * The judgement, given the ledger as it stands. Never mutates anything; the
+ * transitions it implies are `advance`'s job, and `decide` composes the two so
+ * a caller cannot take one without the other.
+ */
+function evaluate(input: LadderInput, outageClass: OutageClass): LadderDecision {
   const { now, policy, ledger } = input
-  const outageClass = classify(input)
   const healthy = outageClass === 'healthy' || outageClass === 'partial'
 
   const base = {
@@ -616,17 +663,31 @@ export function decide(input: LadderInput): LadderDecision {
   if (downForS >= policy.exhaustAtS) {
     const quiet =
       ledger.lastEscalationTs !== null && now - ledger.lastEscalationTs < policy.escalationQuietS * 1000
+    // An escalation is a notification, not a write to the line, so it is not
+    // gated on `armed` — a shadow run that cannot tell you it gave up is the
+    // same inert shadow mode the capability precondition already produced once.
+    // It *is* gated on the disarm file, which is a human saying they have this.
+    const worthWaking = ESCALATABLE.has(outageClass) && !input.disarmed
+    const blockedBy = worthWaking ? shared : [...shared, `no_escalation_for_${outageClass}`]
+    // Only the classes where a ladder could have run get the "ladder complete"
+    // sentence. On a dead gateway or a line out of showtime there was never
+    // anything to try, and saying otherwise misdescribes the evidence.
+    const ranALadder = ACTIONABLE.has(outageClass)
     return {
       ...base,
       t0,
       outageKey,
       rung: 'exhausted',
       state: 'exhausted',
-      action: quiet ? 'none' : 'escalate',
+      action: worthWaking && !quiet ? 'escalate' : 'none',
       shadow: false,
-      blockedBy: shared,
+      blockedBy,
       nextEvaluationAt: tick,
-      note: `down ${downForS}s with the ladder complete — escalating to a human`,
+      note: worthWaking
+        ? ranALadder
+          ? `down ${downForS}s with the ladder complete — escalating to a human`
+          : `${outageClass} for ${downForS}s and nothing here can address it — escalating to a human`
+        : `${outageClass} for ${downForS}s — nothing to escalate, this says nothing about the home line`,
     }
   }
 
@@ -696,5 +757,172 @@ export function decide(input: LadderInput): LadderDecision {
           : `${kind} after ${downForS}s of ${outageClass}`
         : `${kind} due after ${downForS}s but blocked by ${blockers.join(', ')}`,
     }
+  }
+}
+
+/** A ledger with nothing in it. The shape a first boot writes, and what tests start from. */
+export function emptyLedger(): Ledger {
+  return {
+    version: 1,
+    ladder: { outageKey: null, t0: null, rung: 'observe', enteredAt: 0, settleUntil: null, announcedAt: null },
+    actions: [],
+    pending: null,
+    v6: { lastUpTs: null, lastCheckedTs: null },
+    postActionCooldownUntil: null,
+    lastEscalationTs: null,
+    consecutiveActions: 0,
+    healthySince: null,
+  }
+}
+
+/**
+ * A ladder may climb but never descend. `rebootBlockers` refuses while the rung
+ * is still `observe` — that is what guarantees the cheap rung is reached and
+ * either taken or reported before the destructive one becomes available — so a
+ * rung that could slip back would hand out a second reboot window per outage.
+ */
+const RUNG_RANK: Readonly<Record<Rung, number>> = Object.freeze({ observe: 0, reconnect: 1, reboot: 2, exhausted: 3 })
+
+/**
+ * Long enough to cover every lookback the blockers perform — 24 h for the daily
+ * budgets, 6 h for the reboot spacing — with a wide margin, and short enough
+ * that the file cannot grow without bound. Pruning is by timestamp rather than
+ * by count so a burst cannot evict the older entry a rate limit still needs.
+ */
+const ACTION_RETENTION_MS = 2 * DAY_MS
+
+function pruneActions(actions: readonly LedgerAction[], now: number): LedgerAction[] {
+  return actions.filter((action) => now - action.ts <= ACTION_RETENTION_MS)
+}
+
+/**
+ * The ledger the decision implies, to be fsynced **before** anything is
+ * performed.
+ *
+ * Everything here is derived from `decision` rather than recomputed, so the two
+ * can never disagree about what is happening — the failure a second
+ * reimplementation in the runner would eventually produce.
+ */
+function advance(input: LadderInput, decision: LadderDecision): Ledger {
+  const { now, policy, ledger } = input
+
+  const next: Ledger = {
+    ...ledger,
+    ladder: { ...ledger.ladder },
+    v6: { ...ledger.v6 },
+    actions: pruneActions(ledger.actions, now),
+  }
+
+  // The v6 baseline is updated *after* classification, never before: `v6Health`
+  // reads `lastUpTs` to tell "IPv6 is down" from "IPv6 was never deployed here",
+  // and folding this tick's reading in first would let a v6 anchor vouch for
+  // itself.
+  if (input.self?.v6 != null) {
+    next.v6.lastCheckedTs = input.self.probeTs
+    if (input.self.v6.received > 0) next.v6.lastUpTs = input.self.probeTs
+  }
+
+  const healthy = decision.outageClass === 'healthy' || decision.outageClass === 'partial'
+  if (healthy) {
+    next.healthySince = ledger.healthySince ?? now
+    // The latch's clear condition, which until now existed only as prose inside
+    // a note string. A latched watchdog is disarmed until the line has been
+    // continuously clean for `latchClearAfterCleanS` — not until the next tick
+    // that happens to look fine, which a flapping line supplies every minute.
+    if (now - next.healthySince >= policy.latchClearAfterCleanS * 1000) next.consecutiveActions = 0
+  } else {
+    next.healthySince = null
+  }
+
+  // A pending action owns the ledger until `recordOutcome` closes it. Advancing
+  // anything else here would be writing over a write-ahead entry that has not
+  // been resolved, which is the one state the crash reconciliation depends on.
+  if (ledger.pending !== null) return next
+
+  if (healthy) {
+    if (ledger.ladder.t0 !== null) {
+      // A recovery that holds a couple of cycles and fails again must not be
+      // laundered into a fresh independent outage with a fresh action budget.
+      // Armed at the recovery rather than at the action, deliberately: arming it
+      // when the action fires would block the ladder's own next rung — the
+      // reconnect at 240 s would veto the reboot at 330 s.
+      const acted = ledger.actions.some((action) => action.outageKey === ledger.ladder.outageKey)
+      if (acted) next.postActionCooldownUntil = now + policy.postActionCooldownS * 1000
+      next.ladder = { outageKey: null, t0: null, rung: 'observe', enteredAt: now, settleUntil: null, announcedAt: null }
+    }
+    return next
+  }
+
+  if (decision.t0 !== null && ledger.ladder.t0 === null) {
+    next.ladder.t0 = decision.t0
+    next.ladder.outageKey = decision.outageKey
+    next.ladder.enteredAt = now
+  }
+
+  if (RUNG_RANK[decision.rung] > RUNG_RANK[ledger.ladder.rung]) {
+    next.ladder.rung = decision.rung
+    next.ladder.enteredAt = now
+  }
+
+  if (decision.action === 'announce') next.ladder.announcedAt = now
+  if (decision.action === 'escalate') next.lastEscalationTs = now
+
+  const settleS = decision.rung === 'reboot' ? policy.rebootSettleS : policy.reconnectSettleS
+
+  if (decision.action === 'reconnect' || decision.action === 'reboot') {
+    // Write-ahead. On disk before the action leaves this process, so a crash
+    // between the two is reconciled as HAVING FIRED — the deliberate inverse of
+    // the probe spool's fail-toward-resending, because a probe batch is
+    // idempotent and a router reboot is not.
+    next.pending = { ts: now, kind: decision.action, outageKey: decision.outageKey ?? `wan:${now}` }
+    // Counted at the attempt, not the acknowledgement. An action whose result
+    // never comes back is exactly the case the latch has to cover.
+    next.consecutiveActions = ledger.consecutiveActions + 1
+    next.ladder.settleUntil = now + settleS * 1000
+  } else if (decision.shadow) {
+    // Shadow mode still walks the whole machine: without the settle window the
+    // suppressed reconnect would re-authorise on every tick and the run would
+    // never reach the rung above it, so two weeks of it would report one rung.
+    // No `pending`, no action row, no latch increment — nothing touched the
+    // line, so nothing may count as if it had.
+    next.ladder.settleUntil = now + settleS * 1000
+  }
+
+  return next
+}
+
+/**
+ * The judgement and the ledger it implies, together. Total, deterministic, and
+ * it never throws.
+ */
+export function decide(input: LadderInput): LadderOutcome {
+  const outageClass = classify(input)
+  const decision = evaluate(input, outageClass)
+  return { ...decision, ledger: advance(input, decision) }
+}
+
+/**
+ * Close a write-ahead entry once the executor has answered. Called by the
+ * runner immediately after performing, and it is the only thing that clears
+ * `pending`.
+ *
+ * `not_executed` gives the latch increment back, and that asymmetry is the
+ * point: it means the executor read the router and declined — no connected WAN
+ * instance, an unrecognised `connType`, the capability switch off — so nothing
+ * reached the line. Letting two pre-flight refusals self-disarm the watchdog
+ * would turn a transient read hiccup into a permanent stand-down needing a
+ * human. `failed` and `unknown` both count, because in each of those a verb
+ * went out and the state of the line afterwards is not something this process
+ * knows.
+ */
+export function recordOutcome(ledger: Ledger, action: LedgerAction): Ledger {
+  const reachedTheLine = action.outcome !== 'not_executed'
+  return {
+    ...ledger,
+    pending: null,
+    actions: [...ledger.actions, action],
+    consecutiveActions: reachedTheLine ? ledger.consecutiveActions : Math.max(0, ledger.consecutiveActions - 1),
+    // A refusal bought no settle window either — there is nothing settling.
+    ladder: reachedTheLine ? ledger.ladder : { ...ledger.ladder, settleUntil: null },
   }
 }

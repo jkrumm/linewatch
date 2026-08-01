@@ -5,6 +5,7 @@ import { db } from '../db/client.js'
 import { outage, probeSample, speedTest } from '../db/schema.js'
 import { config } from '../config.js'
 import { currentVantage } from '../services/cycle-vantage.js'
+import { isSpeedtestRunning } from '../services/speedtest-runner.js'
 
 const LastSampleSchema = z.object({
   target: z.string(),
@@ -66,10 +67,29 @@ const VantageSchema = z.object({
     .boolean()
     .nullable()
     .describe('true = Ethernet through the configured home gateway; false = some other path; null = not reported, i.e. UNKNOWN. Never render null as true.'),
+  linkWatchS: z
+    .number()
+    .int()
+    .nullable()
+    .describe(
+      'Seconds of this 30 s cycle covered by the collector\'s 1 Hz link sampler. Positive coverage is what licenses reading "no recorded transition" as "no transition above ~2 s"; null means nothing watched the link, so the absence of events says nothing at all.',
+    ),
 })
 
 const StatusResponse = z.object({
   up: z.boolean().describe('false while any scope (gateway or wan) has an ongoing outage'),
+  newestSampleTs: z
+    .number()
+    .int()
+    .nullable()
+    .describe(
+      'Newest `probe_sample` timestamp, i.e. how fresh this whole answer is. `up: true` on its own cannot be read as "the line is fine": no ingest means no outage row can open, so a dead collector reports a flawless line forever. Anything acting on this must check the age of this field first.',
+    ),
+  speedtestRunning: z
+    .boolean()
+    .describe(
+      'A speed test is saturating the line right now. From the runner\'s own in-process guard, not inferred from the newest `speed_test` row — that row is written when a run *ends*, so inferring from it is exactly inverted. Automated action on the line must stand down while this is true or it poisons the throughput history.',
+    ),
   ongoingOutages: z.array(OngoingOutageSchema),
   lastSamples: z.array(LastSampleSchema),
   lastSpeedTest: LastSpeedTestSchema.nullable(),
@@ -149,11 +169,19 @@ export const statusRoute = new Elysia().get(
           // collector did not report. Coalescing it to `true` here is precisely
           // the lie this table exists to prevent.
           onHomeLine: vantageRow.onHomeLine === null ? null : vantageRow.onHomeLine === 1,
+          linkWatchS: vantageRow.linkWatchS,
         }
       : null
 
+    // Its own query rather than a max over `lastSamples`: that array is built
+    // per configured target, so retiring a target would leave its stale row
+    // deciding the freshness of everything.
+    const newestSampleRow = db.select({ ts: probeSample.ts }).from(probeSample).orderBy(desc(probeSample.ts)).limit(1).get()
+
     return {
       up: ongoingOutages.length === 0,
+      newestSampleTs: newestSampleRow?.ts ?? null,
+      speedtestRunning: isSpeedtestRunning(),
       ongoingOutages,
       lastSamples,
       lastSpeedTest,
@@ -166,7 +194,7 @@ export const statusRoute = new Elysia().get(
       tags: ['Status'],
       summary: 'Current line status',
       description:
-        'Up/down now, any ongoing outage (gateway and/or wan scope), the most recent sample per configured target, the most recent speed test, and the current vantage — which interface and negotiated link the last cycle went out over, the ceiling that NIC advertises as supported, when its DHCP lease last started, and whether any of it was the home line at all. This is the "Now" dashboard view in one call.',
+        'Up/down now, any ongoing outage (gateway and/or wan scope), the most recent sample per configured target, the most recent speed test, and the current vantage — which interface and negotiated link the last cycle went out over, the ceiling that NIC advertises as supported, when its DHCP lease last started, how much of the cycle the 1 Hz link sampler watched, and whether any of it was the home line at all. This is the "Now" dashboard view in one call. `up` is a statement about the outage table, not about the line: check `newestSampleTs` before believing it, because with no ingest no outage row can open and this reports a flawless line forever.',
     },
   },
 )

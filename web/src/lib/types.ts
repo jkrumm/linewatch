@@ -286,6 +286,10 @@ export type Vantage = {
   /** true = Ethernet through the configured home gateway; false = some other path;
    * **null = not reported, i.e. UNKNOWN**. Never render null as true. */
   onHomeLine: boolean | null
+  /** Seconds of this 30 s cycle the collector's 1 Hz link sampler actually watched. Positive
+   * coverage is what licenses reading "no `link_change` event" as "no transition above ~2 s";
+   * null means nothing watched the link, so the absence of events says nothing. */
+  linkWatchS: number | null
 }
 
 /** `GET /api/status` — "is it working right now", answered in one payload. `ongoingOutages` is an
@@ -293,6 +297,13 @@ export type Vantage = {
  * an array (one entry per target that has ever reported), not a record keyed by target. */
 export type StatusResponse = {
   up: boolean
+  /** Newest `probe_sample` ts — how fresh this whole answer is. `up` is a statement about the
+   * outage table, not the line: with no ingest no outage row can open, so a dead collector leaves
+   * `up: true` standing forever. Check this age before believing `up`. */
+  newestSampleTs: number | null
+  /** A speed test is saturating the line right now, from the runner's in-process guard. Never
+   * inferred from the newest `speed_test` row — that row is written when a run *ends*. */
+  speedtestRunning: boolean
   ongoingOutages: OngoingOutage[]
   lastSamples: StatusSample[]
   lastSpeedTest: StatusSpeedTest | null
@@ -419,8 +430,14 @@ export type Evidence = {
  * to rule out a link transition inside it. **The UI must render `uncertainty`, never swallow
  * it**: a conclusion shown without its caveat is an inference presented as a measurement. */
 export type Verdict = {
+  /** The rule that fired. An identifier, not a label — a per-row rule emits one verdict per row,
+   * so it is not unique either. Render `title`; showing this puts a slug where the headline goes. */
   id: string
   severity: Severity
+  /** The headline, templated server-side from the same numbers as `conclusion`. Rendered as-is:
+   * an id→label map in a component drifts from the rule that fires and states things the rule's
+   * guards refused to state. */
+  title: string
   /** One sentence, templated from the live inputs. */
   conclusion: string
   evidence: Evidence[]

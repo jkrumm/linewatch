@@ -1,5 +1,7 @@
 .PHONY: help env up down rebuild logs collector-setup collector-teardown collector-logs check \
-	heartbeat-setup heartbeat-teardown heartbeat-status heartbeat-logs router-reconnect \
+	heartbeat-setup heartbeat-teardown heartbeat-status heartbeat-logs router-reconnect router-reboot \
+	watchdog-setup watchdog-teardown watchdog-status watchdog-logs watchdog-arm watchdog-disarm \
+	watchdog-readiness watchdog-state \
 	marker db-counts db-shell db-backup db-restore db-import
 .DEFAULT_GOAL := help
 
@@ -79,6 +81,16 @@ HEARTBEAT_LOG   := $(LOG_DIR)/linewatch-heartbeat.log
 # itself an alert condition — take the monitor down with it.
 KUMA_URL_DIR    := $(HOME)/.config/uptime-kuma
 KUMA_URL_FILE   := $(KUMA_URL_DIR)/linewatch-push-url
+
+WATCHDOG_LABEL    := com.jkrumm.linewatch-watchdog
+WATCHDOG_LOG      := $(LOG_DIR)/linewatch-watchdog.log
+WATCHDOG_STATE    := $(HOME)/.local/state/linewatch/watchdog-state.json
+WATCHDOG_DISARM   := $(TOKEN_DIR)/watchdog-disarmed
+# A SECOND push monitor, not a message on the first. The line monitor is
+# silence-means-down, so it cannot also carry "the watchdog latched itself" -
+# that happens on a healthy line, where the line monitor is green and staying
+# green. This one's silence means the watchdog is gone.
+WATCHDOG_URL_FILE := $(KUMA_URL_DIR)/linewatch-watchdog-push-url
 
 # Renders collector/$(1).plist.template into ~/Library/LaunchAgents and
 # (re)bootstraps it. $(1) = plist label, $(2) = log file to point at on failure.
@@ -333,6 +345,25 @@ router-reconnect: ## Re-dial the WAN connection (needs LINEWATCH_ROUTER_WRITE=1 
 	@curl -fsS -X POST http://127.0.0.1:7731/api/router/actions/reconnect \
 		-H "authorization: Bearer $$(cat $(TOKEN_FILE))" | python3 -m json.tool
 
+router-reboot: ## Reboot the router (needs LINEWATCH_ROUTER_WRITE=1; takes the WHOLE LAN down ~2min)
+	@# Typed confirmation, unlike every other target here, and it is not
+	@# ceremony. This drops the LAN, which drops Tailscale, which is the only
+	@# route to this machine from outside the house - so a stray invocation from
+	@# a remote session ends that session and cannot be taken back. The firmware
+	@# budgets 130s for the restart (INCLUDE_REBOOT_WAIT_TIME on the device).
+	@#
+	@# No OID parameter here either. The route exposes named actions only.
+	@printf '  ! This reboots the router: the whole LAN, Tailscale included, goes down for ~2 minutes.\n'
+	@printf '    Type REBOOT to continue: '
+	@read -r CONFIRM; [ "$$CONFIRM" = "REBOOT" ] || { echo "  · aborted"; exit 1; }
+	@# --max-time, and a curl failure is not an error: the device stops answering
+	@# because it is rebooting, so a dead transport here is the expected shape of
+	@# success. The route reports that as outcome `unknown` when it gets the
+	@# chance; when it does not, this prints the reason and exits 0 anyway.
+	@curl -sS --max-time 30 -X POST http://127.0.0.1:7731/api/router/actions/reboot \
+		-H "authorization: Bearer $$(cat $(TOKEN_FILE))" | python3 -m json.tool \
+		|| echo "  · no answer from the API - if the router went down mid-request that is the expected signature; check make logs and the probe record"
+
 db-vacuum: ## Rebuild the database, reclaiming freed pages (run after a migration that DROPs a column)
 	$(REQUIRE_VOLUME)
 	@# Why this exists rather than trusting the migration: SQLite's ALTER TABLE
@@ -568,6 +599,85 @@ heartbeat-logs: ## Tail the heartbeat log (the previous generation is the same p
 	@touch "$(HEARTBEAT_LOG)"
 	@if [ -f "$(HEARTBEAT_LOG).1" ]; then echo "  · older window kept at $(HEARTBEAT_LOG).1"; fi
 	tail -f "$(HEARTBEAT_LOG)"
+
+# ---------------------------------------------------------------------------
+# Watchdog
+# ---------------------------------------------------------------------------
+
+watchdog-setup: ## Render + load the watchdog LaunchAgent (starts DISARMED — shadow mode)
+	@# Shadow mode is the default and the plist carries no arming variable at
+	@# all, so this is safe to run before any of the conditions in
+	@# docs/watchdog-spec.md are met. It walks the whole ladder and writes
+	@# `would_*` notes; it cannot touch the line.
+	@if [ ! -s "$(WATCHDOG_URL_FILE)" ]; then \
+		echo "  ! no watchdog push URL at $(WATCHDOG_URL_FILE)"; \
+		echo "    The agent will run and log, but nothing reaches Uptime Kuma — so a"; \
+		echo "    latched or crashed watchdog would be invisible on a healthy line."; \
+		echo "    Create the 'Home Line - Watchdog' push monitor (homelab/uptime-kuma/monitors.yaml,"; \
+		echo "    then 'make uk-sync' there) and:"; \
+		echo "      mkdir -p $(KUMA_URL_DIR) && printf '%s' '<push-url>' > $(WATCHDOG_URL_FILE) && chmod 600 $(WATCHDOG_URL_FILE)"; \
+	else \
+		PERMS=$$(stat -f '%Lp' "$(WATCHDOG_URL_FILE)"); \
+		if [ "$$PERMS" != "600" ]; then echo "  ! $(WATCHDOG_URL_FILE) is mode $$PERMS — tightening to 600"; chmod 600 "$(WATCHDOG_URL_FILE)"; fi; \
+	fi
+	$(call install_agent,$(WATCHDOG_LABEL),$(WATCHDOG_LOG))
+
+watchdog-teardown: ## Unload and remove the watchdog LaunchAgent (leaves the ledger alone)
+	@# Deliberately does NOT delete the ledger: the reboot budget and the latch
+	@# counter live there, and a teardown/setup cycle that reset them would be a
+	@# way to launder a latch a human was supposed to clear.
+	$(call teardown_agent,$(WATCHDOG_LABEL))
+
+watchdog-status: ## Evaluate the ladder once and print the decision WITHOUT persisting or acting
+	@LINEWATCH_WATCHDOG_ONCE=1 bun run collector/watchdog.ts
+
+watchdog-state: ## Print the ledger: budgets, the latch, any write-ahead entry
+	@if [ ! -f "$(WATCHDOG_STATE)" ]; then echo "  · no ledger yet at $(WATCHDOG_STATE) — nothing has run"; else python3 -m json.tool "$(WATCHDOG_STATE)"; fi
+	@if [ -f "$(WATCHDOG_DISARM)" ]; then echo "  ! DISARMED by $(WATCHDOG_DISARM):"; cat "$(WATCHDOG_DISARM)"; fi
+
+watchdog-logs: ## Tail the watchdog log (the previous generation is the same path + .1)
+	@touch "$(WATCHDOG_LOG)"
+	@if [ -f "$(WATCHDOG_LOG).1" ]; then echo "  · older window kept at $(WATCHDOG_LOG).1"; fi
+	tail -f "$(WATCHDOG_LOG)"
+
+watchdog-disarm: ## Stand the watchdog down NOW (one file; survives restarts; the phone-in-the-seconds-the-link-is-up escape)
+	@mkdir -p "$(TOKEN_DIR)"
+	@printf 'disarmed at %s\n' "$$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$(WATCHDOG_DISARM)"
+	@chmod 600 "$(WATCHDOG_DISARM)"
+	@echo "  ✓ disarmed — every rung refuses until 'make watchdog-arm'. The agent keeps running and reporting."
+
+watchdog-arm: ## Clear the disarm file (does NOT arm the agent — that is LINEWATCH_WATCHDOG_ARMED in the plist)
+	@# Two different switches, and conflating them would be dangerous. This
+	@# clears a human's explicit stand-down. Whether the agent may act at all is
+	@# LINEWATCH_WATCHDOG_ARMED in the plist, which shadow mode leaves unset.
+	@rm -f "$(WATCHDOG_DISARM)"
+	@echo "  ✓ disarm file cleared"
+	@if launchctl print gui/$$(id -u)/$(WATCHDOG_LABEL) 2>/dev/null | grep -q 'LINEWATCH_WATCHDOG_ARMED'; then \
+		echo "  ! the agent is ARMED — authorised rungs will be performed"; \
+	else \
+		echo "  · the agent is in SHADOW mode — it will report what it would do and do nothing"; \
+	fi
+
+watchdog-readiness: ## Measure the conditions for arming: poll coverage, p90 spacing, shadow output
+	$(REQUIRE_UP)
+	@# These are docs/watchdog-spec.md §6's arming conditions, measured rather
+	@# than remembered. The binding one is poll coverage: a watchdog whose
+	@# authority exceeds its instrumentation fails exactly when the router is
+	@# stressed, which is when it is needed.
+	@echo "  Arming conditions over the last 48h"
+	@echo "  -----------------------------------"
+	@docker exec linewatch sqlite3 -readonly $(DB) "\
+		with gaps as (select (ts - lag(ts) over (order by ts))/1000 g from router_line_sample where ts > (strftime('%s','now')-172800)*1000), \
+		     ranked as (select g, row_number() over (order by g) r, count(*) over () n from gaps where g is not null) \
+		select 'poll coverage      ' || round(100.0 * (select count(*) from gaps where g is not null) / (172800.0/600), 1) || '%  (want >= 80%)' from gaps limit 1; \
+		select 'p90 poll spacing   ' || (select g from ranked where r = cast(0.9*n as int)) || 's  (want <= 1200s)'; \
+		select 'worst poll gap     ' || (select max(g) from ranked) || 's'; \
+		select 'shadow would_* notes ' || (select count(*) from event where kind='note' and ts > (strftime('%s','now')-172800)*1000 and detail like '%would_%') || '  (read them before arming)'; \
+		select 'watchdog notes     ' || (select count(*) from event where ts > (strftime('%s','now')-172800)*1000 and detail like '%\"source\":\"watchdog\"%');"
+	@echo "  -----------------------------------"
+	@echo "  Still manual: the mini's LAN address pinned by DHCP reservation, and a human"
+	@echo "  agreeing with every would_* trigger. 'make watchdog-state' shows the budgets."
+
 
 check: ## Typecheck (API + collector, then the dashboard) + run the test suite
 	bun run typecheck

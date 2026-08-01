@@ -794,6 +794,12 @@ export function generateStatus(now: number = NOW): StatusResponse {
 
   return {
     up: ongoingOutages.length === 0,
+    newestSampleTs: lastSamples.reduce<number | null>((newest, sample) => (newest === null || sample.ts > newest ? sample.ts : newest), null),
+    // Always false: the mock generates a *history*, and a speed test in flight
+    // is an instantaneous condition with no history to generate. A mock that
+    // flipped this at random would make the dashboard's stand-down state appear
+    // for reasons no reader could reconstruct.
+    speedtestRunning: false,
     ongoingOutages,
     lastSamples,
     lastSpeedTest,
@@ -815,6 +821,15 @@ export function generateStatus(now: number = NOW): StatusResponse {
  * shape — the interesting one (a 1000-capable NIC negotiated down to 100) is a fault, and the mock
  * does not manufacture faults it has no other evidence for.
  */
+/**
+ * Full coverage once the sampler exists, null before it. The boundary is the whole point: an empty
+ * event timeline means "no transition above the sampling resolution" on one side of it and
+ * "nothing was watching" on the other, and those are not the same claim.
+ */
+function linkWatchFor(ts: number): number | null {
+  return ts < LINK_SAMPLING_SINCE ? null : PROBE_CYCLE_MS / 1000
+}
+
 function currentVantage(now: number): Vantage {
   const ts = Math.floor(now / PROBE_CYCLE_MS) * PROBE_CYCLE_MS
   if (ts >= VANTAGE_UNKNOWN_WINDOW.start && ts <= VANTAGE_UNKNOWN_WINDOW.end) {
@@ -829,6 +844,7 @@ function currentVantage(now: number): Vantage {
       dhcpBoundAt: null,
       gatewayAddr: null,
       onHomeLine: null,
+      linkWatchS: null,
     }
   }
   if (ts >= WIFI_WINDOW.start && ts <= WIFI_WINDOW.end) {
@@ -843,6 +859,7 @@ function currentVantage(now: number): Vantage {
       dhcpBoundAt: WIFI_WINDOW.start,
       gatewayAddr: TARGET_ADDR.gateway,
       onHomeLine: false,
+      linkWatchS: linkWatchFor(ts),
     }
   }
   return {
@@ -856,6 +873,7 @@ function currentVantage(now: number): Vantage {
     dhcpBoundAt: VANTAGE_SINCE,
     gatewayAddr: TARGET_ADDR.gateway,
     onHomeLine: true,
+    linkWatchS: linkWatchFor(ts),
   }
 }
 
@@ -966,6 +984,7 @@ export function generateVerdicts(from: number, to: number): Verdict[] {
     verdicts.push({
       id: 'probe_coverage_low',
       severity: 'critical',
+      title: `This window is only ${coveragePct.toFixed(1)}% measured`,
       conclusion: `Only ${summary.recordedCycles} of the ${summary.expectedCycles} probe cycles this ${hours} h window should hold were recorded (${coveragePct.toFixed(1)}%). The rest of the window was not measured, which is not the same as up.`,
       evidence: [
         { label: 'Recorded cycles', value: String(summary.recordedCycles) },
@@ -981,6 +1000,7 @@ export function generateVerdicts(from: number, to: number): Verdict[] {
     verdicts.push({
       id: 'symmetric_loss_not_line',
       severity: 'info',
+      title: `${summary.degradedCycles} loss cycles hit every WAN anchor at once`,
       conclusion: `${summary.degradedCycles} cycles lost at least ${summary.degradedLossPct}% on every WAN anchor at once without any anchor going silent.`,
       evidence: [
         { label: 'Degraded cycles', value: String(summary.degradedCycles) },

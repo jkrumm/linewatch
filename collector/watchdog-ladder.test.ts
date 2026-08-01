@@ -625,17 +625,20 @@ describe('the ledger the decision writes', () => {
     const now = T0 + 600_000
     const laddered = { outageKey: `wan:${T0}`, t0: T0, rung: 'reconnect' as const, enteredAt: T0, settleUntil: null, announcedAt: null }
     const healthy = { now, record: record({ newestSampleTs: now }), self: self({ probeTs: now }) }
+    // Healthy long enough that the recovery counts as held — otherwise the
+    // ladder is deliberately kept standing and none of this applies yet.
+    const held = now - DEFAULT_POLICY.recoverAfterS * 1000
 
     const afterAction = decide(
       armedInput({
         ...healthy,
-        ledger: ledger({ ladder: laddered, actions: [{ ts: T0 + 240_000, kind: 'reconnect', outageKey: `wan:${T0}`, outcome: 'executed' }] }),
+        ledger: ledger({ ladder: laddered, healthySince: held, actions: [{ ts: T0 + 240_000, kind: 'reconnect', outageKey: `wan:${T0}`, outcome: 'executed' }] }),
       }),
     )
     expect(afterAction.ledger.postActionCooldownUntil).toBe(now + DEFAULT_POLICY.postActionCooldownS * 1000)
     expect(afterAction.ledger.ladder.t0).toBeNull()
 
-    const selfHealed = decide(armedInput({ ...healthy, ledger: ledger({ ladder: laddered }) }))
+    const selfHealed = decide(armedInput({ ...healthy, ledger: ledger({ ladder: laddered, healthySince: held }) }))
     expect(selfHealed.note).toContain('self_recovery')
     expect(selfHealed.ledger.postActionCooldownUntil).toBeNull()
   })
@@ -794,5 +797,90 @@ describe('closing a write-ahead entry', () => {
     const out = decide(armedInput({ now: T0 + 600_000, ledger: { ...second, ladder: written.ladder } }))
     expect(out.state).toBe('latched')
     expect(out.action).toBe('none')
+  })
+})
+
+/**
+ * The defect a live router reboot exposed on 2026-08-01, 131 s in, with all
+ * three WAN anchors at 100% loss in the record.
+ *
+ * Entry into an outage is gated on `confirmTicks`. Exit was gated on nothing —
+ * so one stray reply to one anchor in the watchdog's own three-packet probe
+ * read as `partial`, which counts as healthy, which tore the ladder down and
+ * wrote `self_recovery` into the record for a line that had not recovered.
+ *
+ * The false attribution is the smaller half. The larger one is that a wedge
+ * flapping a single reply every couple of minutes restarts the 240 s observe
+ * window every time, so the ladder never advances on exactly the failure it
+ * exists for.
+ */
+describe('a recovery has to hold', () => {
+  const laddered = { outageKey: `wan:${T0}`, t0: T0, rung: 'observe' as const, enteredAt: T0, settleUntil: null, announcedAt: null }
+  const now = T0 + 131_000
+  const looksBetter = (over: Partial<Ledger> = {}) =>
+    decide(
+      armedInput({
+        now,
+        // One anchor answered; the other two did not. That is `partial`.
+        record: record({ newestSampleTs: now, wanAnchors: [
+          { target: 'cloudflare', received: 0 },
+          { target: 'google', received: 0 },
+          { target: 'quad9', received: 2 },
+        ] }),
+        self: self({ probeTs: now, wanAnchors: [
+          { target: 'cloudflare', received: 0 },
+          { target: 'google', received: 0 },
+          { target: 'quad9', received: 1 },
+        ] }),
+        ledger: ledger({ ladder: laddered, ...over }),
+      }),
+    )
+
+  test('one stray reply does not end an outage', () => {
+    const out = looksBetter()
+    expect(out.outageClass).toBe('partial')
+    expect(out.state).toBe('recovering')
+    expect(out.blockedBy).toContain('recovery_not_sustained')
+    expect(out.note).not.toContain('self_recovery')
+  })
+
+  test('and does not reset the clock the ladder runs on', () => {
+    const out = looksBetter()
+    // The whole point. T0 surviving is what lets the observe window complete
+    // through a line that is flapping rather than cleanly down.
+    expect(out.ledger.ladder.t0).toBe(T0)
+    expect(out.ledger.ladder.outageKey).toBe(`wan:${T0}`)
+  })
+
+  test('a recovery that holds the window does end it', () => {
+    const out = looksBetter({ healthySince: now - DEFAULT_POLICY.recoverAfterS * 1000 })
+    expect(out.state).toBe('recovered')
+    expect(out.ledger.ladder.t0).toBeNull()
+  })
+
+  test('a line that fails again mid-recovery continues the same outage', () => {
+    const holding = looksBetter()
+    const downAgain = decide(armedInput({ now: now + 15_000, ledger: holding.ledger }))
+    expect(downAgain.outageClass).toBe('full_wan_down')
+    // Same T0, so `downForS` keeps counting from the real start rather than
+    // from the moment the flap ended.
+    expect(downAgain.t0).toBe(T0)
+    expect(downAgain.ledger.healthySince).toBeNull()
+  })
+
+  test('the clean clock restarts from zero on every fresh recovery attempt', () => {
+    const first = looksBetter()
+    expect(first.ledger.healthySince).toBe(now)
+    const downAgain = decide(armedInput({ now: now + 15_000, ledger: first.ledger }))
+    const secondAttempt = decide(armedInput({
+      now: now + 30_000,
+      record: record({ newestSampleTs: now + 30_000 }),
+      self: self({ probeTs: now + 30_000 }),
+      ledger: downAgain.ledger,
+    }))
+    // Not resumed from the first attempt: 30 s of flapping must not add up to a
+    // sustained recovery.
+    expect(secondAttempt.ledger.healthySince).toBe(now + 30_000)
+    expect(secondAttempt.state).toBe('recovering')
   })
 })

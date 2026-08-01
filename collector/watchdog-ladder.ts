@@ -74,6 +74,7 @@ export type WatchdogState =
   | 'settling'
   | 'blocked'
   | 'exhausted'
+  | 'recovering'
   | 'recovered'
   | 'latched'
 
@@ -98,6 +99,24 @@ export interface WatchdogPolicy {
   postActionCooldownS: number
   escalationQuietS: number
   v6BaselineMaxAgeS: number
+  /**
+   * How long a recovery must hold before the ladder is torn down.
+   *
+   * Entry into an outage is gated on `confirmTicks`; exit was gated on nothing,
+   * and that asymmetry is a real defect rather than a theoretical one. Measured
+   * 2026-08-01 19:11:18, 131 s into a live router reboot with all three WAN
+   * anchors at 100% loss in the record: one stray reply to one anchor in the
+   * watchdog's own three-packet probe made `anchorsAllDown` false, which is
+   * `partial`, which counts as healthy. The ladder reset — T0 cleared, outage
+   * key cleared — and a `self_recovery` note went into the record for a line
+   * that had not recovered.
+   *
+   * The attribution lie is the smaller half. The larger one is that a wedge
+   * flapping a single reply every couple of minutes would restart the 240 s
+   * observe window every time, so the ladder would never advance on exactly the
+   * failure this exists for.
+   */
+  recoverAfterS: number
   /** Consecutive actions with no sustained recovery between them before the watchdog disarms itself. */
   latchAfterActions: number
   /** How long the line must be continuously healthy to clear the latch counter. */
@@ -167,6 +186,11 @@ export const DEFAULT_POLICY: WatchdogPolicy = {
   postActionCooldownS: 900,
   escalationQuietS: 3_600,
   v6BaselineMaxAgeS: 86_400,
+  // Two probe cycles, the same evidence bar as `confirmTicks` on the way in.
+  // Short enough that a genuine recovery is recognised within one ladder tick
+  // of the record showing it, long enough that a single anchor's stray reply
+  // cannot end an outage on its own.
+  recoverAfterS: 60,
   latchAfterActions: 2,
   // 60 clean probe cycles.
   latchClearAfterCleanS: 1_800,
@@ -593,23 +617,42 @@ function evaluate(input: LadderInput, outageClass: OutageClass): LadderDecision 
   }
 
   if (healthy) {
-    const recovering = ledger.ladder.t0 !== null
+    const inLadder = ledger.ladder.t0 !== null
+    if (!inLadder) {
+      return { ...base, state: 'normal', action: 'none', shadow: false, blockedBy: [], nextEvaluationAt: tick, note: 'healthy' }
+    }
+
+    // A recovery has to hold as long as an outage takes to confirm. One stray
+    // reply to one anchor reads as `partial`, which is healthy — and without
+    // this it tore the ladder down mid-outage and wrote a self_recovery for a
+    // line that was still at 100% loss.
+    const healthyForMs = ledger.healthySince === null ? 0 : now - ledger.healthySince
+    if (healthyForMs < policy.recoverAfterS * 1000) {
+      return {
+        ...base,
+        state: 'recovering',
+        action: 'none',
+        shadow: false,
+        blockedBy: ['recovery_not_sustained'],
+        nextEvaluationAt: tick,
+        note: `looks ${outageClass} again after ${Math.floor(healthyForMs / 1000)}s — holding the ladder until it has held ${policy.recoverAfterS}s`,
+      }
+    }
+
     return {
       ...base,
-      state: recovering ? 'recovered' : 'normal',
+      state: 'recovered',
       action: 'none',
       shadow: false,
       blockedBy: [],
       nextEvaluationAt: tick,
-      note: recovering
-        ? // Attribution: if no action was taken in this ladder, the line fixed
-          // itself and the record must say so. Crediting the watchdog for a
-          // self-recovery is the same lie the intervention route exists to
-          // prevent, told about a machine.
-          ledger.actions.some((action) => action.outageKey === ledger.ladder.outageKey)
-          ? 'recovered after an action in this ladder'
-          : 'recovered with no action taken — self_recovery'
-        : 'healthy',
+      // Attribution: if no action was taken in this ladder, the line fixed
+      // itself and the record must say so. Crediting the watchdog for a
+      // self-recovery is the same lie the intervention route exists to
+      // prevent, told about a machine.
+      note: ledger.actions.some((action) => action.outageKey === ledger.ladder.outageKey)
+        ? 'recovered after an action in this ladder'
+        : 'recovered with no action taken — self_recovery',
     }
   }
 
@@ -840,7 +883,10 @@ function advance(input: LadderInput, decision: LadderDecision): Ledger {
   if (ledger.pending !== null) return next
 
   if (healthy) {
-    if (ledger.ladder.t0 !== null) {
+    // Gated on the decision, not recomputed: `recovering` keeps T0 and the
+    // outage key, so a flapping line continues the outage it is still in
+    // rather than starting a fresh one with a fresh action budget.
+    if (ledger.ladder.t0 !== null && decision.state === 'recovered') {
       // A recovery that holds a couple of cycles and fails again must not be
       // laundered into a fresh independent outage with a fresh action budget.
       // Armed at the recovery rather than at the action, deliberately: arming it

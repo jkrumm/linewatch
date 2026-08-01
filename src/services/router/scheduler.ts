@@ -3,6 +3,7 @@ import { db } from '../../db/client.js'
 import { RouterClient, RouterSessionLostError, RouterUnreachableError } from './client.js'
 import { routerConfig } from './config.js'
 import { RouterPoller } from './poll.js'
+import { LiveExecutor, NullExecutor, type RouterActionExecutor } from './actions.js'
 
 /**
  * The router poller's schedule.
@@ -18,6 +19,29 @@ const FIRST_POLL_DELAY_MS = 5_000
 let running = false
 let poller: RouterPoller | null = null
 let client: RouterClient | null = null
+let executor: RouterActionExecutor = new NullExecutor()
+
+/**
+ * The poller, for the on-demand poll route. Null when no router is configured —
+ * the route answers 503 rather than pretending a poll happened.
+ */
+export function getRouterPoller(): RouterPoller | null {
+  return poller
+}
+
+/**
+ * The action executor. A `NullExecutor` unless both a password and
+ * `LINEWATCH_ROUTER_WRITE=1` are present, so the default in every environment
+ * — including every test and every fresh checkout — sends nothing.
+ */
+export function getRouterExecutor(): RouterActionExecutor {
+  return executor
+}
+
+/** Serialises an on-demand poll against the scheduled one: they share a session. */
+export function pollOnDemand(): Promise<boolean> {
+  return pollGuarded().then(() => true)
+}
 
 async function pollGuarded(): Promise<void> {
   if (poller === null || client === null) return
@@ -84,6 +108,12 @@ export function startRouterPoller(): Cron | null {
     client,
     collectorHostIp: routerConfig.collectorHostIp,
   })
+  executor = routerConfig.writeEnabled ? new LiveExecutor(client) : new NullExecutor()
+  console.log(
+    routerConfig.writeEnabled
+      ? '[router] WRITE CAPABILITY ENABLED (LINEWATCH_ROUTER_WRITE=1) — the action routes can reach the device'
+      : '[router] write capability off — the action routes answer 403 and the executor sends nothing',
+  )
 
   // One poll shortly after boot: it fills the tables right after a deploy and is
   // the fastest honest answer to "is the router reachable from in here".

@@ -49,6 +49,18 @@ export interface RouterConfig {
   /** Why the poller is off, when it is off. */
   disabledReason: string | null
   /**
+   * Whether this process may write to the router at all
+   * (`LINEWATCH_ROUTER_WRITE=1`). Off by default and independent of everything
+   * above, including of whether a watchdog exists: with it unset the action
+   * routes answer 403 and the executor is the one that sends nothing, so a bug
+   * anywhere upstream still cannot reach the device.
+   *
+   * A second switch rather than a mode of `enabled` on purpose — the poller
+   * being on is not consent to write, and the two are turned on by different
+   * people at different times for different reasons.
+   */
+  writeEnabled: boolean
+  /**
    * A setting that was accepted but not honoured — currently only an
    * unparseable cron pattern. Separate from `disabledReason` because the poller
    * is degraded, not off, and silently running on a different schedule than
@@ -120,6 +132,9 @@ export function buildRouterConfig(env: NodeJS.ProcessEnv): RouterConfig {
     staleAfterMs: cron.intervalMs * STALE_AFTER_INTERVALS,
     requestTimeoutMs: Number(env['LINEWATCH_ROUTER_TIMEOUT_MS'] ?? 10_000),
     collectorHostIp: env['LINEWATCH_COLLECTOR_HOST_IP'] ?? '192.168.1.100',
+    // Requires the password too: a write capability with no way to log in is
+    // not a capability, and reporting it as one would misdescribe the system.
+    writeEnabled: env['LINEWATCH_ROUTER_WRITE'] === '1' && password !== null,
     disabledReason: switchedOff ? 'LINEWATCH_ROUTER_POLL=0' : reason,
     configWarning: cron.reason,
   }

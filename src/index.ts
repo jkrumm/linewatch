@@ -15,6 +15,7 @@ import { speedtestsRoutes } from './routes/speedtests.js'
 import { eventsRoutes } from './routes/events.js'
 import { interventionsRoutes } from './routes/interventions.js'
 import { routerRoutes } from './routes/router.js'
+import { routerActionRoutes } from './routes/router-actions.js'
 import { verdictRoutes } from './routes/verdict.js'
 import { wifiRoutes } from './routes/wifi.js'
 import { startSpeedtestScheduler } from './services/speedtest-runner.js'
@@ -54,7 +55,10 @@ export const app = new Elysia()
             '30-second ping cycles feed an outage state machine; hourly Ookla runs measure throughput ' +
             'and loaded (bufferbloat) latency. Reads are open on the tailnet. `Authorization: Bearer ' +
             '<token>` is required by the two routes that write to the historical record from outside — ' +
-            '`POST /api/probes` and `POST /api/interventions`. `POST /api/speedtests/run` is **not** ' +
+            '`POST /api/probes`, `POST /api/interventions`, `POST /api/router/poll` and ' +
+            '`POST /api/router/actions/reconnect` — the last of which also needs ' +
+            '`LINEWATCH_ROUTER_WRITE=1`, an independent switch that is off by default. ' +
+            '`POST /api/speedtests/run` is **not** ' +
             'one of them: it is a dashboard button with no token to present, so it is rate-limited ' +
             'instead — a second call inside `minIntervalS` gets a 429 carrying `secondsUntilNext`.',
         },
@@ -86,6 +90,7 @@ export const app = new Elysia()
   .use(eventsRoutes)
   .use(interventionsRoutes)
   .use(routerRoutes)
+  .use(routerActionRoutes)
   .use(verdictRoutes)
   .use(wifiRoutes)
   // Serves the built dashboard: a real file when the path maps to one, and

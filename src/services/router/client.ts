@@ -45,6 +45,65 @@ import { redactRow, type RouterRow } from './redact.js'
 
 export type RouterOperation = 'go' | 'gl' | 'gs'
 
+/**
+ * The only actions this codebase can express, as *intents* rather than OIDs.
+ *
+ * This indirection is the whole safety model and it is not a style preference.
+ * `/js/gdprProxy.js` routes every verb — `go`, `gl`, `gs`, `so`, `ao`, `do`,
+ * `op`, `cgi` — to the same `/cgi_gdpr?9`, discriminated only by a string
+ * inside an AES-encrypted body. Reading line statistics and factory-resetting
+ * the device are the same URL, the same method and the same envelope, so **no
+ * network-layer control can tell them apart**: not a firewall rule, not a proxy
+ * rule, not a URL allowlist. The only place the distinction can be enforced is
+ * here.
+ *
+ * So the OID never crosses a module boundary. `sendAction` takes one of these
+ * four literals, the map below is module-private and frozen, and there is no
+ * overload anywhere that accepts an OID as a string. The natural shape —
+ * `act(oid: string)` — would put all eight existing `read(oid, …)` call sites
+ * one argument away from an action, with the destructive constants as lexical
+ * neighbours in the router's own JavaScript.
+ */
+export type RouterActionIntent = 'ppp_connect' | 'ppp_disconnect' | 'dhcp_renew' | 'reboot'
+
+/**
+ * Intent → the firmware's own operation name.
+ *
+ * Sourced from TP-Link's published VX800v emulator, whose `main/*.htm` are the
+ * real firmware page sources: `wan.htm` branches on `connType` to
+ * `ACT_OP_PPP_CONN` / `ACT_OP_DHCP_RENEW`, and its mirror handler is
+ * `ACT_OP_PPP_DISCONN`. **`reboot` is the one name that is not settled** —
+ * `restart.htm` uses `ACT_OP_REBOOT` while `sysMode.htm` uses `ACT_REBOOT`, and
+ * the live device's own `proxy.js` string-searches the serialised body for
+ * `ACT_REBOOT` in order to swallow the transport error a dying device produces.
+ * That is evidence for the short name and not proof, which is why nothing in
+ * this repo sends it: `RouterActionExecutor` refuses `reboot` outright, and
+ * this entry exists so the refusal has something to name.
+ */
+const ACTION_OIDS: Readonly<Record<RouterActionIntent, string>> = Object.freeze({
+  ppp_connect: 'ACT_OP_PPP_CONN',
+  ppp_disconnect: 'ACT_OP_PPP_DISCONN',
+  dhcp_renew: 'ACT_OP_DHCP_RENEW',
+  reboot: 'ACT_REBOOT',
+})
+
+/**
+ * The runtime half of the type-level guard above. Types are erased, and a value
+ * that reached here through a parsed config or a JSON body is `any` at runtime
+ * however it was declared — so membership is asserted rather than assumed at
+ * the single point where `operation: 'op'` is put on the wire.
+ */
+const ALLOWED_ACTION_OIDS: ReadonlySet<string> = new Set(Object.values(ACTION_OIDS))
+
+export interface RouterActionResponse {
+  /** True when the router answered errorcode 0. */
+  ok: boolean
+  errorcode: string | null
+  httpStatus: number | null
+  /** The operation name actually sent, for the intervention record. */
+  oid: string
+}
+
 export interface RouterClientOptions {
   baseUrl: string
   /** Not "admin": both the login payload and the MD5 hash use "user" on this firmware. */
@@ -215,6 +274,61 @@ export class RouterClient {
         }
         throw error
       }
+    })
+  }
+
+  /**
+   * Sends one `$.dm.op` action over the held session.
+   *
+   * The envelope is byte-identical to a read — same `/cgi_gdpr?9`, same RSA
+   * `sign` with a non-incrementing `seq`, same AES-128-CBC body, same TokenID —
+   * so nothing here is new transport, only a different `operation` and `oid`.
+   * `stack` is the caller's, because the object being acted on decides it: the
+   * WAN connection's own stack is `3,0,0,0,0,0` while `DEV2_IP_INTF`'s `ppp0`
+   * is stack 4, and using the interface's would address the wrong object.
+   *
+   * **The request body is never logged.** The login body on this same transport
+   * carries `Passwd: base64(password)`, and the container log is not a place
+   * that stays private. A "log the body on failure" helper added here later
+   * would put the household credential into it the first time a login failed.
+   */
+  sendAction(input: { intent: RouterActionIntent; stack: string }): Promise<RouterActionResponse> {
+    return this.serialise(async () => {
+      const session = this.session
+      if (session === null) throw new RouterSessionLostError('no session held when sending an action')
+
+      const oid = ACTION_OIDS[input.intent]
+      // Belt to the type layer's braces. If this ever throws, something reached
+      // the send site with an OID the whitelist does not contain, and the
+      // correct outcome is a crash rather than a request.
+      if (!ALLOWED_ACTION_OIDS.has(oid)) {
+        throw new Error(`refusing to send a router operation outside the whitelist: ${oid}`)
+      }
+
+      const payload =
+        JSON.stringify({
+          data: { stack: input.stack, pstack: '0,0,0,0,0,0' },
+          operation: 'op',
+          oid,
+        }) + '\r\n'
+
+      let response: { status: number; body: string }
+      try {
+        response = await this.post(session, '/cgi_gdpr?9', payload)
+      } catch (error) {
+        throw await this.classifyTransportFailure(error, oid)
+      }
+
+      let errorcode: string | null = null
+      try {
+        const envelope = JSON.parse(response.body) as { errorcode?: unknown }
+        errorcode = envelope.errorcode === undefined ? '0' : String(envelope.errorcode)
+      } catch {
+        // Left null: an unparsable body after an action is genuinely ambiguous,
+        // and the caller decides what that means for the action it sent.
+      }
+
+      return { ok: response.status === 200 && errorcode === '0', errorcode, httpStatus: response.status, oid }
     })
   }
 

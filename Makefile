@@ -458,11 +458,24 @@ collector-setup: ## Generate the bearer token (if absent), render + load the nat
 		mv "$$TMP" "$$DST"; \
 		echo "  ✓ LaunchAgent rendered ($$DST)"; \
 	fi; \
-	launchctl unload "$$DST" 2>/dev/null || true; \
-	launchctl load "$$DST" || { echo "  ✗ launchctl load failed"; exit 1; }; \
+	: "Modern domain-target form, not the legacy load/unload pair it replaced."; \
+	: "The legacy launchctl load cannot clear a DISABLED OVERRIDE: launchd keeps"; \
+	: "a per-user enabled/disabled database separate from the plist, and a job"; \
+	: "disabled there is skipped SILENTLY at every login - no error, no log line,"; \
+	: "nothing in the job own StandardErrorPath, because the job is never even"; \
+	: "considered. Measured, not theoretical: after the 2026-08-01 reboot this"; \
+	: "agent was the only one of 22 in ~/Library/LaunchAgents that did not come"; \
+	: "back, log show over the boot window had no launchd mention of it at all,"; \
+	: "and its plist, permissions and xattrs were identical to agents that did"; \
+	: "load. enable is the only step that addresses that state, and it is"; \
+	: "idempotent, so it is cheap insurance even if the cause was something else"; \
+	UID_N=$$(id -u); \
+	launchctl bootout gui/$$UID_N/$(PLIST_LABEL) 2>/dev/null || true; \
+	launchctl enable gui/$$UID_N/$(PLIST_LABEL) 2>/dev/null || true; \
+	launchctl bootstrap gui/$$UID_N "$$DST" || { echo "  ✗ launchctl bootstrap failed"; exit 1; }; \
 	sleep 2; \
-	if launchctl list | grep -q "$(PLIST_LABEL)"; then \
-		echo "  ✓ collector loaded (RunAtLoad + KeepAlive — survives reboot)"; \
+	if launchctl print gui/$$UID_N/$(PLIST_LABEL) >/dev/null 2>&1; then \
+		echo "  ✓ collector loaded and enabled (RunAtLoad + KeepAlive)"; \
 	else \
 		echo "  ✗ LaunchAgent failed to load — check $(COLLECTOR_LOG)"; \
 		exit 1; \

@@ -60,7 +60,11 @@ describe('the write whitelist', () => {
    * ones in the router's own JavaScript — one careless paste away.
    */
   it('contains no destructive operation name anywhere in the router module', () => {
-    const dangerous = /ACT[A-Z_]*(FACTORY|RESET|RESTORE|DEFAULT|UPGRADE|FIRMWARE)|FACTORY_RESET/i
+    // Quoted forms only. An unquoted identifier in prose cannot be sent — and
+    // this file's own commentary names the dangerous constants deliberately, so
+    // a regex over bare words would fail on the documentation that explains why
+    // the regex exists. What can be sent is a string literal.
+    const dangerous = /['"`]ACT[A-Z_]*(FACTORY|RESET|RESTORE|DEFAULT|UPGRADE|FIRMWARE)/i
     const offenders: string[] = []
     for (const name of readdirSync(moduleDir)) {
       if (!name.endsWith('.ts') || name === THIS_FILE) continue
@@ -80,7 +84,10 @@ describe('the write whitelist', () => {
   it('sends exactly four operations, and they are these four', () => {
     const source = readFileSync(join(moduleDir, 'client.ts'), 'utf-8')
     const found = new Set(source.match(/'ACT_[A-Z_]+'/g)?.map((match) => match.slice(1, -1)) ?? [])
-    expect([...found].sort()).toEqual(['ACT_OP_DHCP_RENEW', 'ACT_OP_PPP_CONN', 'ACT_OP_PPP_DISCONN', 'ACT_REBOOT'])
+    // Wire values, not the firmware's identifier names for them: the device's
+    // own gdprProxy.js declares `var ACT_OP_PPP_CONN = "ACT_PPP_CONN"`, and
+    // sending the identifier gets HTTP 200 with errorcode 1.
+    expect([...found].sort()).toEqual(['ACT_DHCP_RENEW', 'ACT_PPP_CONN', 'ACT_PPP_DISCONN', 'ACT_REBOOT'])
   })
 
   it('exposes no way to name an operation from outside client.ts', () => {

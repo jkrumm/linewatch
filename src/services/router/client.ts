@@ -67,23 +67,32 @@ export type RouterOperation = 'go' | 'gl' | 'gs'
 export type RouterActionIntent = 'ppp_connect' | 'ppp_disconnect' | 'dhcp_renew' | 'reboot'
 
 /**
- * Intent → the firmware's own operation name.
+ * Intent → the operation name that goes on the wire.
  *
- * Sourced from TP-Link's published VX800v emulator, whose `main/*.htm` are the
- * real firmware page sources: `wan.htm` branches on `connType` to
- * `ACT_OP_PPP_CONN` / `ACT_OP_DHCP_RENEW`, and its mirror handler is
- * `ACT_OP_PPP_DISCONN`. **`reboot` is the one name that is not settled** —
- * `restart.htm` uses `ACT_OP_REBOOT` while `sysMode.htm` uses `ACT_REBOOT`, and
- * the live device's own `proxy.js` string-searches the serialised body for
- * `ACT_REBOOT` in order to swallow the transport error a dying device produces.
- * That is evidence for the short name and not proof, which is why nothing in
- * this repo sends it: `RouterActionExecutor` refuses `reboot` outright, and
- * this entry exists so the refusal has something to name.
+ * **These are values, not identifiers, and the difference cost a live request.**
+ * The firmware's WAN page calls `$.dm.op({oid: ACT_OP_PPP_CONN, ...})`, and the
+ * obvious reading — that the OID is the string `"ACT_OP_PPP_CONN"` — is wrong.
+ * `ACT_OP_PPP_CONN` is a JavaScript variable, declared in the device's own
+ * `gdprProxy.js` as `var ACT_OP_PPP_CONN = "ACT_PPP_CONN"`. Every one of these
+ * constants drops the `_OP` between the identifier and its value. Sent with the
+ * identifier name, the router answers HTTP 200 with `errorcode: 1` — measured
+ * against the live device 2026-08-01, which is a useful fact in itself: it
+ * validates the OID rather than doing something arbitrary with an unknown one.
+ *
+ * The same file settles the reboot name that looked ambiguous from the page
+ * sources: `restart.htm`'s `ACT_OP_REBOOT` and `sysMode.htm`'s `ACT_REBOOT`
+ * resolve to the same wire string, because the first is the identifier for the
+ * second. There was never a disagreement, only two ways of writing it.
+ *
+ * And the hazard this whole design guards against is not theoretical: the two
+ * factory-reset constants — plain and deep — are declared five lines above
+ * `ACT_OP_PPP_CONN` in that same file, following the same naming rule. They are
+ * literally adjacent to the constants this codebase does want.
  */
 const ACTION_OIDS: Readonly<Record<RouterActionIntent, string>> = Object.freeze({
-  ppp_connect: 'ACT_OP_PPP_CONN',
-  ppp_disconnect: 'ACT_OP_PPP_DISCONN',
-  dhcp_renew: 'ACT_OP_DHCP_RENEW',
+  ppp_connect: 'ACT_PPP_CONN',
+  ppp_disconnect: 'ACT_PPP_DISCONN',
+  dhcp_renew: 'ACT_DHCP_RENEW',
   reboot: 'ACT_REBOOT',
 })
 

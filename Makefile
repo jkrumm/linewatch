@@ -1,5 +1,5 @@
 .PHONY: help env up down rebuild logs collector-setup collector-teardown collector-logs check \
-	heartbeat-setup heartbeat-teardown heartbeat-status heartbeat-logs \
+	heartbeat-setup heartbeat-teardown heartbeat-status heartbeat-logs router-reconnect \
 	marker db-counts db-shell db-backup db-restore db-import
 .DEFAULT_GOAL := help
 
@@ -319,6 +319,19 @@ intervention: ## Record a manual action on the line: make intervention ACTION="s
 		-H 'content-type: application/json' \
 		-d "$$BODY" \
 		&& echo "  ✓ recorded — it will appear on the timeline and in GET /api/events"
+
+router-reconnect: ## Re-dial the WAN connection (needs LINEWATCH_ROUTER_WRITE=1 in .env; drops the line for ~15s)
+	@# No OID parameter, and there never will be one: the router routes every
+	@# verb through one URL with the verb inside an encrypted body, so a target
+	@# that took an operation name would put a factory reset one typo away. The
+	@# route exposes named actions only.
+	@#
+	@# Measured on this line 2026-08-01: 13s from command to a re-established
+	@# session, zero packets lost across the 30s probe cycles either side, and a
+	@# 3s en0 link flap the 1Hz sampler caught. It is cheap. It is also not a
+	@# fix for anything on its own - see docs/watchdog-spec.md.
+	@curl -fsS -X POST http://127.0.0.1:7731/api/router/actions/reconnect \
+		-H "authorization: Bearer $$(cat $(TOKEN_FILE))" | python3 -m json.tool
 
 db-vacuum: ## Rebuild the database, reclaiming freed pages (run after a migration that DROPs a column)
 	$(REQUIRE_VOLUME)

@@ -294,9 +294,47 @@ redaction. `ifconfig -v`'s `uplink rate`/`downlink rate` are omitted too: they
 disagree with the PHY rate by ~4× (53.95 vs 229 Mbit) and would only invite a
 fabricated single "wifi speed".
 
-`config_change` and `note` are still unwritten. They stay so that phase 2 —
-TP-Link reconnect, LAN↔WLAN failover, forced re-dial — can land without a
-migration.
+All four kinds are now written. `config_change` records a container start:
+downtime was otherwise invisible in the schema, and the 07:10→08:17 hole on
+2026-08-01 — six missed polls over 67 minutes, almost certainly a rebuild — was
+indistinguishable from the router refusing for that long, so every coverage
+figure computed from `router_line_sample` blamed the router for the deploys.
+`note` carries poller telemetry, and only for polls that were not clean: a clean
+poll evidences itself in the rows it stored, and one note per poll would be 52k
+rows a year in the table the timeline reads. It is in the record rather than
+stdout because `make up` runs `--force-recreate`, which destroys the previous
+container's log — so every failure-mode tally in this repo was bounded by
+time-since-last-deploy.
+
+`router_wan_sample` — the WAN *connection*, one row per poll, between the
+carrier line and the IP interface. It exists because the 2026-08-01 outage could
+not be diagnosed: `parseLiveWan` parsed five fields and the poller stored one of
+them, so the layer that failed had to be inferred from byte counters resetting.
+
+Reading the live device settled what the code comments only asserted. This line
+**is** DS-Lite (`X_TP_DsliteEnable=1`, from the router's own data model), the
+connection's stack is `3,0,0,0,0,0` while `DEV2_IP_INTF`'s `ppp0` is stack 4, and
+`connIPv4Enabled` is 0 with a 0.0.0.0 address — so IPv4 is *entirely* the
+softwire. That last one is why **`conn_status_v4` is a constant, not a signal**:
+it reads `Connecting` in health and in failure alike, and `uptime_v4_s` is pinned
+at 0 forever. `conn_status_v6` and `uptime_v6_s` are the live pair.
+
+`uptime_v6_s` is what the table was worth adding for on its own. It is the WAN
+session's own age, so a decrease between polls proves the session was torn down
+and re-established — the fact the 08-01 diagnosis had to reconstruct from byte
+counters, and the poll that would have shown it directly is the one that failed.
+It is materialised into `event` as a `link_change` with `reason:
+wan_session_restart`, and it fired on its first real event: an unprompted session
+restart at 12:30:00 on 2026-08-01, named 7 seconds later.
+
+`selected_by` records how the row was chosen out of `DEV2_ADT_WAN`'s six
+instances. `status` means the router reported it not-disconnected; `continuity`
+means nothing was, and this is the connection that was live at the previous poll.
+The poller carries one forward so `ppp0`'s counters and the session state keep
+being recorded *through* an outage — the old behaviour wrote no WAN row at all
+then, which was honest about the label and expensive about the record. Nothing is
+fabricated to do it: the counters are read live, and `continuity` says plainly
+that the router did not vouch for the connection.
 
 Four more tables hold the carrier-side view, written by the read-only router
 poller every 10 minutes. They answer *why* a line is slow, which no amount of
@@ -307,11 +345,24 @@ between polls and answered an eviction with a 15-minute re-login backoff, which
 measured at 36% coverage: 20 of 55 due polls stored over 4.5 hours, gaps
 alternating 300 s and 1500 s, because one drop silently swallowed the next three
 polls. Re-establishing the session per poll costs 72 logins a day against ~144
-for repairing a held one, and removes the failure mode instead of tuning its
-constant. The cadence halved to pay for it and nothing measurable was lost —
-`down_sync_kbps` had zero variance across all 20 samples the old scheme stored.
-A failed login stores nothing at all; the gap is the honest record of a poll
-that did not happen.
+for repairing a held one.
+
+**It did not remove the failure mode, and the two claims that said so were
+wrong.** Per-attempt success roughly doubled — 33.5% under the held session,
+45.6% after — but the same two-successes-then-a-hole pattern survives, unbroken
+overnight with nobody present, which proves the 15-minute re-login backoff was a
+contributing cause rather than the mechanism. And the same change halved the
+cadence, so effective sampling fell from 4.04 to 3.23 samples/hour: a better
+success rate bought with a worse record. "Nothing measurable was lost" was an
+artefact of the 20-sample window it was computed over; 163 samples later,
+`down_sync_kbps` shows seven distinct values across eight transitions.
+
+What *is* now fixed is the other half: a poll abandoned partway through no longer
+throws away the reads that already succeeded. Two of the ten attempts in the only
+log window that survived a deploy were abandoned at reads 3 and 7, and a line
+sample needs reads 1 and 2 — so both had one in hand and discarded it. A failed
+*login* still stores nothing; the gap is the honest record of a poll that did not
+happen.
 
 | Table | Holds |
 |-|-|
@@ -338,8 +389,12 @@ is nothing; `redact.ts` now blanks name-shaped keys as a second guard, and
 
 ## API
 
-Bearer token on the two routes that write to the historical record, and so are
-the two worth forging: `POST /api/probes` and `POST /api/interventions`.
+Bearer token on the four routes that write to the historical record or to the
+line itself: `POST /api/probes`, `POST /api/interventions`, `POST
+/api/router/poll` and `POST /api/router/actions/reconnect`. The last carries a
+second, independent gate — `LINEWATCH_ROUTER_WRITE`, unset by default — because
+the two stop different people: the bearer stops someone else acting, the
+capability switch stops *us*.
 Everything else is open on the tailnet, including `POST /api/speedtests/run`: it
 is a dashboard button with no token to present, and its only abuse is saturating
 the line, which a 5-minute rate limit caps more usefully than a shared secret
@@ -361,6 +416,8 @@ in-process timer, so restarting the container cannot reset the budget.
 | `GET /api/router` | latest line sample, WAN/LAN throughput, the collector host's presence and medium, LAN ports |
 | `GET /api/router/line?from&to&limit` | carrier line history: sync rates, noise margin in real dB, attenuation, showtime |
 | `GET /api/router/throughput?from&to&role&limit` | per-interface rates, `role=wan` for the live internet-facing one |
+| `POST /api/router/poll` | run one read-only poll now (bearer; 429 within 60 s of the newest stored sample) |
+| `POST /api/router/actions/reconnect` | re-dial the WAN (bearer **and** `LINEWATCH_ROUTER_WRITE=1`; 403 without it) |
 | `GET /api/wifi?from&to&bucket` | radio history, bucketed in SQL: signal/noise, SNR derived on read, PHY rate (not throughput), interface-bound RTT |
 
 Bucketing happens in SQL. The dashboard must never pull 4M rows to draw a year.

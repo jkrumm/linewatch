@@ -42,8 +42,10 @@ Full reasoning, schema, and API contract: [`docs/DESIGN.md`](docs/DESIGN.md).
 ```bash
 make up                # build + start the container stack (API + UI on :7731)
 make collector-setup   # generate the bearer token, load the native LaunchAgent
+make heartbeat-setup   # load the Uptime Kuma heartbeat agent (needs the push URL)
 make logs              # container logs
 make collector-logs    # collector logs
+make heartbeat-status  # what the heartbeat would report right now, without pushing
 make check             # typecheck + tests
 ```
 
@@ -56,6 +58,30 @@ The collector spools to `collector/spool.jsonl` whenever the API is unreachable
 and replays on the next successful cycle, so a redeploy does not punch a hole in
 the uptime record — that hole would read as an outage, which is the one thing
 being measured.
+
+## Alerting
+
+Uptime Kuma runs on the homelab, which is on a different WAN, so it cannot probe
+this line even in principle. The mini reports on itself instead — and that
+inversion is the point rather than a compromise: a home-line outage severs the
+push, Kuma alerts on the missed heartbeat, and that alert leaves the homelab over
+a WAN the outage does not touch. **The push failing is the signal.**
+
+Two failure classes stay distinguishable in one monitor. Silence means the line
+or the mini is gone. An explicit `down` push means linewatch stopped measuring
+while the line still works — a dead collector, an unreachable API, or the mini
+having failed over to Wi-Fi and no longer measuring *this* line at all.
+
+That second class is the one worth having, and it needs care: `GET /api/status`
+reports `up: true` whenever no cycle is being ingested, because the outage state
+machine has nothing to open a row from. A collector that died at 02:00 reports a
+flawless line forever. The heartbeat checks sample freshness for exactly that
+reason.
+
+Threshold is 240 s to DOWN, four heartbeats of margin. Not a round number: the
+longest self-recovery in the record is 90 s, and two of the three events of that
+class healed themselves in exactly that. Measured on a real outage the day it
+shipped — 135 s of silence, no page, line back on its own.
 
 ## Known limits
 

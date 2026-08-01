@@ -21,12 +21,24 @@ Throughput through the VM is unaffected, so speed tests belong in the container.
 | Piece | Where | Why |
 |-|-|-|
 | `collector/{probe,ping-parser,vantage,link-sampler,wifi}.ts` | native, launchd | real ICMP + the host's own vantage + 1 Hz link state + the radio; no npm deps |
+| `collector/heartbeat{,-verdict}.ts` | native, launchd, 60 s | pushes the Uptime Kuma heartbeat; its own agent so a dead collector is still reportable |
 | API + SQLite + Ookla + router poll + UI | Docker (`:7731`) | restart policy, rollhook CD |
 
 The collector POSTs batches with a bearer token and **spools to
 `collector/spool.jsonl` on failure**, replaying on the next successful cycle. Do
 not "simplify" the spool away — without it every redeploy writes a fake outage
 into the record.
+
+**Alerting is a missed heartbeat, and that is the design.** Uptime Kuma runs on
+the homelab, on a different WAN, and the Tailscale ACL has no `tag:homelab →
+tag:mac` grant — so it cannot probe this line even in principle. The mini pushes
+to it every 60 s (`Home Line - Push`, 240 s to DOWN); a home-line outage severs
+the push and the alert leaves the homelab over a WAN the outage does not touch.
+Silence means the line or the mini is gone; an explicit `down` push means
+linewatch stopped measuring while the line works. **`GET /api/status`'s own `up`
+field cannot be used for this** — no ingest means no outage row can open, so a
+dead collector reports a flawless line forever. `collector/heartbeat-verdict.ts`
+checks sample freshness for that reason and its tests pin it.
 
 **The database is in the `linewatch-data` named Docker volume and the host
 cannot open it.** Read it with `make db-counts` / `make db-shell`, never by
@@ -46,9 +58,13 @@ an invariant of importing the client.
 
 ## Conventions
 
-- Bearer auth on the two routes that write to the historical record: `POST
-  /api/probes` and `POST /api/interventions`. Everything else is open on the
-  tailnet — including `POST /api/speedtests/run`, which is a dashboard button
+- Bearer auth on the four routes that write to the historical record or to the
+  line itself: `POST /api/probes`, `POST /api/interventions`, `POST
+  /api/router/poll` and `POST /api/router/actions/reconnect`. The last carries a
+  **second, independent gate**, `LINEWATCH_ROUTER_WRITE`, unset by default: the
+  bearer stops someone else acting, the capability switch stops *us* — a bad
+  deploy, a watchdog gone wrong, a test pointed at the wrong host. Everything
+  else is open on the tailnet — including `POST /api/speedtests/run`, which is a dashboard button
   with no token to present and is **rate-limited instead** (429 within
   `speedtestMinIntervalS`, 5 min by default, measured against the newest
   `speed_test` row so a container restart cannot reset it). Saturating the line
@@ -75,9 +91,11 @@ an invariant of importing the client.
   from the carrier side. **1 Hz resolves transitions of ~2 s and longer: no
   recorded transition means none was observed above that resolution, never that
   the link was stable.** `intervention` is written by `POST /api/interventions`.
-  `config_change` and `note` are still unwritten; the `event` table stays the
-  extension point for phase-2 router control (TP-Link reconnect, LAN↔WLAN
-  failover) so it needs no migration.
+  All four `event` kinds are now written. `config_change` records container
+  starts, so a deploy stops being indistinguishable from the router refusing to
+  answer; `note` carries poller telemetry (non-clean polls only — a clean poll
+  evidences itself in the rows it stored, and one note per poll would be 52k
+  rows a year in the table the UI timeline reads).
 - `wifi_sample` records the radio every 10th cycle (5 min — `system_profiler
   SPAirPortDataType` costs 4.8 s median, so per-cycle is not affordable). Call
   it **an alternate radio path currently attached**, never "the standby path":
@@ -89,8 +107,26 @@ an invariant of importing the client.
   Local Wi-Fi Networks`. `tx_rate_mbps` is a PHY/MCS rate, not throughput — no
   verdict may call the radio faster than the wire off it (measured: 9.99 ms RTT
   on Wi-Fi vs 5.24 ms on Ethernet).
-- The router poller is **read-only** against the router, and no schema table
-  stores a MAC — **or a device name**: `router_host.host_name` was dropped in
+- The router **poller** is read-only, and writes live in one place:
+  `services/router/actions.ts`, off unless `LINEWATCH_ROUTER_WRITE=1`. That
+  module is the only thing in this repo that can write to the device, and its
+  surface is deliberately tiny. The reason is not style: `/js/gdprProxy.js`
+  routes every verb — `go`/`gl`/`gs`/`so`/`ao`/`do`/`op`/`cgi` — to the same
+  `/cgi_gdpr?9` with the verb inside an AES-encrypted body, so **no firewall,
+  proxy or URL rule can tell a line-statistics read from a factory reset**. Code
+  is the only layer where that distinction can exist. So the OID never crosses a
+  module boundary: `sendAction` takes one of four *intents*, the intent→operation
+  map is module-private and frozen, membership is asserted at runtime at the
+  single send site, and a test greps the module for destructive operation names.
+  Do not add `act(oid: string)`; it would put all eight read call sites one
+  argument from an action, and the factory-reset constants are declared five
+  lines from the PPP ones in the router's own JavaScript.
+- **The `ACT_*` names in that JavaScript are identifiers, not the strings they
+  stand for.** `var ACT_OP_PPP_CONN = "ACT_PPP_CONN"` — the whole family drops
+  `_OP` between name and value. Sending the identifier gets HTTP 200 with
+  `errorcode: 1`, measured. The same fact settles the reboot name that read as
+  ambiguous across two firmware pages.
+- No schema table stores a MAC — **or a device name**: `router_host.host_name` was dropped in
   migration 0005 because a fifth of the stored names were vendor defaults of the
   form prefix + 12 hex digits, i.e. a MAC with its separators stripped, which no
   value-level MAC pattern catches. `parseHosts` does not read the field and

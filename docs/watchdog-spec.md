@@ -275,34 +275,55 @@ These are why the switches exist. Ordered by what they cost.
 
 ---
 
-## 6. What is left
+## 6. What is built, and what arming still needs
 
-1. **`collector/watchdog.ts`** — the runner. Tick loop, evidence gathering,
-   dispatch. A thin shell: gather → `decide()` → perform → persist → report.
-2. **`collector/watchdog-state.ts`** — the ledger at
-   `~/.local/state/linewatch/watchdog-state.json`, mode 0600, written
-   `writeFileSync(tmp)` → `fsync` → `rename`. **Not** in the repo directory: a
-   `git clean` resetting the reboot budget is failure mode 12.
-3. **Two spools, deliberately separate** — events drain against localhost
-   (usually up during a WAN outage), notifications against the WAN (by definition
-   down when it matters). Every delayed notification carries `delayedMs` and its
-   original `ts`; it must never arrive looking live.
-4. **A LaunchAgent and `make watchdog-{setup,teardown,arm,disarm,hold,status,logs}`.**
-   Use `bootout`/`enable`/`bootstrap`, never the legacy `load`/`unload` — a
-   disabled override is skipped *silently*, and that already cost this repo its
-   collector once after a reboot.
-5. **Shadow mode, ≥2 weeks**, and read every `would_*` note before arming
-   anything.
+Everything in the original "what is left" list now exists. It runs, in shadow
+mode, and has done since 2026-08-01.
+
+| Piece | Where |
+|-|-|
+| Runner — tick, gather, `decide()`, dispatch, record | `collector/watchdog.ts` |
+| Ledger, 0600, tmp → fsync → rename → fsync(dir) | `collector/watchdog-state.ts` |
+| Report mapping and notification text | `collector/watchdog-report.ts` |
+| LaunchAgent, `KeepAlive`, no arming variable | `collector/com.jkrumm.linewatch-watchdog.plist.template` |
+| `make watchdog-{setup,teardown,status,state,logs,arm,disarm,readiness}` | `Makefile` |
+| Two spools — events against localhost, notifications across the WAN | `collector/watchdog.ts` |
+| A second Kuma push monitor for the watchdog's own health | `homelab/uptime-kuma/monitors.yaml` |
+
+Three things changed shape while building it, and each is a defect the
+specification did not catch.
+
+1. **Three preconditions could never fire.** `speedtest_running` and
+   `link_coverage_incomplete` were in the normative list and in §5's mitigation
+   column, and `GET /api/status` carried neither `speedtestRunning` nor
+   `linkWatchS` — so no evidence path could set either. A precondition that
+   cannot fire is worse than a missing one, because the failure-mode table
+   counts it as a defence. `newestSampleTs` was added beside them.
+2. **The state transitions had no home.** `latchClearAfterCleanS` and
+   `postActionCooldownS` were policy fields nothing read. The latch is failure
+   mode #1's entire mitigation and its clear condition existed only as prose
+   inside a note string. `decide()` now returns the ledger it implies, so the
+   rung advance, the T0 capture, the write-ahead and both of those live in the
+   tested layer.
+3. **Escalation had no class filter.** The exhausted branch fired for any
+   non-healthy class, including `off_home_line` — so fifteen minutes on a
+   hotspot paged about a line that was not being measured. `no_evidence` is
+   excluded too: the heartbeat already reports that, and can, because the WAN is
+   up.
 
 ### Conditions for arming
 
 - Poll coverage ≥80% of due polls over 48 h with no deploys, p90 spacing ≤20 min.
-  **At 45.6% a watchdog fails exactly when the router is stressed**, which is
-  when it is needed. Partial-poll persistence is a step toward this, not the
-  finish.
+  **Measured 2026-08-01: 65% and 30 min** — better than the 45.6% this document
+  was written against, still short. `make watchdog-readiness` reports both.
+  At this coverage a watchdog fails exactly when the router is stressed, which
+  is when it is needed.
 - Shadow mode has produced `would_*` notes whose triggers a human agrees with.
 - The mini's LAN address is pinned by DHCP reservation.
-- `reboot` stays refused until its success can be distinguished from its failure.
+- `reboot` stays refused until its success can be distinguished from its
+  failure. **This one is now settled** — see §3 — but the rung stays behind
+  `LINEWATCH_WATCHDOG_REBOOT` regardless, because distinguishable is not the
+  same as warranted.
 
 ---
 
@@ -321,6 +342,10 @@ These are why the switches exist. Ordered by what they cost.
 - **Does a reconnect ever clear a wedge?** It has now been proven to work and to
   be cheap. It has never been observed to *fix* anything, because it has only
   ever been fired at a healthy line.
+- **What is the reboot's real recovery curve?** The firmware budgets 130 s
+  (`INCLUDE_REBOOT_WAIT_TIME` on the device) and the record's worst measured
+  reboot-to-IPv4 is 193 s, which is what `rebootSettleS: 300` is scaled from.
+  Both are one observation each.
 - **The base rate is one qualifying event in three days**, and with a 240 s
   trigger this would have fired **once** in the entire history of the database.
   Everything here — shadow mode, dry-run every tick, the replayed windows, the

@@ -22,6 +22,7 @@ Throughput through the VM is unaffected, so speed tests belong in the container.
 |-|-|-|
 | `collector/{probe,ping-parser,vantage,link-sampler,wifi}.ts` | native, launchd | real ICMP + the host's own vantage + 1 Hz link state + the radio; no npm deps |
 | `collector/heartbeat{,-verdict}.ts` | native, launchd, 60 s | pushes the Uptime Kuma heartbeat; its own agent so a dead collector is still reportable |
+| `collector/watchdog{,-ladder,-state,-report}.ts` | native, launchd, 15 s | decides and acts on a wedged line; **ships in shadow mode** |
 | API + SQLite + Ookla + router poll + UI | Docker (`:7731`) | restart policy, rollhook CD |
 
 The collector POSTs batches with a bearer token and **spools to
@@ -39,6 +40,26 @@ linewatch stopped measuring while the line works. **`GET /api/status`'s own `up`
 field cannot be used for this** — no ingest means no outage row can open, so a
 dead collector reports a flawless line forever. `collector/heartbeat-verdict.ts`
 checks sample freshness for that reason and its tests pin it.
+
+**The watchdog ships disarmed, and both of its switches are load-bearing.**
+`LINEWATCH_WATCHDOG_ARMED` in the plist decides whether an authorised rung is
+*performed*; without it the machine still walks the whole ladder and writes
+`would_*` notes, which is the only thing that makes a shadow run worth its
+weeks. `LINEWATCH_ROUTER_WRITE` in the container decides whether the executor
+can reach the device at all, and the watchdog **reads that capability from
+`GET /api/router` rather than assuming it** — the two processes are configured
+separately, so guessing would make a shadow run report actions that never
+happened. `make watchdog-readiness` measures the arming conditions;
+`make watchdog-disarm` is the stand-down, one file, `touch`-able from a phone
+in the seconds the link is up.
+
+The ledger lives at `~/.local/state/linewatch/watchdog-state.json`, **never
+beside `spool.jsonl`** — a `git clean` that reset the reboot budget and the
+latch is the single failure that turns this into a reboot loop. An unreadable
+ledger disarms rather than resets: an empty one has a full budget and no latch,
+which is exactly the wrong reading after a crash. Every state transition lives
+in `decide()`, not the runner, because the runner executes for real about once a
+month and the tests are the only thing that exercises this monthly code daily.
 
 **The database is in the `linewatch-data` named Docker volume and the host
 cannot open it.** Read it with `make db-counts` / `make db-shell`, never by
@@ -58,12 +79,13 @@ an invariant of importing the client.
 
 ## Conventions
 
-- Bearer auth on the four routes that write to the historical record or to the
+- Bearer auth on the five routes that write to the historical record or to the
   line itself: `POST /api/probes`, `POST /api/interventions`, `POST
-  /api/router/poll` and `POST /api/router/actions/reconnect`. The last carries a
-  **second, independent gate**, `LINEWATCH_ROUTER_WRITE`, unset by default: the
-  bearer stops someone else acting, the capability switch stops *us* — a bad
-  deploy, a watchdog gone wrong, a test pointed at the wrong host. Everything
+  /api/router/poll`, `POST /api/router/actions/reconnect` and `POST
+  /api/router/actions/reboot`. The last two carry a **second, independent gate**,
+  `LINEWATCH_ROUTER_WRITE`, unset by default: the bearer stops someone else
+  acting, the capability switch stops *us* — a bad deploy, a watchdog gone
+  wrong, a test pointed at the wrong host. Everything
   else is open on the tailnet — including `POST /api/speedtests/run`, which is a dashboard button
   with no token to present and is **rate-limited instead** (429 within
   `speedtestMinIntervalS`, 5 min by default, measured against the newest
@@ -108,7 +130,13 @@ an invariant of importing the client.
   verdict may call the radio faster than the wire off it (measured: 9.99 ms RTT
   on Wi-Fi vs 5.24 ms on Ethernet).
 - The router **poller** is read-only, and writes live in one place:
-  `services/router/actions.ts`, off unless `LINEWATCH_ROUTER_WRITE=1`. That
+  `services/router/actions.ts`, off unless `LINEWATCH_ROUTER_WRITE=1`. A reboot
+  reports **three** outcomes, not two: `executed` when the device acknowledged,
+  `failed` when it rejected the operation (HTTP 200, `errorcode: 1` — the
+  firmware validates the operation before acting, which is what makes a wrong
+  name distinguishable from a successful reboot), and `unknown` when the
+  transport died, which is the expected signature of success and is settled only
+  by the probe record. Never read `unknown` as either. That
   module is the only thing in this repo that can write to the device, and its
   surface is deliberately tiny. The reason is not style: `/js/gdprProxy.js`
   routes every verb — `go`/`gl`/`gs`/`so`/`ao`/`do`/`op`/`cgi` — to the same

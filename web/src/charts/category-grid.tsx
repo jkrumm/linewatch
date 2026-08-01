@@ -110,8 +110,17 @@ export function CategoryGrid({
 
   const lookup = new Map(cells.map((c) => [cellKey(c.row, c.col), c]))
 
+  // Derived from the labels actually being drawn, never a fixed inset. The row labels are
+  // locale-formatted dates, so their width is not knowable at authoring time: the hardcoded 52 px
+  // this replaced was sized for an English `30 Jul` and clipped the leading digits off a German
+  // `30. Juli`, rendering the axis as `0. Juli` / `1. Aug.` — dates that are not merely ugly but
+  // wrong, and wrong in a way that reads as real. Monospace advance is ~0.6em, and the label is
+  // right-aligned 6 px off the grid.
+  const labelChars = rows.reduce((widest, row) => Math.max(widest, rowLabel(row).length), 0)
+  const padLeft = Math.max(PAD_LEFT, Math.ceil(labelChars * VX.axisFont * 0.62) + 10)
+
   const legendH = legend ? LEGEND_H + LEGEND_LABEL_H : 0
-  const gridW = Math.max(0, width - PAD_LEFT)
+  const gridW = Math.max(0, width - padLeft)
   const gridH = Math.max(0, height - PAD_TOP - PAD_BOTTOM - legendH)
   const cellW = cols.length > 0 ? gridW / cols.length : 0
   const cellH = rows.length > 0 ? gridH / rows.length : 0
@@ -130,7 +139,7 @@ export function CategoryGrid({
             </linearGradient>
           )}
         </defs>
-        <Group left={PAD_LEFT} top={PAD_TOP}>
+        <Group left={padLeft} top={PAD_TOP}>
           {rows.flatMap((row, ri) =>
             cols.map((col, ci) => {
               const cell = lookup.get(cellKey(row, col))
@@ -155,7 +164,7 @@ export function CategoryGrid({
           {rows.map((row, ri) => (
             <text
               key={row}
-              x={PAD_LEFT - 6}
+              x={padLeft - 6}
               y={ri * cellH + cellH / 2 + 4}
               textAnchor="end"
               fontSize={VX.axisFont}
@@ -166,7 +175,7 @@ export function CategoryGrid({
             </text>
           ))}
         </Group>
-        <Group left={PAD_LEFT} top={PAD_TOP + gridH}>
+        <Group left={padLeft} top={PAD_TOP + gridH}>
           {cols.map((col, ci) => (
             <text
               key={col}
@@ -182,7 +191,7 @@ export function CategoryGrid({
           ))}
         </Group>
         {legend && (
-          <Group left={PAD_LEFT} top={PAD_TOP + gridH + PAD_BOTTOM}>
+          <Group left={padLeft} top={PAD_TOP + gridH + PAD_BOTTOM}>
             <rect width={gridW} height={LEGEND_H} rx={2} fill={`url(#${legendGradientId})`} />
             <text
               x={0}

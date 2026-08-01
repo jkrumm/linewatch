@@ -96,3 +96,21 @@ describe('the mock timeline', () => {
     expect(events.map((e) => e.ts)).toEqual([...events.map((e) => e.ts)].sort((a, b) => b - a))
   })
 })
+
+describe('summariseEventDetail — router disagreements', () => {
+  test('renders the two sides as a sentence, not as JSON', () => {
+    // The shape the router poller really writes, taken from event id 15 on 2026-08-01: the moment
+    // the router already saw 1000 Mbit on its port while the host was still negotiated at 100.
+    const detail = {
+      source: 'router-poller',
+      reason: 'vantage_disagreement',
+      hostCycleTs: 1785567178926,
+      disagreements: [{ field: 'link_speed', host: '100 Mbit', router: '1000 Mbit on LAN1' }],
+    }
+    const out = summariseEventDetail(detail)
+    expect(out).toContain('link_speed: host 100 Mbit vs router 1000 Mbit on LAN1')
+    // The regression: no JSON punctuation may survive into the cell.
+    expect(out).not.toContain('[{')
+    expect(out).not.toContain('"field"')
+  })
+})

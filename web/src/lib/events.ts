@@ -107,6 +107,22 @@ export function summariseEventDetail(detail: unknown): string {
       }
       continue
     }
+    // The router poller's `disagreements` is an array of {field, host, router} records. Left to
+    // `scalar` it JSON-stringifies, so the single most interesting row on the timeline — the two
+    // sides of the link disagreeing, which is how the cable fault first surfaced — rendered as
+    // `[{"field":"link_speed","host":"100 Mbit","router":"1000 Mbit on LAN1"}]`. Same facts, but
+    // as punctuation rather than a sentence.
+    if (key === 'disagreements' && Array.isArray(value)) {
+      const rendered = value
+        .map((entry) =>
+          isRecord(entry) && 'field' in entry
+            ? `${scalar(entry['field'])}: host ${scalar(entry['host'])} vs router ${scalar(entry['router'])}`
+            : scalar(entry),
+        )
+        .join('; ')
+      if (rendered.length > 0) parts.push(rendered)
+      continue
+    }
     parts.push(`${key} ${scalar(value)}`)
   }
   return parts.join(' · ')

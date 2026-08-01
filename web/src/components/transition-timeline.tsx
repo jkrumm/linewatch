@@ -44,9 +44,14 @@ export function TransitionTimeline({
     <Table verticalSpacing="xs" highlightOnHover>
       <Table.Thead>
         <Table.Tr>
-          <Table.Th>When</Table.Th>
-          <Table.Th>Kind</Table.Th>
-          <Table.Th>Observed by</Table.Th>
+          {/* Explicit widths on the three narrow columns. Without them the browser gives Detail —
+              by far the longest cell — almost the whole table and squeezes the badges until their
+              own text ellipsises: `link_change` rendered as "LINK …" and `vantage-diff` as
+              "VANTAG…", which turns the two columns that say WHAT happened and WHO saw it into
+              the least readable thing on the page. Detail takes the remainder. */}
+          <Table.Th w={150}>When</Table.Th>
+          <Table.Th w={130}>Kind</Table.Th>
+          <Table.Th w={140}>Observed by</Table.Th>
           <Table.Th>Detail</Table.Th>
         </Table.Tr>
       </Table.Thead>
@@ -61,7 +66,7 @@ export function TransitionTimeline({
                 </Text>
               </Table.Td>
               <Table.Td>
-                <Badge color={event.kind === 'intervention' ? 'grape' : 'blue'} variant="light">
+                <Badge color={event.kind === 'intervention' ? 'grape' : 'blue'} variant="light" style={{ whiteSpace: 'nowrap' }}>
                   {EVENT_KIND_LABEL[event.kind]}
                 </Badge>
               </Table.Td>
@@ -69,7 +74,7 @@ export function TransitionTimeline({
                 {/* The precision rides on the badge rather than in a fifth column: it is the
                     caveat on the timestamp, not a fact of its own. */}
                 <Tooltip label={`Timestamp means: ${source.precision}`} multiline w={280}>
-                  <Badge color={source.color} variant="light" style={{ cursor: 'help' }}>
+                  <Badge color={source.color} variant="light" style={{ cursor: 'help', whiteSpace: 'nowrap' }}>
                     {source.label}
                   </Badge>
                 </Tooltip>

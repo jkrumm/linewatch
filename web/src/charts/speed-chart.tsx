@@ -4,7 +4,14 @@ import { fmtMbps } from '../lib/format'
 import { AXIS_LABEL_PX, fitTickCount, runAxisLabels } from '../lib/axis'
 import { PendingChart } from './pending'
 
-const SPEED_HEIGHT = 260
+/**
+ * 190, matching `latency-band-chart`'s — the chart directly above this one on the page, and the
+ * other member of the same "lines over a window" idiom. It was 260, which bought nothing: two
+ * download/upload traces on a household line sit near-flat for most windows, so the extra 70px was
+ * headroom above the download line rather than resolution in it. Two line charts one section apart
+ * at two different heights read as a layout accident, and the taller one is the one carrying less.
+ */
+const SPEED_HEIGHT = 190
 
 /**
  * A horizontal reference at a rate the line is measured against — the host's negotiated link speed,

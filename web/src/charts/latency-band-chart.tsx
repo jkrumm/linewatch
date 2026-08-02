@@ -105,9 +105,17 @@ const getPointKey = (p: Point): string => p.key
  *
  * `overlay` adds a second, band-less median line sharing this chart's y-scale — the router's own
  * RTT drawn over the folded-internet band, so one picture answers "how bad, and is it past the
- * router". It draws in `VX.line` and pushes the primary series to `VX.accent` (only when an
- * overlay is present — with none, colors are exactly what they were before this prop existed), the
- * same pairing `speed-chart.tsx` uses for its own two-series case.
+ * router".
+ *
+ * **With an overlay, the accent goes to the OVERLAY and the band goes neutral** — the reverse of
+ * what it was. The band is a mass: a median line, a p5–p95 fill and a worst-ping envelope, all
+ * derived from `primaryColor`, and a mass wants the neutral. The router is a single 1px reference
+ * line whose whole job is to be read against that mass, and a mark wants the accent. Drawn the
+ * other way round the accent was spread across a filled area while the line that answers "is it
+ * past the router" was the quieter of the two.
+ *
+ * With NO overlay the primary keeps `VX.line`, the bright neutral: there it is the only series on
+ * the chart, and a lone neutral metric is supposed to be the bright one.
  */
 export function LatencyBandChart({
   label,
@@ -208,9 +216,10 @@ export function LatencyBandChart({
   // is shown, because it is arithmetic over the configured cadence, not a count of anything.
   const expectedCycles = Math.max(1, Math.round((bucketSeconds * 1000) / PROBE_CYCLE_MS))
 
-  // See the component docblock: the primary only moves off `VX.line` when there is a second line
-  // to distinguish it from.
-  const primaryColor = overlay ? VX.accent : VX.line
+  // See the component docblock. Alone, the primary is the bright neutral; against an overlay it
+  // steps down to the mid grey and hands the accent to the overlay, because everything derived from
+  // `primaryColor` below is an AREA (band fill, worst-ping envelope) and the overlay is a line.
+  const primaryColor = overlay ? VX.line2 : VX.line
 
   const hasOutages = outages !== undefined && outages.length > 0
 
@@ -219,13 +228,7 @@ export function LatencyBandChart({
       series={[
         { key: chartKey, label, color: primaryColor, mark: 'line' },
         ...(overlay
-          // `VX.line2`, the mid grey, not `VX.line`. The overlay is the SECOND series against an
-          // accent primary, and at 11.1:1 against the panel `VX.line` is the brightest value
-          // available — a secondary louder than the series it is drawn over. Same pair the speed
-          // and throughput charts use for their own accent-plus-secondary case. The single-series
-          // branch above keeps `VX.line`: there it is the primary, and a lone neutral metric is
-          // supposed to be the bright one.
-          ? [{ key: `${chartKey}-overlay`, label: overlay.label, color: VX.line2, mark: 'line' as const }]
+          ? [{ key: `${chartKey}-overlay`, label: overlay.label, color: VX.accent, mark: 'line' as const }]
           : []),
         // The loss markers, named. Two entries and not three: `lossColor(0)` returns the good token, but a
         // marker is only DRAWN when maxLossPct > 0, so a "No loss" swatch would name a mark this chart

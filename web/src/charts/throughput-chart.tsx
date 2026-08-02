@@ -1,4 +1,4 @@
-import { useCallback, useContext, useMemo, useRef } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import { scaleBand, scaleLinear } from '@visx/scale'
 import {
   AxisBottomDate,
@@ -7,7 +7,7 @@ import {
   deriveLegend,
   ChartTooltip,
   Crosshair,
-  HoverContext,
+  HoverOverlay,
   ResponsiveChart,
   TooltipBody,
   TooltipHeader,
@@ -20,11 +20,10 @@ import {
 import type { ProbeBucketSeconds, ThroughputBucket } from '../lib/types'
 import { throughputPoints, type ThroughputPoint } from '../lib/throughput'
 import { fmtBytes, fmtDateTime, fmtRate } from '../lib/format'
-import { AXIS_LABEL_PX, axisTickValues } from '../lib/axis'
-import { ChartPending } from './chart-pending'
+import { AXIS_LABEL_PX, axisTickValues, bucketTickFormat } from '../lib/axis'
+import { PendingChart } from './pending'
 import { foldSourceIndex } from './fold'
 import { HatchPattern, hatchFill } from './hatch'
-import { PointerOverlay } from './pointer-overlay'
 import { SyncedTip } from './synced-tip'
 
 // 180, not 240. This is a two-sided bar chart with three y ticks per half and no line to trace,
@@ -130,7 +129,7 @@ export function foldPoints(points: ThroughputPoint[], cap: number): PlotPoint[] 
 }
 
 /** Stable across renders — see `availability-strip.tsx`'s identical constant. */
-const getPointLabel = (p: PlotPoint): string => p.label
+const getPointKey = (p: PlotPoint): string => p.key
 
 /**
  * Down and up on one mirrored axis: download below the baseline, upload above it.
@@ -158,6 +157,13 @@ const getPointLabel = (p: PlotPoint): string => p.label
  * RULE forbids: a fully-hatched band asserting the whole window was watched and held nothing. This
  * prop, and the `ChartPending` it renders in place of `MirroredBars`/`ChartLegend`, is that fix —
  * the same `isPending` idiom `OutageTable`/`TransitionTimeline` already use for their own queries.
+ *
+ * `ChartPending` is basalt-ui's now (1.9.0), not this directory's. The hand-rolled one it replaces
+ * existed only because the package had no pending state at all; the shipped component draws the
+ * same reserved, mark-free box and needs no `theme-allow` for its centring, because `ChartCenter`
+ * is the layout primitive the Mantine-free boundary was missing. The legend suppression below
+ * stays local: this chart composes `ChartLegend` itself rather than going through `ChartFrame`,
+ * which is what would otherwise drop the legend for it.
  */
 export function ThroughputChart({
   buckets,
@@ -182,11 +188,11 @@ export function ThroughputChart({
     <>
       {/* See `availability-strip.tsx`'s identical wrapper for why this is a floor, not a height. */}
       <div style={{ minHeight: CHART_HEIGHT + AXIS_HEIGHT }}>
-        {isPending ? (
-          <ChartPending height={CHART_HEIGHT + AXIS_HEIGHT} />
+        {isPending === true ? (
+          <PendingChart height={CHART_HEIGHT + AXIS_HEIGHT} />
         ) : (
           <ResponsiveChart height={CHART_HEIGHT + AXIS_HEIGHT}>
-            {({ width }) => <MirroredBars points={points} width={width} />}
+            {({ width }) => <MirroredBars points={points} bucketSeconds={bucketSeconds} width={width} />}
           </ResponsiveChart>
         )}
       </div>
@@ -199,7 +205,15 @@ export function ThroughputChart({
   )
 }
 
-function MirroredBars({ points, width }: { points: ThroughputPoint[]; width: number }) {
+function MirroredBars({
+  points,
+  bucketSeconds,
+  width,
+}: {
+  points: ThroughputPoint[]
+  bucketSeconds: ProbeBucketSeconds
+  width: number
+}) {
   const tooltipStyles = useTooltipStyles()
   const absentHatchId = 'throughput-absent'
   const svgRef = useRef<SVGSVGElement | null>(null)
@@ -216,30 +230,30 @@ function MirroredBars({ points, width }: { points: ThroughputPoint[]; width: num
   // is needed: a `/ 2` cap leaves no room for a partial fold's fill/hatch split to render as two
   // visibly distinct pieces.
   const plotPoints = useMemo(() => foldPoints(points, Math.floor(plotWidth / 3)), [points, plotWidth])
-  // Memoized — see `availability-strip.tsx`'s identical `labels`/`scale`.
-  const labels = useMemo(() => plotPoints.map((p) => p.label), [plotPoints])
-  const xScale = useMemo(() => scaleBand<string>({ domain: labels, range: [0, plotWidth] }), [labels, plotWidth])
+  // Memoized — see `availability-strip.tsx`'s identical `keys`/`scale`.
+  const keys = useMemo(() => plotPoints.map((p) => p.key), [plotPoints])
+  const xScale = useMemo(() => scaleBand<string>({ domain: keys, range: [0, plotWidth] }), [keys, plotWidth])
   // See `availability-strip.tsx`'s identical `sourceIndex`.
   const sourceIndex = useMemo(() => foldSourceIndex(points, plotPoints), [points, plotPoints])
-  const hoverCtx = useContext(HoverContext)
 
   const bandCenter = useCallback(
-    (label: string) => {
-      const v = xScale(label)
+    (key: string) => {
+      const v = xScale(key)
       return v === undefined ? undefined : v + xScale.bandwidth() / 2
     },
     [xScale],
   )
+  // See `availability-strip.tsx`'s identical seam.
+  const resolveKey = useCallback((key: string) => sourceIndex.get(key) ?? null, [sourceIndex])
 
-  const { tip, tooltipRef, isDirectHover, handleMouse, handleLeave } = useHoverSync<PlotPoint>({
+  const { tip, tooltipRef, syncedPoint, isDirectHover, handleMouse, handleLeave } = useHoverSync<PlotPoint>({
     data: plotPoints,
     chartId: 'throughput',
-    getKey: getPointLabel,
+    getKey: getPointKey,
     xScale: bandCenter,
     marginLeft: LEFT_GUTTER,
+    resolveKey,
   })
-  // See `availability-strip.tsx`'s identical override of the hook's own `syncedPoint`.
-  const syncedPoint = hoverCtx.key ? (sourceIndex.get(hoverCtx.key) ?? null) : (tip?.data ?? null)
 
   // Each half scaled independently — see the component docblock. `|| 1` keeps a window with no
   // traffic at all from producing a zero-width domain, which renders as NaN geometry.
@@ -360,25 +374,22 @@ function MirroredBars({ points, width }: { points: ThroughputPoint[]; width: num
             )
           })}
           <line x1={0} y1={baseline} x2={plotWidth} y2={baseline} stroke={VX.axisStroke} strokeWidth={1} />
+          {/* The tick VALUES are ISO bucket starts (the scale's domain); `bucketTickFormat` renders
+              each as the time a reader sees — see `lib/axis.ts`. */}
           <AxisBottomDate
             scale={xScale}
             top={CHART_HEIGHT}
-            tickValues={axisTickValues(labels, plotWidth, AXIS_LABEL_PX)}
+            tickValues={axisTickValues(keys, plotWidth, AXIS_LABEL_PX)}
+            tickFormat={bucketTickFormat(bucketSeconds)}
           />
           {syncedPoint && (
             <Crosshair
-              x={(xScale(syncedPoint.label) ?? 0) + xScale.bandwidth() / 2}
+              x={(xScale(syncedPoint.key) ?? 0) + xScale.bandwidth() / 2}
               top={0}
               bottom={CHART_HEIGHT}
             />
           )}
-          <PointerOverlay
-            width={plotWidth}
-            height={CHART_HEIGHT}
-            onMove={handleMouse}
-            onLeave={handleLeave}
-            active={tip !== null || syncedPoint !== null}
-          />
+          <HoverOverlay width={plotWidth} height={CHART_HEIGHT} onMove={handleMouse} onLeave={handleLeave} />
         </g>
       </svg>
       <ChartTooltip tip={isDirectHover ? tip : null} tooltipRef={tooltipRef} styles={tooltipStyles}>
@@ -387,7 +398,7 @@ function MirroredBars({ points, width }: { points: ThroughputPoint[]; width: num
       {!isDirectHover && syncedPoint !== null && syncedPoint.downBytesPerS !== null && (
         <SyncedTip
           svgRef={svgRef}
-          x={LEFT_GUTTER + (xScale(syncedPoint.label) ?? 0) + xScale.bandwidth() / 2}
+          x={LEFT_GUTTER + (xScale(syncedPoint.key) ?? 0) + xScale.bandwidth() / 2}
           styles={tooltipStyles}
         >
           <TooltipBody>

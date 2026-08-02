@@ -13,7 +13,7 @@ const WINDOW = { from: 0, to: 30 * DAY_MS } as const
  * claims the line was up), but the same class, and the same `isPending` fix.
  */
 describe('AvailabilityHeatmap isPending', () => {
-  test('renders the pending caption, not the grid, while pending — even with buckets already in hand', () => {
+  test('renders the shipped pending caption, not the grid, while pending — even with buckets already in hand', () => {
     const html = renderToStaticMarkup(
       <AvailabilityHeatmap
         buckets={[
@@ -35,7 +35,7 @@ describe('AvailabilityHeatmap isPending', () => {
         isPending
       />,
     )
-    expect(html).toContain('Waiting for this window')
+    expect(html).toContain('Loading')
     // `CategoryGrid`'s own tooltip claim for an absent cell — proof the hatched-absent grid did not
     // also mount underneath the pending caption.
     expect(html).not.toContain('expected cycles')
@@ -43,11 +43,11 @@ describe('AvailabilityHeatmap isPending', () => {
 
   test('does not render the pending caption once the query has resolved', () => {
     const html = renderToStaticMarkup(<AvailabilityHeatmap buckets={[]} {...WINDOW} isPending={false} />)
-    expect(html).not.toContain('Waiting for this window')
+    expect(html).not.toContain('Loading')
   })
 
   test('an omitted isPending defaults to the resolved (non-pending) path', () => {
     const html = renderToStaticMarkup(<AvailabilityHeatmap buckets={[]} {...WINDOW} />)
-    expect(html).not.toContain('Waiting for this window')
+    expect(html).not.toContain('Loading')
   })
 })

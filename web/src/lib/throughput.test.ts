@@ -50,10 +50,16 @@ describe('throughputPoints', () => {
     expect(point?.downBytes).toBe(6_000_000)
   })
 
-  /** Labels are the chart's band-scale keys and must be unique per bucket — see `lib/axis.ts`. */
-  test('every bucket gets a distinct axis label', () => {
-    const labels = throughputPoints([], OPTS).map((p) => p.label)
-    expect(new Set(labels).size).toBe(labels.length)
+  /**
+   * `key` is the chart's band-scale domain value, its hover key and `foldSourceIndex`'s key, so it
+   * must be unique per bucket: two points sharing one collapse onto a single x position and one of
+   * them stops being drawn. This used to assert the same property of a pre-formatted `label`,
+   * which was the domain value back when `AxisBottomDate` took no `tickFormat` — the field is gone
+   * and the property moved to the identity that replaced it.
+   */
+  test('every bucket gets a distinct scale key', () => {
+    const keys = throughputPoints([], OPTS).map((p) => p.key)
+    expect(new Set(keys).size).toBe(keys.length)
   })
 })
 

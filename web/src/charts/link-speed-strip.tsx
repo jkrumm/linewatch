@@ -1,10 +1,10 @@
-import { useCallback, useContext, useMemo, useRef } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import { scaleBand } from '@visx/scale'
 import {
   AxisBottomDate,
   ChartTooltip,
   Crosshair,
-  HoverContext,
+  HoverOverlay,
   ResponsiveChart,
   TooltipBody,
   TooltipHeader,
@@ -19,10 +19,10 @@ import type { LinkBucketState } from '../lib/vantage'
 import { linkBucketState } from '../lib/vantage'
 import { densifyBuckets } from '../lib/densify'
 import { fmtDateTime } from '../lib/format'
-import { AXIS_LABEL_PX, axisTickValues, bucketAxisLabel } from '../lib/axis'
+import { AXIS_LABEL_PX, axisTickValues, bucketTickFormat } from '../lib/axis'
+import { PendingChart } from './pending'
 import { foldSourceIndex } from './fold'
 import { HatchPattern, hatchFill } from './hatch'
-import { PointerOverlay } from './pointer-overlay'
 import { SyncedTip } from './synced-tip'
 
 const STRIP_HEIGHT = 44
@@ -49,13 +49,12 @@ const AXIS_HEIGHT = 22
 const MARKER_INSET = 6
 
 type Column = {
-  /** ISO-8601 of the bucket start — what the tooltip's own date formatting reads. */
+  /** ISO-8601 of the bucket start: what the tooltip's date formatting reads, the band scale's
+   * domain value, and the broadcast hover key. `AxisBottomDate` takes a `tickFormat` as of
+   * basalt-ui 1.9.0, so the axis label is derived from this at draw time instead of being carried
+   * beside it — the same change `availability-strip.tsx` made, for the reason `lib/axis.ts` gives. */
   key: string
   bucketStart: number
-  /** The pre-formatted axis label, which is also the band scale's domain value. `AxisBottomDate`
-   * takes no `tickFormat` and reduces an ISO string to `DD.MM`, so this is the only way a time of
-   * day reaches the axis — the same mechanism `availability-strip.tsx` uses. */
-  label: string
   state: LinkBucketState
 }
 
@@ -113,7 +112,7 @@ export function foldColumns(columns: Column[], cap: number): PlotColumn[] {
 
 /** Stable across renders, unlike an inline arrow — see `availability-strip.tsx`'s identical
  * constant for why an unstable `getKey` defeats `useHoverSync`'s own memoization. */
-const getColumnLabel = (c: PlotColumn): string => c.label
+const getColumnKey = (c: PlotColumn): string => c.key
 
 export function foldStates(states: LinkBucketState[]): LinkBucketState {
   const mbits = new Set<number>()
@@ -170,18 +169,27 @@ export function LinkSpeedStrip({
   from,
   to,
   bucketSeconds,
+  isPending,
 }: {
   vantage: VantageBucket[]
   from: number
   to: number
   bucketSeconds: ProbeBucketSeconds
+  /**
+   * True while the probe-buckets query carrying the vantage series is in flight.
+   *
+   * `linkBucketState(null)` is `unmeasured`, so an unresolved query hatched every column in the
+   * window — a positive claim that the collector ran and reported no link speed for any of it,
+   * which on this strip reads as the NIC having gone dark rather than as a question nobody had
+   * answered. Same guard, same reason, as `availability-strip.tsx`'s.
+   */
+  isPending?: boolean
 }) {
   const columns: Column[] = useMemo(
     () =>
       densifyBuckets(vantage, { from, to, bucketSeconds }).map((slot) => ({
         key: slot.key,
         bucketStart: slot.bucketStart,
-        label: bucketAxisLabel(slot.bucketStart, bucketSeconds),
         state: linkBucketState(slot.value),
       })),
     [vantage, from, to, bucketSeconds],
@@ -199,14 +207,30 @@ export function LinkSpeedStrip({
   return (
     // See `availability-strip.tsx`'s identical wrapper for why this is a floor, not a height.
     <div style={{ minHeight: STRIP_HEIGHT + AXIS_HEIGHT }}>
-      <ResponsiveChart height={STRIP_HEIGHT + AXIS_HEIGHT}>
-        {({ width }) => <StripPlot columns={columns} maxMbit={maxMbit} width={width} />}
-      </ResponsiveChart>
+      {isPending === true ? (
+        <PendingChart height={STRIP_HEIGHT + AXIS_HEIGHT} />
+      ) : (
+        <ResponsiveChart height={STRIP_HEIGHT + AXIS_HEIGHT}>
+          {({ width }) => (
+            <StripPlot columns={columns} maxMbit={maxMbit} bucketSeconds={bucketSeconds} width={width} />
+          )}
+        </ResponsiveChart>
+      )}
     </div>
   )
 }
 
-function StripPlot({ columns, maxMbit, width }: { columns: Column[]; maxMbit: number; width: number }) {
+function StripPlot({
+  columns,
+  maxMbit,
+  bucketSeconds,
+  width,
+}: {
+  columns: Column[]
+  maxMbit: number
+  bucketSeconds: ProbeBucketSeconds
+  width: number
+}) {
   const tooltipStyles = useTooltipStyles()
   const absentHatchId = 'link-speed-strip-absent'
   const svgRef = useRef<SVGSVGElement | null>(null)
@@ -220,36 +244,36 @@ function StripPlot({ columns, maxMbit, width }: { columns: Column[]; maxMbit: nu
   // is needed: a `/ 2` cap leaves no room for a partial fold's fill/hatch split to render as two
   // visibly distinct pieces.
   const plotColumns = useMemo(() => foldColumns(columns, Math.floor(plotWidth / 3)), [columns, plotWidth])
-  // Memoized — see `availability-strip.tsx`'s identical `labels`/`scale` for why an unmemoized
+  // Memoized — see `availability-strip.tsx`'s identical `keys`/`scale` for why an unmemoized
   // `scaleBand` call defeats the point of the `bandCenter` callback below.
-  const labels = useMemo(() => plotColumns.map((c) => c.label), [plotColumns])
-  const scale = useMemo(() => scaleBand<string>({ domain: labels, range: [0, plotWidth] }), [labels, plotWidth])
+  const keys = useMemo(() => plotColumns.map((c) => c.key), [plotColumns])
+  const scale = useMemo(() => scaleBand<string>({ domain: keys, range: [0, plotWidth] }), [keys, plotWidth])
   // See `availability-strip.tsx`'s identical `sourceIndex` — resolves a key the latency chart
   // broadcasts from its full, unfolded space to the folded column that contains it.
   const sourceIndex = useMemo(() => foldSourceIndex(columns, plotColumns), [columns, plotColumns])
-  const hoverCtx = useContext(HoverContext)
 
   const bandCenter = useCallback(
-    (label: string) => {
-      const v = scale(label)
+    (key: string) => {
+      const v = scale(key)
       return v === undefined ? undefined : v + scale.bandwidth() / 2
     },
     [scale],
   )
+  // See `availability-strip.tsx`'s identical seam.
+  const resolveKey = useCallback((key: string) => sourceIndex.get(key) ?? null, [sourceIndex])
 
   // This is the chart where the shared cursor pays most — its whole subject is *when did the NIC
   // renegotiate*, and correlating a transition column with the latency spike above it used to be a
   // manual eyeball across two cards. `useHoverSync` replaces the bare `useChartTooltip` this strip
   // shipped with, the same wiring `availability-strip.tsx` gets.
-  const { tip, tooltipRef, isDirectHover, handleMouse, handleLeave } = useHoverSync<PlotColumn>({
+  const { tip, tooltipRef, syncedPoint, isDirectHover, handleMouse, handleLeave } = useHoverSync<PlotColumn>({
     data: plotColumns,
     chartId: 'link-speed-strip',
-    getKey: getColumnLabel,
+    getKey: getColumnKey,
     xScale: bandCenter,
     marginLeft: plotLeft,
+    resolveKey,
   })
-  // See `availability-strip.tsx`'s identical override of the hook's own `syncedPoint`.
-  const syncedPoint = hoverCtx.key ? (sourceIndex.get(hoverCtx.key) ?? null) : (tip?.data ?? null)
 
   if (width < plotLeft + plotRight + 20 || plotColumns.length === 0) return null
 
@@ -322,24 +346,20 @@ function StripPlot({ columns, maxMbit, width }: { columns: Column[]; maxMbit: nu
           })}
           {syncedPoint && (
             <Crosshair
-              x={(scale(syncedPoint.label) ?? 0) + scale.bandwidth() / 2}
+              x={(scale(syncedPoint.key) ?? 0) + scale.bandwidth() / 2}
               top={0}
               bottom={STRIP_HEIGHT}
             />
           )}
-          <PointerOverlay
-            width={plotWidth}
-            height={STRIP_HEIGHT}
-            onMove={handleMouse}
-            onLeave={handleLeave}
-            active={tip !== null || syncedPoint !== null}
-          />
+          <HoverOverlay width={plotWidth} height={STRIP_HEIGHT} onMove={handleMouse} onLeave={handleLeave} />
           {/* `axisTickValues` rather than `smartTicks`, for the reason its docblock gives: the latter
-            appends the final value unconditionally and the last two labels overlap. */}
+            appends the final value unconditionally and the last two labels overlap. The values are
+            ISO bucket starts; `bucketTickFormat` renders each as the time a reader sees. */}
           <AxisBottomDate
             scale={scale}
             top={STRIP_HEIGHT}
-            tickValues={axisTickValues(labels, plotWidth, AXIS_LABEL_PX)}
+            tickValues={axisTickValues(keys, plotWidth, AXIS_LABEL_PX)}
+            tickFormat={bucketTickFormat(bucketSeconds)}
           />
         </g>
       </svg>
@@ -358,7 +378,7 @@ function StripPlot({ columns, maxMbit, width }: { columns: Column[]; maxMbit: nu
         followerLinkValue(syncedPoint.state) !== null && (
           <SyncedTip
             svgRef={svgRef}
-            x={plotLeft + (scale(syncedPoint.label) ?? 0) + scale.bandwidth() / 2}
+            x={plotLeft + (scale(syncedPoint.key) ?? 0) + scale.bandwidth() / 2}
             styles={tooltipStyles}
           >
             <TooltipBody>

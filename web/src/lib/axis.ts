@@ -1,38 +1,6 @@
 import type { ProbeBucketSeconds } from './types'
 
 /**
- * The time label for one bucket on a chart's x-axis, in UTC.
- *
- * `basalt-ui`'s `fmtAxisDate` renders every category as `DD.MM` — it matches the date out of an
- * ISO string and drops the time entirely. On a 24 h window at 5-minute buckets that produces an
- * axis reading `31.07 31.07 31.07 …` a dozen times: an axis that costs its full height and tells
- * the reader nothing about where they are in the window.
- *
- * `AxisBottomDate` accepts a `tickFormat` override, so a chart composing it directly can just pass
- * one. `MultiLine` does not forward it — it calls `AxisBottomDate` with no format — so a chart
- * built on that kind can only reach the axis through the category string it returns from `getX`.
- * `fmtAxisDate` returns any non-ISO-shaped string unchanged, so a pre-formatted label passes
- * straight through. That is the mechanism this function exists to feed, and it is why the label
- * must be display-ready rather than a timestamp.
- *
- * **The label doubles as the band scale's key, so it has to stay unique per bucket.** Two buckets
- * sharing a label collapse onto one x position and one of them stops being drawn — a measurement
- * silently dropped, which is the failure this codebase is built to refuse. Uniqueness is decided by
- * the bucket size:
- *
- * - Buckets of a day or more get `DD.MM.YY`. **The year is not decoration.** The `all` range spans
- *   365 days, so a window opened on 1 August runs to 1 August: first and last bucket produce an
- *   identical `DD.MM`, collide as scale keys, and one of the year's two endpoints stops being
- *   drawn. This was live — the year-long axis printed `01.08` twice, stacked at the same x.
- * - Anything finer gets `DD.MM HH:MM`. Not `HH:MM` alone: a window is not guaranteed to sit inside
- *   one calendar day, and a 24 h window at 5-minute buckets genuinely contains the same clock time
- *   twice. No year needed — no sub-day bucket size produces a window long enough to wrap one, the
- *   coarsest being 4-hourly over 30 days.
- *
- * UTC, matching `fmtClock`/`fmtDateTime` and the verdict layer, so nothing on the page is rendered
- * against a different clock from anything else.
- */
-/**
  * Horizontal room one `bucketAxisLabel` needs, in px, including breathing space.
  *
  * `DD.MM HH:MM` measures ~72px at the 11px axis font, and basalt's own `smartTicks` spaces ticks by
@@ -44,6 +12,11 @@ export const AXIS_LABEL_PX = 96
 
 /**
  * Which of a chart's category values get a tick, given the axis width.
+ *
+ * The values are DOMAIN values, not labels — on the four bucketed charts that is the bucket's ISO
+ * start, which `AxisBottomDate` renders through `bucketTickFormat`. `minPxPerTick` still measures
+ * the *drawn* label, which is why it stays `AXIS_LABEL_PX` and not the width of an ISO string:
+ * spacing is a question about what the reader sees, not about what the scale holds.
  *
  * Deliberately not `smartTicks`: that helper appends the final value unconditionally, so the last
  * two ticks land wherever the step happens to leave them — on a 24 h window that printed
@@ -111,6 +84,42 @@ export function fitTickCount(
   return ceiling
 }
 
+/**
+ * The time label for one bucket on a chart's x-axis, in UTC.
+ *
+ * `basalt-ui`'s `fmtAxisDate` renders every category as `DD.MM` — it matches the date out of an
+ * ISO string and drops the time entirely. On a 24 h window at 5-minute buckets that produces an
+ * axis reading `31.07 31.07 31.07 …` a dozen times: an axis that costs its full height and tells
+ * the reader nothing about where they are in the window.
+ *
+ * **This is a formatter now, not a key.** basalt-ui 1.9.0 gave `AxisBottomDate` a `tickFormat`, so
+ * the four charts that compose the axis directly (both strips, the throughput bars, the latency
+ * band) keep the bucket's ISO start as their scale domain and pass this in to render it. Before
+ * that there was no supported exit — `fmtAxisDate` returns a non-ISO string unchanged, so a
+ * *pre-formatted* label was the only thing that reached the axis, which forced the label to double
+ * as the scale's domain value and, through it, as the cross-chart hover key and the fold index's
+ * key. Three unrelated jobs on one string. `tickFormat` separates them: identity is the ISO start,
+ * rendering is this function, and neither constrains the other.
+ *
+ * `MultiLine` still forwards no `tickFormat` (it calls `AxisBottomDate` with `scale` and
+ * `tickValues` only), so the two run-series charts on that kind — `speed-chart`,
+ * `bufferbloat-chart` — must still pre-format via `runAxisLabels`, where the label genuinely is
+ * the domain value and uniqueness genuinely is load-bearing. See that function.
+ *
+ * Resolution still varies with the bucket size, but now for legibility rather than collision:
+ *
+ * - Buckets of a day or more get `DD.MM.YY`. **The year is not decoration.** The `all` range spans
+ *   365 days, so a window opened on 1 August runs to 1 August, and an axis printing a bare `01.08`
+ *   at both ends names the same day for two readings twelve months apart. It no longer drops one
+ *   of them — the domain values differ — but a reader cannot tell them apart without it.
+ * - Anything finer gets `DD.MM HH:MM`. Not `HH:MM` alone: a window is not guaranteed to sit inside
+ *   one calendar day, and a 24 h window at 5-minute buckets genuinely contains the same clock time
+ *   twice. No year needed — no sub-day bucket size produces a window long enough to wrap one, the
+ *   coarsest being 4-hourly over 30 days.
+ *
+ * UTC, matching `fmtClock`/`fmtDateTime` and the verdict layer, so nothing on the page is rendered
+ * against a different clock from anything else.
+ */
 export function bucketAxisLabel(ts: number, bucketSeconds: ProbeBucketSeconds): string {
   const d = new Date(ts)
   const dd = String(d.getUTCDate()).padStart(2, '0')
@@ -122,7 +131,29 @@ export function bucketAxisLabel(ts: number, bucketSeconds: ProbeBucketSeconds): 
 }
 
 /**
+ * `AxisBottomDate`'s `tickFormat` for a bucketed chart whose scale domain is the bucket's ISO
+ * start.
+ *
+ * A pure function of the domain value, deliberately — the alternative is a `Map<key, label>` built
+ * alongside the points, which is one more structure to keep in step with a fold, a densify and a
+ * re-render. `Date.parse` on the ISO string `densifyBuckets` emitted is exact, and it runs once
+ * per drawn tick (order of ten), not once per bucket.
+ *
+ * All four bucketed charts pass this, so a change to how a time reads on one axis is a change to
+ * all of them. That was previously true only by four copies of the same call agreeing.
+ */
+export function bucketTickFormat(bucketSeconds: ProbeBucketSeconds): (key: string) => string {
+  return (key) => bucketAxisLabel(Date.parse(key), bucketSeconds)
+}
+
+/**
  * Axis labels for a series drawn one point per event rather than one per bucket.
+ *
+ * **Still pre-formatted, and still a scale key — this is the case `tickFormat` did not reach.**
+ * `MultiLine` calls `AxisBottomDate` with `scale` and `tickValues` and forwards no format, so for
+ * the two charts built on that kind the string returned from `getX` is the domain value, the hover
+ * key and the visible tooltip header at once. Everything below therefore still holds here, exactly
+ * as it stopped holding for the bucketed charts.
  *
  * The bucketed charts get uniqueness for free: `bucketAxisLabel` is injective over a grid whose
  * step is at least a minute. A speed-test series has no grid — the runs land wherever the cron

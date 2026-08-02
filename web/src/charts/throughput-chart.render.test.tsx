@@ -13,7 +13,7 @@ const WINDOW = { from: 0, to: 3_600_000, bucketSeconds: 300 } as const
  * alongside one, whatever `buckets` holds.
  */
 describe('ThroughputChart isPending', () => {
-  test('renders the pending caption, not a chart, while pending — even with buckets already in hand', () => {
+  test('renders the shipped pending caption, not a chart, while pending — even with buckets already in hand', () => {
     const html = renderToStaticMarkup(
       <ThroughputChart
         buckets={[{ bucket: 0, inBytes: 6_000_000, outBytes: 600_000, spanMs: 60_000, intervals: 2, skipped: 0 }]}
@@ -21,7 +21,7 @@ describe('ThroughputChart isPending', () => {
         isPending
       />,
     )
-    expect(html).toContain('Waiting for this window')
+    expect(html).toContain('Loading')
     // `MirroredBars`' own accessible label — proof the chart body did not mount underneath the
     // pending caption, which is the exact "renders both, one on top of the other" failure mode a
     // boolean gate that forgot its `else` branch would produce.
@@ -30,11 +30,11 @@ describe('ThroughputChart isPending', () => {
 
   test('does not render the pending caption once the query has resolved', () => {
     const html = renderToStaticMarkup(<ThroughputChart buckets={[]} {...WINDOW} isPending={false} />)
-    expect(html).not.toContain('Waiting for this window')
+    expect(html).not.toContain('Loading')
   })
 
   test('an omitted isPending defaults to the resolved (non-pending) path', () => {
     const html = renderToStaticMarkup(<ThroughputChart buckets={[]} {...WINDOW} />)
-    expect(html).not.toContain('Waiting for this window')
+    expect(html).not.toContain('Loading')
   })
 })

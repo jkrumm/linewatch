@@ -2,7 +2,7 @@
   "version": 1,
   "files": {
     ".claude/rules/basalt-mantine.md": "c10319b7f6ff6b489b74c3885fa75d5be11185361b84418b5739f3730718c7bc",
-    ".claude/rules/basalt-charts.md": "113731efc24c4e8131e0c76c8248c443e418f375780c9d472e84fcc23e9b6ab1",
+    ".claude/rules/basalt-charts.md": "6d604d9258586ae0d33d31021d39d017f28c882f9014dd668d708dbddcf9b239",
     ".claude/rules/basalt-tokens.md": "c2864940c39df3b15261a32e8a7f0a02ec6fbe0954e84cf4db68dbe409362120",
     ".claude/rules/basalt-query.md": "cacd92c4c9c40721e3854abc8e734f557c0447c51c4b619e84e2e42d12fe2cdc",
     ".claude/rules/basalt-router.md": "2d6d9cb9dd34e683309a380af4fd5434dc0349592a252c4208c1c51b673105d2",
@@ -26,7 +26,7 @@
     "src/query-client.ts": "5efb420731453ee1e0279a4501bf6536b066b595f14886ba3d7329336eae09c1",
     "src/routes/__root.tsx": "439fb91cf26ee51eb56ae6415556970d323dae6049d10415970709b79c0373e0"
   },
-  "basaltVersion": "1.8.0",
+  "basaltVersion": "1.9.0",
   "spacingScale": {
     "xs": 11,
     "sm": 13,

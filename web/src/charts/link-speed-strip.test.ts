@@ -10,8 +10,8 @@ const NO_VANTAGE_7: LinkBucketState = { kind: 'no-vantage', cycles: 7 }
 const UNMEASURED: LinkBucketState = { kind: 'unmeasured' }
 const TRANSITION: LinkBucketState = { kind: 'transition', mbits: [100, 1000] }
 
-function column(label: string, state: LinkBucketState) {
-  return { key: label, bucketStart: Number(label), label, state }
+function column(key: string, state: LinkBucketState) {
+  return { key, bucketStart: Number(key), state }
 }
 
 describe('foldStates', () => {
@@ -86,7 +86,7 @@ describe('foldColumns', () => {
     expect(folded[1]?.foldedFrom).toBe(2)
     expect(folded.reduce((sum, f) => sum + f.foldedFrom, 0)).toBe(columns.length)
     const index = foldSourceIndex(columns, folded)
-    expect(columns.every((c) => index.has(c.label))).toBe(true)
+    expect(columns.every((c) => index.has(c.key))).toBe(true)
   })
 
   test('a non-positive cap folds nothing', () => {

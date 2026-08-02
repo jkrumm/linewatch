@@ -3,6 +3,7 @@ import type { SpeedTest } from '../lib/types'
 import { densifyBuckets } from '../lib/densify'
 import { fmtMbps, fmtPct } from '../lib/format'
 import { CategoryGrid, type GridCell } from './category-grid'
+import { PendingChart } from './pending'
 
 /** One cell is one UTC hour, matching the availability grid so the two calendars on this dashboard
  * are read the same way. Hourly is also the speed test's own cadence (DESIGN.md, "Cadence"). */
@@ -47,7 +48,26 @@ const cellKey = (row: string, col: string) => `${row} ${col}`
  * Three cell states, because a failed run used to be dropped by a bare `return []` and so became
  * pixel-identical to an hour nothing ran in: measured, hatched-warn for an hour whose only runs
  * errored, and hatched-neutral for an hour with no run at all. */
-export function SpeedHeatmap({ tests, from, to }: { tests: SpeedTest[]; from: number; to: number }) {
+export function SpeedHeatmap({
+  tests,
+  from,
+  to,
+  isPending,
+}: {
+  tests: SpeedTest[]
+  from: number
+  to: number
+  /**
+   * True while the speed-tests query behind this grid is in flight.
+   *
+   * `tests ?? []` produced an empty run list, which is not an empty grid: every cell became
+   * `absent` and every tooltip read "No run · Not measured", so the pending state rendered as a
+   * flat claim that thirty days of hourly speed tests had never fired. The legend said it too —
+   * "No successful run", derived from a `fastest` of `null`. Three separate assertions about the
+   * line, all of them over a question nobody had answered yet.
+   */
+  isPending?: boolean
+}) {
   const windowFrom = Math.max(from, to - MAX_DAYS * 86_400_000)
 
   const byHour = new Map<number, HourRow>()
@@ -112,70 +132,81 @@ export function SpeedHeatmap({ tests, from, to }: { tests: SpeedTest[]; from: nu
           the height itself is already computed (`rows.length * 15`), not fixed — this only stops it
           from momentarily reporting 0 before the first measurement. */}
       <div style={{ minHeight: 220 }}>
-        <ResponsiveChart height={Math.max(220, rows.length * 15)}>
-          {({ width, height }) => (
-            <CategoryGrid
-              cells={cells}
-              rows={rows}
-              cols={HOUR_LABELS}
-              width={width}
-              height={height}
-              chartId="speed-heatmap"
-              color={VX.accent}
-              rowLabel={(row) => DAY_FORMAT.format(new Date(`${row}T00:00:00Z`))}
-              // The captions are the strip's two ends, and they carry the real numbers rather than
-              // bare superlatives: "Slowest" over a range-relative ramp was the lie itself.
-              legend={{
-                min: fastest === null ? 'No successful run' : `Fastest ${fmtMbps(fastest)}`,
-                max: `≥${FULL_INTENSITY_DEFICIT_PCT}% slower`,
-              }}
-              renderTooltip={(cell) => {
-                const source = sources.get(cellKey(cell.row, cell.col))
-                const hour = source?.row ?? null
-                const mean = source?.mean ?? null
-                if (hour === null) {
-                  return <TooltipRow color={VX.neutral} shape="bar" label="No run" value="Not measured" />
-                }
-                return (
-                  <>
-                    {mean !== null && (
-                      <TooltipRow
-                        color={VX.accent}
-                        shape="bar"
-                        label={hour.downloads.length > 1 ? 'Download (mean)' : 'Download'}
-                        value={fmtMbps(mean)}
-                      />
-                    )}
-                    {mean !== null && fastest !== null && fastest > 0 && (
+        {isPending === true ? (
+          <PendingChart height={Math.max(220, rows.length * 15)} />
+        ) : (
+          <ResponsiveChart height={Math.max(220, rows.length * 15)}>
+            {({ width, height }) => (
+              <CategoryGrid
+                cells={cells}
+                rows={rows}
+                cols={HOUR_LABELS}
+                width={width}
+                height={height}
+                chartId="speed-heatmap"
+                color={VX.accent}
+                rowLabel={(row) => DAY_FORMAT.format(new Date(`${row}T00:00:00Z`))}
+                // The captions are the strip's two ends, and they carry the real numbers rather than
+                // bare superlatives: "Slowest" over a range-relative ramp was the lie itself.
+                legend={{
+                  min: fastest === null ? 'No successful run' : `Fastest ${fmtMbps(fastest)}`,
+                  max: `≥${FULL_INTENSITY_DEFICIT_PCT}% slower`,
+                }}
+                renderTooltip={(cell) => {
+                  const source = sources.get(cellKey(cell.row, cell.col))
+                  const hour = source?.row ?? null
+                  const mean = source?.mean ?? null
+                  if (hour === null) {
+                    return (
                       <TooltipRow
                         color={VX.neutral}
                         shape="bar"
-                        label="Below fastest hour"
-                        value={fmtPct((100 * (fastest - mean)) / fastest)}
+                        label="No run"
+                        value="Not measured"
                       />
-                    )}
-                    {hour.downloads.length > 0 && (
-                      <TooltipRow
-                        color={VX.neutral}
-                        shape="bar"
-                        label="Successful runs"
-                        value={String(hour.downloads.length)}
-                      />
-                    )}
-                    {hour.failures.length > 0 && (
-                      <TooltipRow
-                        color={VX.warnSolid}
-                        shape="bar"
-                        label="Failed runs"
-                        value={`${hour.failures.length}${failureReason(hour.failures)}`}
-                      />
-                    )}
-                  </>
-                )
-              }}
-            />
-          )}
-        </ResponsiveChart>
+                    )
+                  }
+                  return (
+                    <>
+                      {mean !== null && (
+                        <TooltipRow
+                          color={VX.accent}
+                          shape="bar"
+                          label={hour.downloads.length > 1 ? 'Download (mean)' : 'Download'}
+                          value={fmtMbps(mean)}
+                        />
+                      )}
+                      {mean !== null && fastest !== null && fastest > 0 && (
+                        <TooltipRow
+                          color={VX.neutral}
+                          shape="bar"
+                          label="Below fastest hour"
+                          value={fmtPct((100 * (fastest - mean)) / fastest)}
+                        />
+                      )}
+                      {hour.downloads.length > 0 && (
+                        <TooltipRow
+                          color={VX.neutral}
+                          shape="bar"
+                          label="Successful runs"
+                          value={String(hour.downloads.length)}
+                        />
+                      )}
+                      {hour.failures.length > 0 && (
+                        <TooltipRow
+                          color={VX.warnSolid}
+                          shape="bar"
+                          label="Failed runs"
+                          value={`${hour.failures.length}${failureReason(hour.failures)}`}
+                        />
+                      )}
+                    </>
+                  )
+                }}
+              />
+            )}
+          </ResponsiveChart>
+        )}
       </div>
     </ChartCard>
   )

@@ -2,6 +2,7 @@ import { ChartCard, ChartLegend, MultiLine, ResponsiveChart, VX } from 'basalt-u
 import type { SpeedTest } from '../lib/types'
 import { fmtMbps } from '../lib/format'
 import { AXIS_LABEL_PX, fitTickCount, runAxisLabels } from '../lib/axis'
+import { PendingChart } from './pending'
 
 const SPEED_HEIGHT = 260
 
@@ -30,7 +31,33 @@ export type SpeedRefLine = {
  * screen apart carrying the same word for two different measurements is exactly the confusion the
  * Speed/Throughput split exists to prevent.
  */
-export function SpeedChart({ tests, refLines = [] }: { tests: SpeedTest[]; refLines?: SpeedRefLine[] }) {
+export function SpeedChart({
+  tests,
+  refLines = [],
+  isPending,
+}: {
+  tests: SpeedTest[]
+  refLines?: SpeedRefLine[]
+  /**
+   * True while the speed-tests query is in flight.
+   *
+   * `tests ?? []` drew an axis with no points on it — which on a run-series chart is the claim
+   * "no speed test ran in this window", not "nobody has asked yet".
+   *
+   * Branched here rather than handed to `MultiLine`'s own `isPending`, even though the kind takes
+   * one as of basalt-ui 1.9.0. This chart wraps the kind in its OWN `ResponsiveChart` (it has to —
+   * `numTicksX` is derived from a measured plot width, see below), so the kind's `ChartFrame`
+   * never mounts until that outer container has been measured, and a pending state that renders
+   * nothing until a `ResizeObserver` fires is one no server-rendered test can observe. Replacing
+   * the whole wrapper achieves what `ChartFrame`'s own gate would — no plot, no legend, a reserved
+   * footprint — and stays visible to the guard.
+   *
+   * The ref-line legend below is this app's own rather than `ChartFrame`'s, so it needs
+   * suppressing explicitly: a dashed "Host link 1000 Mbit" caption over a plot with no runs on it
+   * names a ceiling for measurements that are not on screen.
+   */
+  isPending?: boolean
+}) {
   // Oldest first. `GET /api/speedtests` answers newest-first — right for a list, backwards for a
   // time axis — and this chart plotted it in that order, so time ran right to left while every
   // other chart on the page ran left to right. A reader comparing a dip here against the latency
@@ -61,57 +88,65 @@ export function SpeedChart({ tests, refLines = [] }: { tests: SpeedTest[]; refLi
           axis rendered as one unbroken smear of overlapping timestamps. */}
       {/* See `availability-strip.tsx`'s identical wrapper for why this is a floor, not a height. */}
       <div style={{ minHeight: SPEED_HEIGHT }}>
-        <ResponsiveChart height={SPEED_HEIGHT}>
-          {({ width }) => {
-            // The *plot* width, not the container's: `MultiLine` spends `VX.margin` on its axes, and
-            // sizing the tick count off the outer width overestimates by 60 px. Harmless at 1600 px
-            // and not at 390, where it was the difference between four legible timestamps and five
-            // overlapping ones.
-            const plotWidth = Math.max(1, width - VX.margin.left - VX.margin.right)
-            return (
-              <MultiLine
-                data={points}
-                chartId="speed-throughput"
-                ariaLabel="Download against upload in Mbps, one point per speed-test run"
-                numTicksX={fitTickCount(
-                  points.length,
-                  Math.max(2, Math.floor(plotWidth / AXIS_LABEL_PX)),
-                  plotWidth,
-                )}
-                getX={(p) => p.label}
-                series={[
-                  {
-                    // `VX.accent`/`VX.line`, not `VX.line`/`VX.line2`: both of the latter resolve to
-                    // plain greys and read as one indistinct hue on the dark panel, which on a
-                    // two-series chart means the reader cannot tell download from upload without the
-                    // legend. The same pair the latency chart uses for its own two-series case.
-                    key: 'download',
-                    label: 'Download',
-                    color: VX.accent,
-                    mark: 'line',
-                    getValue: (p) => p.test.downloadMbps,
-                  },
-                  {
-                    key: 'upload',
-                    label: 'Upload',
-                    color: VX.line,
-                    mark: 'line',
-                    getValue: (p) => p.test.uploadMbps,
-                  },
-                ]}
-                refLines={refLines.map((ref) => ({ value: ref.value, color: ref.color, dashed: true }))}
-                yDomain="auto"
-                formatValue={fmtMbps}
-                height={SPEED_HEIGHT}
-              />
-            )
-          }}
-        </ResponsiveChart>
+        {isPending === true ? (
+          <PendingChart height={SPEED_HEIGHT} />
+        ) : (
+          <ResponsiveChart height={SPEED_HEIGHT}>
+            {({ width }) => {
+              // The *plot* width, not the container's: `MultiLine` spends `VX.margin` on its axes, and
+              // sizing the tick count off the outer width overestimates by 60 px. Harmless at 1600 px
+              // and not at 390, where it was the difference between four legible timestamps and five
+              // overlapping ones.
+              const plotWidth = Math.max(1, width - VX.margin.left - VX.margin.right)
+              return (
+                <MultiLine
+                  data={points}
+                  chartId="speed-throughput"
+                  ariaLabel="Download against upload in Mbps, one point per speed-test run"
+                  numTicksX={fitTickCount(
+                    points.length,
+                    Math.max(2, Math.floor(plotWidth / AXIS_LABEL_PX)),
+                    plotWidth,
+                  )}
+                  getX={(p) => p.label}
+                  series={[
+                    {
+                      // `VX.accent`/`VX.line`, not `VX.line`/`VX.line2`: both of the latter resolve to
+                      // plain greys and read as one indistinct hue on the dark panel, which on a
+                      // two-series chart means the reader cannot tell download from upload without the
+                      // legend. The same pair the latency chart uses for its own two-series case.
+                      key: 'download',
+                      label: 'Download',
+                      color: VX.accent,
+                      mark: 'line',
+                      getValue: (p) => p.test.downloadMbps,
+                    },
+                    {
+                      key: 'upload',
+                      label: 'Upload',
+                      color: VX.line,
+                      mark: 'line',
+                      getValue: (p) => p.test.uploadMbps,
+                    },
+                  ]}
+                  refLines={refLines.map((ref) => ({
+                    value: ref.value,
+                    color: ref.color,
+                    dashed: true,
+                  }))}
+                  yDomain="auto"
+                  formatValue={fmtMbps}
+                  height={SPEED_HEIGHT}
+                />
+              )
+            }}
+          </ResponsiveChart>
+        )}
       </div>
       {/* `MultiLine` draws ref lines but names none of them, and an unlabelled rule across a
           throughput chart is an assertion the reader has to guess at. The labels ride here, in
           their own reference-role legend, with the numbers their caller measured. */}
-      {refLines.length > 0 && (
+      {refLines.length > 0 && isPending !== true && (
         <ChartLegend
           chartId="speed-throughput-refs"
           placement="bottom"

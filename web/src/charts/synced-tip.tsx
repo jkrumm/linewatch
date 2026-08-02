@@ -22,6 +22,16 @@ import { ChartTooltip } from 'basalt-ui/charts'
  * means the follower drifts if the page scrolls mid-hover; hovering implies a still pointer, and the
  * cost of a scroll listener per follower is not worth closing that.
  *
+ * **This file survived the 1.9.0 cleanup, and it is worth saying why.** The other three pieces of
+ * that workaround layer are gone: `PointerOverlay` (`HoverOverlay` binds pointer events now),
+ * `ChartPending` (shipped), and the `HoverContext` reads the four charts did to resolve a folded
+ * sibling's key (`useHoverSync`'s `resolveKey`). This one is not the same kind of thing. It is not
+ * working around a gap in `ChartTooltip` — the portal fixed the gap this directory actually had,
+ * and `ChartTooltip` is used here unmodified. What has no shipped answer is the *question*: what a
+ * chart shows when a sibling owns the cursor. `MultiLine`'s policy is crosshair-and-dot; four
+ * charts sharing one instant need a number. Positioning a tooltip that no pointer event produced
+ * is the whole job, and no 1.9.0 primitive does it.
+ *
  * `tooltipRef` is deliberately NOT forwarded. That ref is the single measurement node
  * `useChartTooltip.show` uses for viewport flipping, and a second consumer breaks it.
  */

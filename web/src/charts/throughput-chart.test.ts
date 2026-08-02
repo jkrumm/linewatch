@@ -6,7 +6,6 @@ import type { ThroughputPoint } from '../lib/throughput'
 function measured(over: Partial<ThroughputPoint> = {}): ThroughputPoint {
   return {
     key: '0',
-    label: '0',
     bucketStart: 0,
     downBytesPerS: 1000,
     upBytesPerS: 100,
@@ -19,11 +18,10 @@ function measured(over: Partial<ThroughputPoint> = {}): ThroughputPoint {
   }
 }
 
-function absent(label: string): ThroughputPoint {
+function absent(key: string): ThroughputPoint {
   return {
-    key: label,
-    label,
-    bucketStart: Number(label),
+    key,
+    bucketStart: Number(key),
     downBytesPerS: null,
     upBytesPerS: null,
     downBytes: 0,
@@ -34,8 +32,8 @@ function absent(label: string): ThroughputPoint {
   }
 }
 
-function labeled(p: ThroughputPoint, label: string): ThroughputPoint {
-  return { ...p, key: label, label, bucketStart: Number(label) }
+function keyed(p: ThroughputPoint, key: string): ThroughputPoint {
+  return { ...p, key, bucketStart: Number(key) }
 }
 
 describe('foldPoints', () => {
@@ -47,7 +45,7 @@ describe('foldPoints', () => {
    * rather than drawing a bar that implies the whole width agreed with it.
    */
   test('[measured, absent, absent] carries unmeasuredMembers 2 and keeps the real partial rate', () => {
-    const [folded] = foldPoints([labeled(measured(), '0'), absent('1'), absent('2')], 1)
+    const [folded] = foldPoints([keyed(measured(), '0'), absent('1'), absent('2')], 1)
     expect(folded?.foldedFrom).toBe(3)
     expect(folded?.unmeasuredMembers).toBe(2)
     expect(folded?.downBytesPerS).not.toBeNull()
@@ -63,7 +61,7 @@ describe('foldPoints', () => {
 
   test('[measured, measured, measured] carries unmeasuredMembers 0', () => {
     const [folded] = foldPoints(
-      [labeled(measured(), '0'), labeled(measured(), '1'), labeled(measured(), '2')],
+      [keyed(measured(), '0'), keyed(measured(), '1'), keyed(measured(), '2')],
       1,
     )
     expect(folded?.foldedFrom).toBe(3)
@@ -72,13 +70,13 @@ describe('foldPoints', () => {
 
   /** The mirror lie: a mostly-measured fold must not report itself wholly unmeasured either. */
   test('a 2-of-3-measured fold does not report itself wholly unmeasured', () => {
-    const [folded] = foldPoints([labeled(measured(), '0'), labeled(measured(), '1'), absent('2')], 1)
+    const [folded] = foldPoints([keyed(measured(), '0'), keyed(measured(), '1'), absent('2')], 1)
     expect(folded?.unmeasuredMembers).toBe(1)
     expect(folded?.downBytesPerS).not.toBeNull()
   })
 
   test('a remainder group (source length not divisible by the group size) still folds every point', () => {
-    const points = ['0', '1', '2', '3', '4'].map((l) => labeled(measured(), l))
+    const points = ['0', '1', '2', '3', '4'].map((l) => keyed(measured(), l))
     // cap 2 -> groupSize ceil(5/2) = 3 -> groups of 3 and 2 (the remainder).
     const folded = foldPoints(points, 2)
     expect(folded).toHaveLength(2)
@@ -86,7 +84,7 @@ describe('foldPoints', () => {
     expect(folded[1]?.foldedFrom).toBe(2)
     expect(folded.reduce((sum, f) => sum + f.foldedFrom, 0)).toBe(points.length)
     const index = foldSourceIndex(points, folded)
-    expect(points.every((p) => index.has(p.label))).toBe(true)
+    expect(points.every((p) => index.has(p.key))).toBe(true)
   })
 
   /**
@@ -96,13 +94,13 @@ describe('foldPoints', () => {
    * `throughputPoints`'s own docblock already records fixing once.
    */
   test('bytes, spanMs, intervals and skipped sum; the rate is recomputed, not averaged', () => {
-    const a = labeled(
+    const a = keyed(
       measured({ downBytes: 60_000, upBytes: 6_000, spanMs: 60_000, intervals: 1, skipped: 0, downBytesPerS: 1000 }),
       '0',
     )
     // A much faster but much shorter interval — averaging the two per-point rates would land near
     // (1000 + 10000) / 2 = 5500, which is not the rate either interval actually ran at.
-    const b = labeled(
+    const b = keyed(
       measured({ downBytes: 10_000, upBytes: 1_000, spanMs: 1_000, intervals: 1, skipped: 1, downBytesPerS: 10_000 }),
       '1',
     )
@@ -117,7 +115,7 @@ describe('foldPoints', () => {
   })
 
   test('a point count at or under the cap passes through unfolded, one source per point', () => {
-    const points = [labeled(measured(), '0'), absent('1')]
+    const points = [keyed(measured(), '0'), absent('1')]
     const folded = foldPoints(points, 5)
     expect(folded).toEqual([
       { ...points[0], foldedFrom: 1, unmeasuredMembers: 0 },
@@ -126,6 +124,6 @@ describe('foldPoints', () => {
   })
 
   test('a non-positive cap folds nothing', () => {
-    expect(foldPoints([labeled(measured(), '0')], 0)).toEqual([])
+    expect(foldPoints([keyed(measured(), '0')], 0)).toEqual([])
   })
 })

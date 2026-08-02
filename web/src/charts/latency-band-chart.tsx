@@ -10,6 +10,7 @@ import {
   Crosshair,
   Group,
   GridRows,
+  HoverOverlay,
   LinePath,
   SeriesDot,
   TooltipBody,
@@ -23,11 +24,10 @@ import {
 } from 'basalt-ui/charts'
 import type { HomeLineVerdict, Outage, ProbeBucket, ProbeBucketSeconds, VantageBucket } from '../lib/types'
 import { densifyBuckets } from '../lib/densify'
-import { axisTickValues, bucketAxisLabel } from '../lib/axis'
+import { axisTickValues, bucketTickFormat } from '../lib/axis'
 import { PROBE_CYCLE_MS } from '../lib/range'
 import { fmtDateTime, fmtDuration, fmtMs, fmtPct } from '../lib/format'
 import { HatchPattern, hatchFill } from './hatch'
-import { PointerOverlay } from './pointer-overlay'
 import { SyncedTip } from './synced-tip'
 
 /** One position on the time axis. `bucket === null` is a bucket the range route returned no row
@@ -38,20 +38,18 @@ import { SyncedTip } from './synced-tip'
  * bucket at this slot has none), so the drawing code never has to ask the point "does an overlay
  * exist" separately from "what is its value here". */
 type Point = {
-  /** ISO-8601 of the bucket start — the instant, used by the tooltip's own date formatting. */
-  key: string
   /**
-   * The display label for this bucket, and the x-scale's domain value.
+   * ISO-8601 of the bucket start: the instant the tooltip's date formatting reads, the x-scale's
+   * domain value, and the key this chart broadcasts to the shared cursor.
    *
-   * Separate from `key` because `AxisBottomDate` accepts no `tickFormat` and renders whatever the
-   * scale's domain holds through basalt's `fmtAxisDate`, which reduces an ISO string to `DD.MM` —
-   * a 24 h window drew `01.08` a dozen times across the bottom of the page's primary latency
-   * chart. `fmtAxisDate` passes a non-ISO string through untouched, so a pre-formatted label is
-   * the only way to reach that axis. `bucketAxisLabel` guarantees it is unique per bucket, which
-   * the point scale requires: two buckets sharing a domain value collapse onto one x position and
-   * one of them stops being drawn.
+   * It used to carry a pre-formatted `label` alongside, because `AxisBottomDate` accepted no
+   * `tickFormat` and rendered the domain through `fmtAxisDate`, which reduces an ISO string to
+   * `DD.MM` — a 24 h window drew `01.08` a dozen times across the bottom of the page's primary
+   * latency chart. A pre-formatted label passed through untouched and was the only way to reach
+   * the axis, which is what forced the *display* string to also be the *identity*. basalt-ui
+   * 1.9.0's `tickFormat` ends that; see `lib/axis.ts`.
    */
-  label: string
+  key: string
   /** The bucket's own start, unix ms — the tooltip header's date and the outage-overlay's x-map
    * both read this rather than re-deriving it from `key`. */
   bucketStart: number
@@ -83,10 +81,10 @@ function lossColor(lossPct: number): string {
 const RAIL_H = 5
 
 /** Stable across renders, unlike an inline arrow — `useHoverSync` rebuilds its key→point Map
- * whenever `getKey`'s identity changes, and an inline `(p) => p.label` is a new function every
+ * whenever `getKey`'s identity changes, and an inline `(p) => p.key` is a new function every
  * render of a page that re-renders on a 30 s heartbeat; see `availability-strip.tsx`'s identical
  * constant. */
-const getPointLabel = (p: Point): string => p.label
+const getPointKey = (p: Point): string => p.key
 
 /**
  * The SmokePing-style signature chart (DESIGN.md's "Latency" view): a median line with a shaded
@@ -119,6 +117,7 @@ export function LatencyBandChart({
   from,
   to,
   bucketSeconds,
+  isPending,
   overlay,
   renderExtraTooltipRows,
   outages,
@@ -132,6 +131,16 @@ export function LatencyBandChart({
   from: number
   to: number
   bucketSeconds: ProbeBucketSeconds
+  /**
+   * True while the probe-buckets queries behind this band are in flight.
+   *
+   * Forwarded straight to `ChartFrame`, which as of basalt-ui 1.9.0 reserves the plot, renders
+   * `ChartPending` in place of the marks, drops the legend and sets `aria-busy` — so this chart
+   * needs none of the app-side `PendingChart` scaffolding its `ResponsiveChart`-based siblings do.
+   * Dropping the legend is the part worth naming: it declares "Loss under 20%", "Loss 20% or
+   * more" and "Cycles fully down" — an encoding for marks that, while pending, do not exist.
+   */
+  isPending?: boolean
   /**
    * A second median line drawn over the band, with no band of its own.
    *
@@ -188,7 +197,6 @@ export function LatencyBandChart({
       : null
     return densifyBuckets(buckets, { from, to, bucketSeconds }).map((slot) => ({
       key: slot.key,
-      label: bucketAxisLabel(slot.bucketStart, bucketSeconds),
       bucketStart: slot.bucketStart,
       bucket: slot.value,
       vantage: vantageByBucket.get(slot.bucketStart) ?? null,
@@ -239,6 +247,7 @@ export function LatencyBandChart({
       // encoding cannot live in the tooltip (which states one bucket's value, not the rule) or in the
       // guide drawer (which is a click away, which is why nobody found it there).
       legend={{}}
+      isPending={isPending}
       ariaLabel={
         overlay
           ? `${label} latency with ${overlay.label} overlaid — median with p5 to p95 band, worst-ping envelope, and unmeasured periods marked${hasOutages ? ', with outages flagged' : ''}`
@@ -306,7 +315,7 @@ function LatencyBandPlot({
   const svgRef = useRef<SVGSVGElement | null>(null)
 
   const xScale = useMemo(
-    () => scalePoint<string>({ domain: points.map((p) => p.label), range: [0, xMax], padding: 0.5 }),
+    () => scalePoint<string>({ domain: points.map((p) => p.key), range: [0, xMax], padding: 0.5 }),
     [points, xMax],
   )
   const bandWidth = points.length > 1 ? xScale.step() : xMax
@@ -316,7 +325,7 @@ function LatencyBandPlot({
    *
    * There is no time→px path through `scalePoint`, but there does not need to be one: `densifyBuckets`
    * emits a uniform grid, so `points[i].bucketStart` is `points[0].bucketStart + i * bucketMs` by
-   * construction and `xScale.step()` is the px per bucket. `xScale(points[0].label)` is bucket 0's
+   * construction and `xScale.step()` is the px per bucket. `xScale(points[0].key)` is bucket 0's
    * CENTRE, so the grid's left edge is that minus half a step, and everything after is linear.
    *
    * This is the one mark on the chart whose x-extent is NOT quantised to a bucket, and that is the
@@ -328,7 +337,7 @@ function LatencyBandPlot({
    */
   const bucketMs = bucketSeconds * 1000
   const gridFirst = points[0]?.bucketStart ?? 0
-  const gridX0 = points[0] === undefined ? 0 : (xScale(points[0].label) ?? 0)
+  const gridX0 = points[0] === undefined ? 0 : (xScale(points[0].key) ?? 0)
   const pxAt = (ms: number) => gridX0 - bandWidth / 2 + ((ms - gridFirst) / bucketMs) * bandWidth
 
   // The envelope is part of the domain: `maxMs` is the only stored witness of a sub-cycle stall
@@ -363,14 +372,19 @@ function LatencyBandPlot({
    * fabrication this project exists to prevent. NaN drops the mark visibly instead.
    */
   const y = (value: number | null): number => (value === null ? Number.NaN : yScale(value))
-  // Takes the point, not a bare string: the scale's domain is the display label while `key` stays
-  // the ISO instant, and passing the wrong one silently yields NaN for every position.
-  const x = (p: Point): number => xScale(p.label) ?? Number.NaN
+  // Takes the point rather than a bare string, so a call site cannot pass the wrong field and get
+  // a silent NaN for every position. That mattered more when the domain was a display label
+  // distinct from `key`; it is kept because the signature still documents which field is the
+  // scale's, and the cost is nothing.
+  const x = (p: Point): number => xScale(p.key) ?? Number.NaN
 
+  // No `resolveKey`. This chart does not fold — it keys all 288 raw buckets — so it already owns
+  // every key any sibling can broadcast, and `useHoverSync`'s default exact-match lookup is
+  // correct here. It is the chart the three folded strips need the seam *for*.
   const { tip, tooltipRef, syncedPoint, isDirectHover, handleMouse, handleLeave } = useHoverSync<Point>({
     data: points,
     chartId: `latency-${chartKey}`,
-    getKey: getPointLabel,
+    getKey: getPointKey,
     xScale,
     marginLeft: margin.left,
   })
@@ -381,27 +395,29 @@ function LatencyBandPlot({
    * This chart drew its ticks with `smartTicks` and let `AxisBottomDate`'s default formatter render
    * them, which reduces an ISO string to `DD.MM` — so a 24 h window printed `01.08` a dozen times
    * across the bottom of the page's primary latency chart, an axis costing its full height to say
-   * nothing about where in the window you are. `lib/axis.ts` already solved this for the
-   * availability strip; the same two helpers apply here. `bucketAxisLabel` also decides the label's
-   * *resolution* from the bucket size, so the `all` range keeps the year that stops its first and
-   * last bucket reading identically.
+   * nothing about where in the window you are. The values are the scale's own domain (ISO bucket
+   * starts) and `bucketTickFormat` renders them; it decides the label's *resolution* from the
+   * bucket size, so the `all` range keeps the year that stops its first and last bucket reading
+   * identically.
    *
    * `axisTickValues` rather than `smartTicks` for the reason its own docblock gives: `smartTicks`
    * appends the final value unconditionally and the last two labels land on top of each other.
    */
   const dateTickValues = axisTickValues(
-    points.map((p) => p.label),
+    points.map((p) => p.key),
     xMax,
   )
 
   if (width < 40 || height < 40) return null
 
   return (
-    // The tooltip lives OUTSIDE the <svg>, and that is the whole reason this chart has one.
-    // `ChartTooltip` renders a plain <div>; React only leaves the SVG host namespace for a
-    // <foreignObject>, so a <div> child of an <svg> is created with createElementNS and the browser
-    // draws nothing for it. This chart shipped with eight authored tooltip rows that no reader has
-    // ever seen. The three sibling charts in this directory were already built this way.
+    // The wrapper is now just the layout box the SVG and its tooltips share; it is no longer
+    // load-bearing. It was: `ChartTooltip` rendered a plain <div>, React only leaves the SVG host
+    // namespace for a <foreignObject>, so a <div> child of an <svg> was created with
+    // createElementNS and the browser drew nothing for it — this chart shipped eight authored
+    // tooltip rows no reader had ever seen. basalt-ui 1.9.0 portals `ChartTooltip` to
+    // `document.body`, so it is safe to author anywhere, this file included. Keeping the tooltip
+    // out here anyway costs nothing and keeps all four charts in this directory one shape.
     <div style={{ position: 'relative' }}>
       <svg ref={svgRef} width={width} height={height}>
         <defs>
@@ -533,7 +549,12 @@ function LatencyBandPlot({
             ) : null,
           )}
           <AxisLeftNumeric scale={yScale} numTicks={4} tickFormat={(v) => fmtMs(v)} />
-          <AxisBottomDate scale={xScale} top={yMax} tickValues={dateTickValues} />
+          <AxisBottomDate
+            scale={xScale}
+            top={yMax}
+            tickValues={dateTickValues}
+            tickFormat={bucketTickFormat(bucketSeconds)}
+          />
           {syncedPoint && <Crosshair x={x(syncedPoint)} top={0} bottom={yMax} />}
           {syncedPoint && syncedPoint.bucket !== null && syncedPoint.bucket.medianMs !== null && (
             <SeriesDot
@@ -542,13 +563,7 @@ function LatencyBandPlot({
               color={lossColor(syncedPoint.bucket.maxLossPct)}
             />
           )}
-          <PointerOverlay
-            width={xMax}
-            height={yMax}
-            onMove={handleMouse}
-            onLeave={handleLeave}
-            active={tip !== null || syncedPoint !== null}
-          />
+          <HoverOverlay width={xMax} height={yMax} onMove={handleMouse} onLeave={handleLeave} />
         </Group>
       </svg>
       <ChartTooltip tip={isDirectHover ? tip : null} tooltipRef={tooltipRef} styles={tooltipStyles}>
@@ -691,6 +706,27 @@ function OverlayRow({ point, overlayLabel }: { point: Point; overlayLabel: strin
   return <TooltipRow color={VX.line} label={overlayLabel} value={fmtMs(point.overlayMs)} shape="line" />
 }
 
+/**
+ * The rail's swatch, matching the rail. Three colours, not two.
+ *
+ * `all` is the only verdict that claims the whole bucket measured this line, so it is the only
+ * green one — but `unknown` is NOT the same reading as `none`/`mixed`, and this row used to paint
+ * both amber. The chart itself has always distinguished them: the rail draws `unknown` through
+ * `unknownHatchId` in `VX.neutral`, on the stated grounds that an unreported vantage is not
+ * evidence of a failover either. The tooltip is the only place a reader is told what the rail
+ * means, and it was contradicting it — naming a neutral mark as a warning.
+ *
+ * This is one of the rows nobody had ever seen. `ChartTooltip` rendered a plain `<div>` inside
+ * `<svg>`, where React creates it in the SVG namespace and the browser paints nothing; the portal
+ * added in basalt-ui 1.9.0 is what makes this chart's tooltip visible at all, and the disagreement
+ * only became reviewable once it was.
+ */
+function vantageColor(verdict: HomeLineVerdict): string {
+  if (verdict === 'all') return VX.goodSolid
+  if (verdict === 'unknown') return VX.neutral
+  return VX.warnSolid
+}
+
 function VantageRows({ point }: { point: Point }) {
   const vantage = point.vantage
   if (vantage === null) return null
@@ -698,7 +734,7 @@ function VantageRows({ point }: { point: Point }) {
   return (
     <>
       <TooltipRow
-        color={vantage.onHomeLine === 'all' ? VX.goodSolid : VX.warnSolid}
+        color={vantageColor(vantage.onHomeLine)}
         label="Vantage"
         value={HOME_LINE_LABEL[vantage.onHomeLine]}
         shape="bar"

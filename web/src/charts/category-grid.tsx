@@ -111,10 +111,12 @@ export function CategoryGrid({
   const svgRef = useRef<SVGSVGElement | null>(null)
 
   // `CategoryGrid` stays outside the shared cursor (see the module docblock in the charts that join
-  // it) but still needs to be reachable on a phone. `useChartTooltip`'s own `show`/`hide` are wired
-  // per-cell below via pointer events instead of mouse events; the one thing per-cell wiring cannot
-  // give for free is a way to dismiss on touch, where `pointerleave` fires on lift and would close
-  // the tooltip the instant it opened. One listener for the whole grid, not one per cell.
+  // it) but still needs to be reachable on a phone. It composes no `HoverOverlay` — hit-testing is
+  // per-cell, because a cell is the unit a reader points at — so basalt-ui 1.9.0's pointer-event
+  // overlay does not reach it and this file keeps wiring `useChartTooltip`'s `show`/`hide` to
+  // pointer events itself. The one thing per-cell wiring cannot give for free is a way to dismiss
+  // on touch, where `pointerleave` fires on lift and would close the tooltip the instant it opened.
+  // One listener for the whole grid, not one per cell.
   useEffect(() => {
     if (tip === null) return
     const dismiss = (event: PointerEvent) => {
@@ -187,10 +189,16 @@ export function CategoryGrid({
                   style={{ cursor: cell ? 'pointer' : 'default' }}
                   onPointerMove={(e) => cell && show(cell, e)}
                   onPointerLeave={(e) => {
-                    // Mirrors `PointerOverlay`'s own rule: only a mouse leaving means "stop showing
-                    // this" — on touch, `pointerleave` fires the instant the finger lifts, which is
-                    // exactly when the reader started reading. The document listener above is what
-                    // dismisses a touch tooltip instead.
+                    // Only a mouse leaving means "stop showing this" — on touch, `pointerleave`
+                    // fires the instant the finger lifts, which is exactly when the reader started
+                    // reading. The document listener above dismisses a touch tooltip instead.
+                    //
+                    // This is a deliberate divergence from the shipped `HoverOverlay`, which the
+                    // four time-series charts in this directory now use unmodified: it dismisses on
+                    // any `pointerleave`, so on touch those charts are press-and-hold-to-scrub and
+                    // release-to-dismiss. That reads fine on a continuous axis you drag along. A
+                    // grid cell is a discrete tap target — releasing is how you finish tapping it,
+                    // so the same rule here would mean a tooltip nobody can read.
                     if (e.pointerType === 'mouse') hide()
                   }}
                 />

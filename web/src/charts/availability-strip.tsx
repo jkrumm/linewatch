@@ -1,10 +1,10 @@
-import { useCallback, useContext, useMemo, useRef } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import { scaleBand } from '@visx/scale'
 import {
   AxisBottomDate,
   ChartTooltip,
   Crosshair,
-  HoverContext,
+  HoverOverlay,
   ResponsiveChart,
   TooltipBody,
   TooltipHeader,
@@ -19,10 +19,10 @@ import { TARGET_LABEL } from '../lib/types'
 import { densifyBuckets } from '../lib/densify'
 import { PROBE_CYCLE_MS } from '../lib/range'
 import { fmtDateTime, fmtPct } from '../lib/format'
-import { AXIS_LABEL_PX, axisTickValues, bucketAxisLabel } from '../lib/axis'
+import { AXIS_LABEL_PX, axisTickValues, bucketTickFormat } from '../lib/axis'
+import { PendingChart } from './pending'
 import { foldSourceIndex } from './fold'
 import { HatchPattern, hatchFill } from './hatch'
-import { PointerOverlay } from './pointer-overlay'
 import { SyncedTip } from './synced-tip'
 
 /** Loss share at which a column is painted at full strength — the same absolute scale the
@@ -66,10 +66,13 @@ const PLOT_LEFT = Math.max(56, Math.round(AXIS_LABEL_PX / 2))
 const PLOT_RIGHT = Math.round(AXIS_LABEL_PX / 2)
 
 type Column = {
+  /** The bucket's ISO start. The band scale's domain value, the broadcast hover key and
+   * `foldSourceIndex`'s key — an identity, never a rendering. The axis label is derived from it at
+   * draw time by `bucketTickFormat`; this used to carry a pre-formatted `label` alongside, because
+   * `AxisBottomDate` took no `tickFormat` and a display string was the only thing that reached the
+   * axis. See `lib/axis.ts`. */
   key: string
   bucketStart: number
-  /** The axis label for this column, and the band scale's key — see `bucketAxisLabel`. */
-  label: string
   bucket: ProbeBucket | null
 }
 
@@ -133,9 +136,9 @@ export function foldColumns(columns: Column[], cap: number): PlotColumn[] {
 }
 
 /** Stable across renders, unlike an inline arrow — `useHoverSync` rebuilds its 288-entry key→point
- * Map whenever `getKey`'s identity changes, and an inline `(c) => c.label` is a new function every
+ * Map whenever `getKey`'s identity changes, and an inline `(c) => c.key` is a new function every
  * render of a page that re-renders on a 30 s heartbeat. */
-const getColumnLabel = (c: PlotColumn): string => c.label
+const getColumnKey = (c: PlotColumn): string => c.key
 
 /**
  * The Now view's 24 h summary, and why it is not a sparkline.
@@ -158,6 +161,7 @@ export function AvailabilityStrip({
   from,
   to,
   bucketSeconds,
+  isPending,
 }: {
   /** Which target's buckets these are — the tooltip names it rather than assuming the WAN anchor. */
   target: TargetName
@@ -165,13 +169,24 @@ export function AvailabilityStrip({
   from: number
   to: number
   bucketSeconds: ProbeBucketSeconds
+  /**
+   * True while the probe-buckets query behind this strip is in flight.
+   *
+   * The strip had no such guard, and it is the chart on the page where the absence of one is
+   * loudest: `densifyBuckets` fills every slot in the window the moment it is called, so an
+   * unresolved query drew a fully-hatched 24 h band — "the collector watched this whole window and
+   * recorded nothing", asserted over a question nobody had answered yet. The route loader warms
+   * this query, which is exactly why it went unnoticed: the state is unreachable on a cold load
+   * and reachable on every range change, and the loader guarantee is route config a later edit can
+   * silently remove.
+   */
+  isPending?: boolean
 }) {
   const columns: Column[] = useMemo(
     () =>
       densifyBuckets(buckets, { from, to, bucketSeconds }).map((slot) => ({
         key: slot.key,
         bucketStart: slot.bucketStart,
-        label: bucketAxisLabel(slot.bucketStart, bucketSeconds),
         bucket: slot.value,
       })),
     [buckets, from, to, bucketSeconds],
@@ -185,17 +200,21 @@ export function AvailabilityStrip({
     // effect, so every mount contributes 0px for one frame — which under a sticky header is the page
     // visibly dropping and snapping back every time a section view is switched.
     <div style={{ minHeight: STRIP_HEIGHT + AXIS_HEIGHT }}>
-      <ResponsiveChart height={STRIP_HEIGHT + AXIS_HEIGHT}>
-        {({ width }) => (
-          <StripPlot
-            target={target}
-            columns={columns}
-            expectedCycles={expectedCycles}
-            bucketSeconds={bucketSeconds}
-            width={width}
-          />
-        )}
-      </ResponsiveChart>
+      {isPending === true ? (
+        <PendingChart height={STRIP_HEIGHT + AXIS_HEIGHT} />
+      ) : (
+        <ResponsiveChart height={STRIP_HEIGHT + AXIS_HEIGHT}>
+          {({ width }) => (
+            <StripPlot
+              target={target}
+              columns={columns}
+              expectedCycles={expectedCycles}
+              bucketSeconds={bucketSeconds}
+              width={width}
+            />
+          )}
+        </ResponsiveChart>
+      )}
     </div>
   )
 }
@@ -237,45 +256,48 @@ function StripPlot({
   // Memoized so `scale` below is referentially stable across renders that don't change the fold —
   // `scaleBand` and the `xScale` wrapper closing over it are otherwise rebuilt every render, which
   // invalidates `useHoverSync`'s `handleMouse` callback identity for no reason.
-  const labels = useMemo(() => plotColumns.map((c) => c.label), [plotColumns])
+  const keys = useMemo(() => plotColumns.map((c) => c.key), [plotColumns])
   // The band scale is built before the width guard's early return so the hook order below it stays
   // fixed; `scaleBand` is a plain call, not a hook, so this is only ordering hygiene for readers.
-  const scale = useMemo(() => scaleBand<string>({ domain: labels, range: [0, plotWidth] }), [labels, plotWidth])
-  // Every source (unfolded) column's label, resolved to the folded column that swallowed it — see
+  const scale = useMemo(() => scaleBand<string>({ domain: keys, range: [0, plotWidth] }), [keys, plotWidth])
+  // Every source (unfolded) column's key, resolved to the folded column that swallowed it — see
   // `foldSourceIndex`. This is what lets the crosshair follow a key broadcast by the latency chart,
   // which keys all 288 raw buckets rather than this strip's folded ~96.
   const sourceIndex = useMemo(() => foldSourceIndex(columns, plotColumns), [columns, plotColumns])
-  const hoverCtx = useContext(HoverContext)
 
   // `+ bandwidth()/2` is mandatory. `useHoverSync`'s nearest-point loop compares the pointer against
   // `xScale(getKey(d))`, and `scaleBand` returns the band's LEFT edge — passing `scale` raw biases
   // every snap by half a column, which at 288 columns is a systematic one-bucket-early cursor.
   const bandCenter = useCallback(
-    (label: string) => {
-      const v = scale(label)
+    (key: string) => {
+      const v = scale(key)
       return v === undefined ? undefined : v + scale.bandwidth() / 2
     },
     [scale],
   )
+  // The `resolveKey` seam, and the reason this file no longer reads `HoverContext` itself. The hook
+  // resolves a sibling's broadcast key by exact string match against its own drawn points, which on
+  // a folded chart misses two keys in three; this overrides just that lookup. It was previously
+  // done by reading the context directly and shadowing the hook's own `syncedPoint` — same result,
+  // but it duplicated the hook's provider-vs-standalone fallback (`tip?.data ?? null`) at the call
+  // site, where it could drift from the hook's.
+  const resolveKey = useCallback((key: string) => sourceIndex.get(key) ?? null, [sourceIndex])
 
   // This strip's own docblock has claimed since it was written that it shares a hover cursor with the
   // plots below, and pinned PLOT_LEFT to match their gutter for exactly that reason. The alignment
   // shipped; the sync did not — it was on bare `useChartTooltip` and the provider mounted around the
-  // whole chart region never saw it. Its label is already the same `bucketAxisLabel` over the same
-  // window the latency chart gets, so the key space needed no design, only wiring.
-  const { tip, tooltipRef, isDirectHover, handleMouse, handleLeave } = useHoverSync<PlotColumn>({
+  // whole chart region never saw it. Its key is the same bucket ISO start `densifyBuckets` gives
+  // the latency chart over the same window, so the key space needed no design, only wiring.
+  const { tip, tooltipRef, syncedPoint, isDirectHover, handleMouse, handleLeave } = useHoverSync<PlotColumn>({
     data: plotColumns,
     chartId: 'availability-strip',
-    getKey: getColumnLabel,
+    getKey: getColumnKey,
     xScale: bandCenter,
     // `localPoint` returns SVG-viewport coordinates, so this is PLOT_LEFT even though the overlay
     // sits inside the translated <g>.
     marginLeft: plotLeft,
+    resolveKey,
   })
-  // Resolved through `sourceIndex`, not `useHoverSync`'s own `syncedPoint` — see the hook's return
-  // and `sourceIndex`'s docblock for why the hook's own Map misses a key this chart itself folded
-  // away.
-  const syncedPoint = hoverCtx.key ? (sourceIndex.get(hoverCtx.key) ?? null) : (tip?.data ?? null)
 
   if (width < plotLeft + plotRight + 20 || plotColumns.length === 0) return null
 
@@ -342,26 +364,21 @@ function StripPlot({
           })}
           {syncedPoint && (
             <Crosshair
-              x={(scale(syncedPoint.label) ?? 0) + scale.bandwidth() / 2}
+              x={(scale(syncedPoint.key) ?? 0) + scale.bandwidth() / 2}
               top={0}
               bottom={STRIP_HEIGHT}
             />
           )}
-          <PointerOverlay
-            width={plotWidth}
-            height={STRIP_HEIGHT}
-            onMove={handleMouse}
-            onLeave={handleLeave}
-            active={tip !== null || syncedPoint !== null}
-          />
+          <HoverOverlay width={plotWidth} height={STRIP_HEIGHT} onMove={handleMouse} onLeave={handleLeave} />
           {/* `axisTickValues` rather than basalt's own `smartTicks`, for the reason its docblock
               gives: `smartTicks` appends the final value unconditionally and the last two labels
-              land on top of each other. The labels are pre-formatted by `bucketAxisLabel` and pass
-              through `fmtAxisDate` untouched — see `lib/axis.ts`. */}
+              land on top of each other. The tick VALUES are ISO bucket starts (the scale's domain);
+              `bucketTickFormat` turns each into the time a reader sees — see `lib/axis.ts`. */}
           <AxisBottomDate
             scale={scale}
             top={STRIP_HEIGHT}
-            tickValues={axisTickValues(labels, plotWidth, AXIS_LABEL_PX)}
+            tickValues={axisTickValues(keys, plotWidth, AXIS_LABEL_PX)}
+            tickFormat={bucketTickFormat(bucketSeconds)}
           />
         </g>
       </svg>
@@ -382,7 +399,7 @@ function StripPlot({
       {!isDirectHover && syncedPoint !== null && syncedPoint.bucket !== null && (
         <SyncedTip
           svgRef={svgRef}
-          x={plotLeft + (scale(syncedPoint.label) ?? 0) + scale.bandwidth() / 2}
+          x={plotLeft + (scale(syncedPoint.key) ?? 0) + scale.bandwidth() / 2}
           styles={tooltipStyles}
         >
           <TooltipBody>

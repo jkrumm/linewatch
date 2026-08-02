@@ -413,6 +413,7 @@ function DashboardPage() {
                         from={from}
                         to={to}
                         bucketSeconds={bucket}
+                        isPending={seriesPending}
                       />
                     </GuidedChart>
                     <CoverageCallout summary={outageData === undefined ? 'pending' : (outageData.summary ?? null)} />
@@ -507,6 +508,7 @@ function DashboardPage() {
                       from={from}
                       to={to}
                       bucketSeconds={bucket}
+                      isPending={seriesPending}
                       overlay={{ label: 'Router', buckets: bucketsByTarget.get('gateway') ?? [] }}
                       renderExtraTooltipRows={(b) => {
                         const fold = internetByBucket.get(b.bucket)
@@ -539,6 +541,7 @@ function DashboardPage() {
                           from={from}
                           to={to}
                           bucketSeconds={bucket}
+                          isPending={seriesPending}
                           outages={allOutageData?.outages.filter((o) =>
                             name === 'gateway' ? o.scope === 'gateway' : o.scope === 'wan',
                           )}
@@ -578,23 +581,33 @@ function DashboardPage() {
                 key: 'runs',
                 label: 'Every run',
                 render: () => (
-                  // Its own provider, and this is not defensive tidiness. This chart's own x-axis is
-                  // runs, not clock time (`SpeedChart`'s own subtitle says so), but `runAxisLabels`
-                  // still emits the `DD.MM HH:MM` string space `bucketAxisLabel` produces for every
-                  // sub-day bucket — so on the 24 h range a run whose minute is a bucket start (14:05,
-                  // 14:10) would broadcast a key the latency band owns and cast a cursor on it, while
-                  // a run at 14:07 would cast nothing. A cursor that appears for some runs and not
-                  // others, with no rule the reader can infer, is worse than no cursor. The label
-                  // cannot be prefixed out of the collision: in `MultiLine` it is the scale domain,
-                  // the hover key AND the visible tooltip header, all three at once. Applies to the
-                  // two chart bodies whose axis can produce that string — this one and
-                  // `BufferbloatChart` below (`grep -rn runAxisLabels src/charts/`). The 30-day
-                  // pattern view and the by-hour heatmap draw fixed `HOUR_LABELS` on bare
-                  // `useChartTooltip` instead — that collision can't reach them, so they stay
-                  // outside any provider.
+                  // Its own provider, and the reason is now the design rather than a key collision.
+                  // This chart's x-axis is runs, not clock time (`SpeedChart`'s own subtitle says
+                  // so), so a cursor shared with the time-series charts above would line up two
+                  // axes that do not correspond — `BufferbloatChart`'s subtitle promises the
+                  // opposite in as many words.
+                  //
+                  // It used to be a collision as well, and that half is gone: `runAxisLabels` emits
+                  // the same `DD.MM HH:MM` string space `bucketAxisLabel` produced, so a run landing
+                  // on a bucket start (14:05, 14:10) broadcast a key the latency band owned while a
+                  // run at 14:07 broadcast nothing — a cursor appearing on some runs and not others,
+                  // with no rule a reader could infer. The bucketed charts key on the bucket's ISO
+                  // start now (basalt-ui 1.9.0's `tickFormat` freed the label from being the domain
+                  // value), so the two key spaces can no longer intersect. The isolation stays
+                  // because the axes still mean different things.
+                  //
+                  // Applies to the two chart bodies on `MultiLine`, whose label IS the domain, the
+                  // hover key and the tooltip header at once — this one and `BufferbloatChart`
+                  // below (`grep -rn runAxisLabels src/charts/`). The 30-day pattern view and the
+                  // by-hour heatmap draw fixed `HOUR_LABELS` on bare `useChartTooltip`, so they
+                  // never join a provider at all.
                   <ChartHoverSync>
                     <Stack gap="md">
-                      <SpeedChart tests={tests ?? []} refLines={throughputRefLines(status?.vantage, router, nowTick)} />
+                      <SpeedChart
+                        tests={tests ?? []}
+                        refLines={throughputRefLines(status?.vantage, router, nowTick)}
+                        isPending={testsPending}
+                      />
                       <ServerChangeNote tests={tests ?? []} isPending={testsPending} />
                     </Stack>
                   </ChartHoverSync>
@@ -603,7 +616,9 @@ function DashboardPage() {
               {
                 key: 'by-hour',
                 label: 'By hour of day',
-                render: () => <SpeedHeatmap tests={tests ?? []} from={from} to={to} />,
+                render: () => (
+                  <SpeedHeatmap tests={tests ?? []} from={from} to={to} isPending={testsPending} />
+                ),
               },
               {
                 key: 'under-load',
@@ -611,7 +626,7 @@ function DashboardPage() {
                 render: () => (
                   // Same isolation as the 'Every run' view above — see that comment.
                   <ChartHoverSync>
-                    <BufferbloatChart tests={tests ?? []} />
+                    <BufferbloatChart tests={tests ?? []} isPending={testsPending} />
                   </ChartHoverSync>
                 ),
               },
@@ -698,7 +713,13 @@ function DashboardPage() {
                   // still interpolated it in, reading "Link speed over time · 24h" directly under a
                   // view tab that already says "Link speed over time".
                   <GuidedChart title="Link speed over time" copy={LINK_SPEED_COPY}>
-                    <LinkSpeedStrip vantage={vantageSeries} from={from} to={to} bucketSeconds={bucket} />
+                    <LinkSpeedStrip
+                      vantage={vantageSeries}
+                      from={from}
+                      to={to}
+                      bucketSeconds={bucket}
+                      isPending={seriesPending}
+                    />
                   </GuidedChart>
                 ),
               },

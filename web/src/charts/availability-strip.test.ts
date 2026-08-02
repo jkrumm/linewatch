@@ -20,8 +20,8 @@ function bucket(over: Partial<ProbeBucket> = {}): ProbeBucket {
   }
 }
 
-function column(label: string, value: ProbeBucket | null) {
-  return { key: label, bucketStart: Number(label), label, bucket: value }
+function column(key: string, value: ProbeBucket | null) {
+  return { key, bucketStart: Number(key), bucket: value }
 }
 
 describe('foldColumns', () => {
@@ -73,7 +73,7 @@ describe('foldColumns', () => {
     // The precondition `foldSourceIndex` depends on: every source column accounted for.
     expect(folded.reduce((sum, f) => sum + f.foldedFrom, 0)).toBe(columns.length)
     const index = foldSourceIndex(columns, folded)
-    expect(columns.every((c) => index.has(c.label))).toBe(true)
+    expect(columns.every((c) => index.has(c.key))).toBe(true)
   })
 
   /** The tooltip's own arithmetic: `downCycles` and `count` sum across the fold (additive, like a

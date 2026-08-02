@@ -1,5 +1,4 @@
 import { densifyBuckets } from './densify'
-import { bucketAxisLabel } from './axis'
 import type { ProbeBucketSeconds, ThroughputBucket } from './types'
 
 /**
@@ -15,8 +14,11 @@ import type { ProbeBucketSeconds, ThroughputBucket } from './types'
  *   column is real but understates. Marked, never silently drawn as though complete.
  */
 export interface ThroughputPoint {
+  /** The bucket's ISO start, from `densifyBuckets`. The chart's scale domain, its hover key and
+   * `foldSourceIndex`'s key — an identity, never a rendering. The axis label is derived from it at
+   * draw time by `bucketTickFormat`; this type used to carry a pre-formatted `label` beside it
+   * because `AxisBottomDate` took no `tickFormat` and there was no other way to reach the axis. */
   key: string
-  label: string
   bucketStart: number
   downBytesPerS: number | null
   upBytesPerS: number | null
@@ -45,12 +47,10 @@ export function throughputPoints(
   opts: { from: number; to: number; bucketSeconds: ProbeBucketSeconds },
 ): ThroughputPoint[] {
   return densifyBuckets([...buckets], opts).map((slot) => {
-    const label = bucketAxisLabel(slot.bucketStart, opts.bucketSeconds)
     const row = slot.value
     if (row === null || row.spanMs <= 0) {
       return {
         key: slot.key,
-        label,
         bucketStart: slot.bucketStart,
         downBytesPerS: null,
         upBytesPerS: null,
@@ -65,7 +65,6 @@ export function throughputPoints(
     const seconds = row.spanMs / 1000
     return {
       key: slot.key,
-      label,
       bucketStart: slot.bucketStart,
       downBytesPerS: row.inBytes / seconds,
       upBytesPerS: row.outBytes / seconds,

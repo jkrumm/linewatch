@@ -4,7 +4,7 @@ import { densifyBuckets } from '../lib/densify'
 import { PROBE_CYCLE_MS } from '../lib/range'
 import { fmtPct } from '../lib/format'
 import { CategoryGrid, type GridCell } from './category-grid'
-import { ChartPending } from './chart-pending'
+import { PendingChart } from './pending'
 
 /**
  * The bucket size this grid is a grid OF. Exported so the route's query and the chart cannot
@@ -106,8 +106,8 @@ export function AvailabilityHeatmap({
           the height itself is already computed (`rows.length * 15`), not fixed — this only stops it
           from momentarily reporting 0 before the first measurement. */}
       <div style={{ minHeight: 220 }}>
-        {isPending ? (
-          <ChartPending height={gridHeight} />
+        {isPending === true ? (
+          <PendingChart height={gridHeight} />
         ) : (
           <ResponsiveChart height={gridHeight}>
             {({ width, height }) => (

@@ -39,20 +39,34 @@ tree to keep Mantine-free and no bridge file to own — `BasaltProvider` already
 color scheme to the `--vx-*` CSS variables charts read internally. Just compose the shipped
 primitives/kinds and pull color from `VX.*`/`alpha()` (`basalt-ui/tokens`).
 
+`check-theme`'s `inline-display` and `raw-html-layout` guards don't fire inside a chart file
+either — both remedies point at a Mantine layout primitive (`Flex`/`Grid`/`Group`/`Box`), which the
+Mantine-free boundary above already forbids there, so the finding would be unactionable. Reach for
+`ChartCenter` (below, under "Pending state") when a chart file needs to center something.
+
 ## Every chart has
 
 1. **ChartCard** wrapper — gives title + info-tooltip + extra slot, consistent margin.
 2. **ChartLegend** — never hand-rolled legend markup. Supports `line | bar | split | splitLine`
    shapes and optional highlight state.
 3. **ChartTooltip** + `TooltipHeader` + `TooltipRow` + `TooltipBody` — never `@visx/tooltip` directly.
+   Portals to `document.body` (SSR-guarded: renders nothing when `document` is undefined), so it
+   can be authored anywhere in the tree, including inside an `<svg>`. A plain `<div>` there used to
+   mount in the SVG namespace — accepting every prop, throwing nothing, typechecking, passing lint
+   — and never paint; one consumer shipped eight authored tooltip rows no one had ever seen. The
+   portal also un-breaks `position: fixed` under a transformed ancestor.
 4. **AxisLeftNumeric** / **AxisRightNumeric** + **AxisBottomDate** — never raw `<AxisLeft>`/`<AxisBottom>`/`<AxisRight>`
    (they miss theme tokens + smart ticks). Enforced by `basalt-ui check-theme` (`raw-visx-axis` guard
    fails the build on a raw axis in a `/charts/` file; escape via `theme-allow`), not just convention.
-5. **HoverOverlay** for mouse capture, **HoverContext** for cross-chart crosshair sync,
-   **useChartTooltip** for tip state, **useHoverSync** for the shared cursor. Wrap a group of
-   date-aligned charts in **ChartHoverSync** (from `basalt-ui/charts`) to activate cross-chart sync —
-   hovering one chart casts a ghost crosshair on all siblings; without it `useHoverSync` runs
-   per-chart only and logs a dev warning:
+   `AxisBottomDate` takes an optional `tickFormat` (`TickFormatter<string>`, defaults to
+   `fmtAxisDate` — `DD.MM`) — the only supported exit for a sub-day window, where the default
+   collapses every tick to the same label and a raw `<AxisBottom>` isn't an option.
+5. **HoverOverlay** for pointer capture (mouse + touch + pen — `touch-action: pan-y` lets vertical
+   page scroll pass through while a horizontal drag scrubs the chart), **HoverContext** for
+   cross-chart crosshair sync, **useChartTooltip** for tip state, **useHoverSync** for the shared
+   cursor. Wrap a group of date-aligned charts in **ChartHoverSync** (from `basalt-ui/charts`) to
+   activate cross-chart sync — hovering one chart casts a ghost crosshair on all siblings; without
+   it `useHoverSync` runs per-chart only and logs a dev warning:
 
    ```tsx
    <ChartHoverSync>
@@ -61,11 +75,66 @@ primitives/kinds and pull color from `VX.*`/`alpha()` (`basalt-ui/tokens`).
    </ChartHoverSync>
    ```
 
+   Sync is exact string match on the broadcast key by default, so two charts share a cursor only
+   when they emit identical key strings. A chart that folds/downsamples its domain for a narrow
+   viewport stops owning most of the keys its unfolded siblings broadcast — the shared crosshair
+   then lands on roughly one hover in three, worse than no shared cursor at all. Pass
+   `useHoverSync`'s `resolveKey` to map a foreign key onto whichever of this chart's own points
+   swallowed it; it only affects reading a SIBLING's broadcast key, never this chart's own hover:
+
+   ```tsx
+   useHoverSync({
+     data: foldedData,
+     chartId: 'load-mobile',
+     getKey: (d) => d.bucketKey,
+     xScale,
+     marginLeft,
+     // ~288 daily buckets folded into ~97 columns at this width — map an unfolded sibling's key
+     // onto the folded bucket that swallowed it.
+     resolveKey: (key) => pointByKey.get(foldKey(key)) ?? null,
+   })
+   ```
+
 6. **Theme-aware colors** via `VX.*` tokens + `alpha()`. **Never** a raw hex literal in a chart file.
    **Never** `localStorage.getItem('theme')` — the scheme resolves via CSS vars (see Dark/light below).
 
 **Exemption:** sparklines (`LineSparkline`, `BarSparkline` — tiny inline charts with no legend/tooltip)
 don't have to compose ChartCard/ChartLegend/ChartTooltip — but still use `VX.*` tokens.
+
+## Pending state (`isPending`)
+
+"Nothing to draw" is three states, not two: **measured-and-empty**, **measured-and-absent** (a
+genuine coverage gap), and **not-asked-yet** (the query hasn't resolved). The `data ?? []` idiom
+collapses the third into the second — an in-flight query renders as a fully-hatched "not measured"
+window, a positive claim the series was watched and carried nothing. Pass `isPending` instead of
+faking an empty array:
+
+```tsx
+import { Bars } from 'basalt-ui/charts'
+;<Bars
+  data={data ?? []}
+  isPending={query.isPending}
+  chartId="load"
+  getX={(d) => d.date}
+  getY={(d) => d.load}
+/>
+```
+
+All seven kinds accept `isPending` and forward it to `ChartFrame` (`Heatmap` handles it locally —
+it composes no `ChartFrame`, taking `width`/`height` directly rather than measuring). `ChartFrame`
+with `isPending` renders `ChartPending` over the plot rect in place of `children`, suppresses the
+legend entirely (a legend naming a series with nothing yet to point at is its own small lie), and
+sets `aria-busy="true"` on the outer container.
+
+`ChartPending` reserves the plot's exact footprint and draws **nothing** that could be mistaken for
+a measurement — no axes, no gridlines, no hatching, no marks, no animation (the motion doctrine
+bans idle pulsing) — just a faint, static, centered label (`ChartPendingProps.label`, default
+`'Loading…'`).
+
+`ChartCenter` (also exported from `./charts`) is the centering primitive `ChartPending` is built
+on — it exists only because chart files can't import Mantine's `Center`/`Flex`. Reach for it
+directly in a bespoke chart file the same way; it's deliberately minimal (`width`, `height`,
+`children`, nothing else), not a general layout system.
 
 ## Kinds — the recurring shapes
 

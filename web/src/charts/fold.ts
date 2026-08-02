@@ -11,11 +11,23 @@
  * full space the unfolded broadcaster uses, so every key it can possibly send resolves to the
  * folded column that contains it.
  *
+ * **This is the map behind `useHoverSync`'s `resolveKey` seam, and the fold is why the seam is
+ * ours to fill.** basalt-ui 1.9.0 added the override precisely because a downsampling chart cannot
+ * resolve a sibling's key by string equality; what a fold *is* on this dashboard — which source
+ * buckets a drawn column stands for, and the `foldedFrom` count that says so — stays domain
+ * knowledge the framework has no way to compute. Charts pass `resolveKey: (key) =>
+ * index.get(key) ?? null` and stop reading `HoverContext` themselves.
+ *
+ * Keyed by the bucket's ISO start (`Slot.key`), which is the scale's domain value and therefore
+ * the broadcast hover key. It used to be the axis label, back when a pre-formatted label had to
+ * double as the domain value to reach `AxisBottomDate` at all; `tickFormat` ended that coupling
+ * (see `lib/axis.ts`), so the key is now an identity rather than a rendering.
+ *
  * Built by walking `folded` and consuming exactly `foldedFrom` source columns per entry — true for
  * every `fold*` function in this directory (each builds its groups by consecutive slicing over the
  * source array), regardless of the aggregation rule inside a group.
  */
-export function foldSourceIndex<S extends { label: string }, F extends { foldedFrom: number }>(
+export function foldSourceIndex<S extends { key: string }, F extends { foldedFrom: number }>(
   source: readonly S[],
   folded: readonly F[],
 ): Map<string, F> {
@@ -24,7 +36,7 @@ export function foldSourceIndex<S extends { label: string }, F extends { foldedF
   for (const column of folded) {
     for (let i = 0; i < column.foldedFrom; i++) {
       const sourceColumn = source[cursor]
-      if (sourceColumn !== undefined) index.set(sourceColumn.label, column)
+      if (sourceColumn !== undefined) index.set(sourceColumn.key, column)
       cursor++
     }
   }

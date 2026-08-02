@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test'
-import { AXIS_LABEL_PX, axisTickValues, bucketAxisLabel, fitTickCount, runAxisLabels } from './axis'
+import {
+  AXIS_LABEL_PX,
+  axisTickValues,
+  bucketAxisLabel,
+  bucketTickFormat,
+  fitTickCount,
+  runAxisLabels,
+} from './axis'
 
 const JUL_31_2026_2305 = Date.UTC(2026, 6, 31, 23, 5)
 
@@ -13,11 +20,17 @@ describe('bucketAxisLabel', () => {
   })
 
   /**
-   * The bug this year suffix exists for, and the reason the uniqueness test below starts in August
-   * rather than January. The `all` range is 365 days, so a window opened on 1 August ends on 1
-   * August: without the year both endpoints render `01.08`, collide as scale keys, and one of them
-   * is silently dropped from the chart. The original test started on 1 January, where 365 daily
-   * buckets never wrap, and passed while the dashboard was visibly stacking two ticks at one x.
+   * The bug this year suffix exists for, and the reason the distinctness test below starts in
+   * August rather than January. The `all` range is 365 days, so a window opened on 1 August ends
+   * on 1 August: without the year both endpoints render `01.08`. The original test started on 1
+   * January, where 365 daily buckets never wrap, and passed while the dashboard was visibly
+   * stacking two ticks at one x.
+   *
+   * The *consequence* changed with basalt-ui 1.9.0 and the tests below are kept anyway. When the
+   * label was also the scale's domain value, a collision dropped a measurement. Now the domain is
+   * the bucket's ISO start and a collision drops nothing — it just prints one date for two
+   * readings a year apart, which a reader cannot disambiguate. Silent data loss became a legibility
+   * bug; neither is acceptable, and the format that fixes both is the same one.
    */
   test('a year-long daily window does not repeat a label at its two ends', () => {
     const aug1 = Date.UTC(2025, 7, 1)
@@ -36,10 +49,14 @@ describe('bucketAxisLabel', () => {
   })
 
   /**
-   * The load-bearing property. The label is the band scale's key, so two buckets sharing one label
-   * collapse onto a single x position and one of them stops being drawn — a measurement dropped
-   * without a trace. `HH:MM` alone would fail this: a 24 h window contains each clock time twice at
-   * its two ends.
+   * Every bucket in a full window reads differently from every other. `HH:MM` alone would fail
+   * this: a 24 h window contains each clock time twice at its two ends.
+   *
+   * This was the load-bearing property back when the label doubled as the band scale's key — two
+   * buckets sharing one collapsed onto a single x position and one stopped being drawn. It is now
+   * a legibility property (see the year-suffix test above), which is why it survives the
+   * decoupling rather than moving to `key`: `throughput.test.ts` asserts uniqueness of the scale
+   * key separately, on the field that is actually the key.
    */
   test.each([
     ['5-minute buckets over 24h', 300, 288],
@@ -53,6 +70,19 @@ describe('bucketAxisLabel', () => {
     const start = Date.UTC(2025, 7, 1)
     const labels = Array.from({ length: count }, (_, i) => bucketAxisLabel(start + i * bucketSeconds * 1000, bucketSeconds))
     expect(new Set(labels).size).toBe(count)
+  })
+
+  /**
+   * The bridge the four bucketed charts actually pass to `AxisBottomDate`: it takes the scale's
+   * domain value (an ISO bucket start, straight out of `densifyBuckets`) and returns the label.
+   * Pinning it matters because the two halves are now separately owned — a chart could hold a
+   * perfectly good ISO domain and still print `Invalid Date` across its axis if the parse and the
+   * emitter ever disagreed about the format, and nothing else in the suite would notice.
+   */
+  test('bucketTickFormat renders a densified ISO key as its bucket label', () => {
+    const iso = new Date(JUL_31_2026_2305).toISOString()
+    expect(bucketTickFormat(300)(iso)).toBe('31.07 23:05')
+    expect(bucketTickFormat(86_400)(iso)).toBe('31.07.26')
   })
 
   /** The exact failure the date prefix prevents, stated directly. */

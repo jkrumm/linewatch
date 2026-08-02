@@ -226,10 +226,15 @@ function VerdictBody({ group }: { group: VerdictGroup }) {
  * line, and it must not be reported inside a finding as though it were.
  */
 function EvidenceLink({ id }: { id: string }) {
+  const [, setCompact] = useCompactMode()
   const section = VERDICT_SECTION[id]
   if (section === undefined) return null
   return (
-    <Anchor href={`#${sectionAnchor(section)}`} size="xs">
+    // Leaving compact is not a side effect here, it is the link working. Compact drops the
+    // Path & hardware section outright and every section's heading, so a bare `#anchor` would
+    // scroll to a block the reader cannot identify — or, for Path & hardware, to nothing at all.
+    // A verdict that points somewhere must land somewhere.
+    <Anchor href={`#${sectionAnchor(section)}`} size="xs" onClick={() => setCompact(false)}>
       See the {SECTION_LABEL[section]} section ↓
     </Anchor>
   )

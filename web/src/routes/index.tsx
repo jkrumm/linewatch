@@ -16,6 +16,7 @@ import {
   verdictsQuery,
 } from '../lib/queries'
 import { StatusBar, type KpiWindow } from '../components/status-bar'
+import { useCompactMode } from '../lib/compact'
 import { VerdictPanel } from '../components/verdict-panel'
 import { PageHeader } from '../components/page-header'
 import { Section } from '../components/section'
@@ -142,6 +143,7 @@ export const Route = createFileRoute('/')({
 })
 
 function DashboardPage() {
+  const [compact] = useCompactMode()
   const search = Route.useSearch()
   const navigate = useNavigate()
 
@@ -288,7 +290,10 @@ function DashboardPage() {
   const rangeLabel = RANGE_LABEL[search.range]
 
   return (
-    <Stack gap="lg">
+    // `sm` between sections in compact, `lg` otherwise. With the heading rows gone the `lg` gap is
+    // the only thing left separating one section's charts from the next's, and at that size it
+    // reads as dead space rather than as a boundary — the card edges already do the separating.
+    <Stack gap={compact ? 'sm' : 'lg'}>
       <PageHeader
         range={search.range}
         onRangeChange={(range) => setSearch({ range })}
@@ -680,6 +685,10 @@ function DashboardPage() {
             ]}
           />
 
+          {/* Dropped whole in compact — the one section whose content is reference rather than a
+              reading, which is also why it is the only `collapsible` one. A verdict that points
+              here leaves compact first, so the anchor still lands (see `EvidenceLink`). */}
+          {compact ? null : (
           <Section
             id="path"
             meta={<StatStrip stats={pathStats(status?.vantage, nowTick)} />}
@@ -741,6 +750,7 @@ function DashboardPage() {
               },
             ]}
           />
+          )}
         </Stack>
       </ChartHoverSync>
     </Stack>

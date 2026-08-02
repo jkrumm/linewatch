@@ -3,6 +3,7 @@ import type { SpeedTest } from '../lib/types'
 import { fmtMbps } from '../lib/format'
 import { AXIS_LABEL_PX, fitTickCount, runAxisLabels } from '../lib/axis'
 import { PendingChart } from './pending'
+import { useCompactMode } from '../lib/compact'
 
 /**
  * 190, matching `latency-band-chart`'s — the chart directly above this one on the page, and the
@@ -12,6 +13,17 @@ import { PendingChart } from './pending'
  * at two different heights read as a layout accident, and the taller one is the one carrying less.
  */
 const SPEED_HEIGHT = 190
+
+/**
+ * Compact draws this one chart shorter, and only this one.
+ *
+ * It is the chart with the least shape to lose: two near-flat traces plus two horizontal reference
+ * lines, where the reading is *where they sit* against the references, not the wiggle. The latency
+ * band and the throughput bars are the opposite — spikes and gaps are the whole content and 130px
+ * would flatten them into a smear. So the height reduction is per-chart rather than a global
+ * scale factor.
+ */
+const SPEED_HEIGHT_COMPACT = 130
 
 /**
  * A horizontal reference at a rate the line is measured against — the host's negotiated link speed,
@@ -76,6 +88,8 @@ export function SpeedChart({
   // chart: run timestamps are whatever the cron fired at, not a grid.
   const labels = runAxisLabels(ordered.map((t) => t.ts))
   const points = ordered.map((test, i) => ({ test, label: labels[i] ?? '' }))
+  const [compact] = useCompactMode()
+  const height = compact ? SPEED_HEIGHT_COMPACT : SPEED_HEIGHT
 
   return (
     <ChartCard
@@ -96,11 +110,11 @@ export function SpeedChart({
           the same reason. Left to its default, every one of a 24 h window's runs got a tick and the
           axis rendered as one unbroken smear of overlapping timestamps. */}
       {/* See `availability-strip.tsx`'s identical wrapper for why this is a floor, not a height. */}
-      <div style={{ minHeight: SPEED_HEIGHT }}>
+      <div style={{ minHeight: height }}>
         {isPending === true ? (
-          <PendingChart height={SPEED_HEIGHT} />
+          <PendingChart height={height} />
         ) : (
-          <ResponsiveChart height={SPEED_HEIGHT}>
+          <ResponsiveChart height={height}>
             {({ width }) => {
               // The *plot* width, not the container's: `MultiLine` spends `VX.margin` on its axes, and
               // sizing the tick count off the outer width overestimates by 60 px. Harmless at 1600 px
@@ -145,7 +159,7 @@ export function SpeedChart({
                   }))}
                   yDomain="auto"
                   formatValue={fmtMbps}
-                  height={SPEED_HEIGHT}
+                  height={height}
                 />
               )
             }}

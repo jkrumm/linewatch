@@ -249,6 +249,19 @@ anyone they disagreed.
   does not scope is the 30-day heatmap, and it says so on itself. A section's
   *evidence* may sit behind a named view switch; a **conclusion never may** — every
   verdict renders in the band above the sections, unconditionally.
+- **Compact mode is the one control that can hide part of the page, and what it
+  may hide is declared, not decided per block.** `lib/compact.ts` holds the split
+  and the reasoning; `lib/compact.contract.test.ts` pins the half that matters by
+  grepping `verdict-panel.tsx` for a gate its critical/warn lists must never
+  acquire. It is a source test on purpose — `createPersistedState` is SSR-safe, so
+  compact always resolves to `false` under `renderToStaticMarkup` and a render test
+  could only ever observe the non-compact branch. Two consequences worth holding:
+  a section's heading and its view switch share one `space-between` row whose
+  height is the switch's, so they go together or not at all — hiding the title
+  alone saves nothing; and because compact drops the Path & hardware section
+  outright, `EvidenceLink` **leaves compact** rather than merely scrolling, and
+  `Section` re-scrolls on mount while the hash still names it. A verdict that
+  points somewhere has to land somewhere.
 - **A chart's axis label and its scale key are two different things — keep them
   that way.** `AxisBottomDate` takes a `tickFormat` as of 1.9.0, so the four
   bespoke charts keep the bucket's ISO start as their scale domain (and therefore

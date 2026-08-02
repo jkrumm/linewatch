@@ -1,5 +1,3 @@
-import { ActionIcon, Tooltip } from '@mantine/core'
-import { IconLayoutList, IconLayoutRows } from '@tabler/icons-react'
 import { createPersistedState } from 'basalt-ui/state'
 
 /**
@@ -14,10 +12,23 @@ import { createPersistedState } from 'basalt-ui/state'
  *
  * - **Hidden:** the per-section stat strips (`Section.meta`), the *informational* coverage rows
  *   (`CoverageCallout`'s `kind === 'info'` branch — "Coverage 100.0% — 2880 of 2880 expected cycles
- *   recorded", which is the statement that nothing is wrong), `ServerChangeNote`, and the routine
- *   verdict group.
+ *   recorded", which is the statement that nothing is wrong), `ServerChangeNote`, the routine
+ *   verdict group, each section's heading row (title AND view switch — see below), and the
+ *   Path & hardware section entirely.
  * - **Never hidden:** the status bar, the verdict band's critical and warn findings, the `warn`/`bad`
- *   coverage callouts, section headings, the view switches, and the charts.
+ *   coverage callouts, and the charts.
+ *
+ * **The heading row goes as a unit, and it has to.** The title and the view switch share one
+ * `Group justify="space-between"` whose height is set by the taller of the two — the switch. Hiding
+ * the title alone therefore saves nothing at all; hiding both saves the row. The cost is real and
+ * accepted: a reader in compact cannot reach a section's other views (the outage table, per-target
+ * latency, the 30-day pattern). Compact is the mode for watching, not for reading evidence, and the
+ * switch is one click away in the other mode.
+ *
+ * **Path & hardware is dropped whole** rather than reduced. It is the one section whose content is
+ * reference — hardware that has not changed since the machine was plugged in — which is why it is
+ * also the only `collapsible` one. It is also the reason `SectionLink` below leaves compact rather
+ * than merely scrolling.
  *
  * The routine group is the one judgement call in that list, and it is a judgement call, not an
  * oversight. `triageVerdicts` sorts findings into critical / warn / routine, and *routine* means, by
@@ -37,30 +48,3 @@ export const useCompactMode = createPersistedState({
   version: 1,
   initial: false,
 })
-
-/**
- * The toggle, drawn beside the theme switch because it belongs to the same family: a per-reader
- * display preference that changes nothing about what was measured.
- *
- * The icon names the state you get by pressing it, not the state you are in — the same convention
- * basalt's `ThemeToggle` uses — and the tooltip says it in words, because an icon pair whose
- * difference is line spacing is not self-evident either way round.
- */
-export function CompactToggle() {
-  const [compact, setCompact] = useCompactMode()
-  const label = compact ? 'Show detail' : 'Compact — charts and findings only'
-
-  return (
-    <Tooltip label={label} events={{ hover: true, focus: true, touch: true }}>
-      <ActionIcon
-        variant="default"
-        size="lg"
-        aria-label={label}
-        aria-pressed={compact}
-        onClick={() => setCompact(!compact)}
-      >
-        {compact ? <IconLayoutList size={18} /> : <IconLayoutRows size={18} />}
-      </ActionIcon>
-    </Tooltip>
-  )
-}

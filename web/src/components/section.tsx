@@ -125,15 +125,25 @@ export function Section({
    * that flips the stored preference to open, once, and every later press of the chevron is
    * theirs again. `VerdictPanel` renders a plain `#section-…` anchor, which is why this listens to
    * the hash rather than to the verdict set.
+   *
+   * **It also re-scrolls, and that half only matters in compact.** Compact drops this section
+   * outright, so a verdict link clicked there fires the browser's own hash scroll against a
+   * document that does not contain the target yet — `EvidenceLink` leaves compact in the same
+   * click, and by the time this section mounts the scroll has already happened and landed short.
+   * Scrolling once on mount, only while the hash still names us, puts the reader where the link
+   * promised. It is a no-op on a normal in-page click (the browser has already scrolled to the
+   * same element) and on a cold load with a hash (same).
    */
   useEffect(() => {
     if (!collapsible) return
+    const targeted = () => window.location.hash === `#${sectionAnchor(id)}`
     const openIfTargeted = () => {
-      if (window.location.hash !== `#${sectionAnchor(id)}`) return
+      if (!targeted()) return
       if (overridesRef.current[id] === true) return
       setOverrides({ ...overridesRef.current, [id]: true })
     }
     openIfTargeted()
+    if (targeted()) document.getElementById(sectionAnchor(id))?.scrollIntoView()
     window.addEventListener('hashchange', openIfTargeted)
     return () => window.removeEventListener('hashchange', openIfTargeted)
   }, [collapsible, id, setOverrides])
@@ -148,6 +158,11 @@ export function Section({
     // (mobile) value on purpose: too much margin leaves air above the heading, too little hides it.
     <Box component="section" id={sectionAnchor(id)} style={{ scrollMarginTop: 'var(--lw-header-h, 96px)' }}>
       <Stack gap="sm">
+        {/* The heading row goes as a UNIT in compact — title and view switch together. They share
+            this `space-between` Group and its height is set by the taller of the two (the switch),
+            so hiding the title alone would save exactly nothing. What that costs is stated in
+            `lib/compact.tsx`: a compact reader cannot reach a section's other views. */}
+        {compact ? null : (
         <Group justify="space-between" align="flex-end" wrap="wrap" gap="xs">
           {/* The whole heading is the target when it can fold, not a chevron beside it — a 16px hit
               area for the one control that decides whether a third of the page is drawn is the kind
@@ -220,6 +235,7 @@ export function Section({
             </>
           )}
         </Group>
+        )}
         {/* `meta` stays outside the FOLD — a collapsed section that reports nothing at all is a
             heading and a chevron, and the reader has to open it to learn whether it was worth
             opening. Its headline figures are what makes folding safe.

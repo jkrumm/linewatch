@@ -192,7 +192,7 @@ env: ## Ensure the bearer token, the router password (if any) and .env exist (id
 	mv .env.tmp .env; \
 	chmod 600 .env
 
-up: env marker ## Ensure the token, .env and data volume exist, build, and (re)start the stack. Safe to re-run any time.
+up: env marker ## THE deploy: token + .env + volume, build (API and dashboard), recreate, wait for health, prove the container is your working tree. Safe to re-run any time.
 	@# `container_name: linewatch` is a fixed name, so a container started by a
 	@# *different* compose project — a sibling worktree, a renamed directory, an
 	@# interrupted run — holds that name without being tracked here. Compose then
@@ -227,6 +227,26 @@ up: env marker ## Ensure the token, .env and data volume exist, build, and (re)s
 		sleep 2; \
 	done; \
 	echo "TIMED OUT — check: make logs"; exit 1
+	@# Assert, don't nuke. `bun run build` writes web/dist on the host and a dev
+	@# server serves it — neither is a deploy, and on 2026-08-02 that shipped a
+	@# dashboard two generations stale with nothing reporting it. This compares
+	@# the image's baked-in fingerprint against the working tree's
+	@# (scripts/codesum.ts) and catches staleness from any cause in ~1s.
+	@printf "  verifying the container is your working tree… "
+	@HOST=$$(bun scripts/codesum.ts src web/src 2>/dev/null); \
+	CONT=$$(docker exec linewatch cat /app/.codesum 2>/dev/null); \
+	if [ -z "$$HOST" ]; then \
+		echo "FAILED"; echo "  ✗ could not fingerprint the working tree — is bun on PATH?"; exit 1; \
+	elif [ -z "$$CONT" ]; then \
+		echo "FAILED"; echo "  ✗ the running image carries no /app/.codesum — it predates this check, so it is not this build."; exit 1; \
+	elif [ "$$HOST" != "$$CONT" ]; then \
+		echo "MISMATCH"; \
+		echo "  ✗ the running container is NOT your working tree — diagnose, do not rebuild past it."; \
+		echo "      working tree: $$HOST"; \
+		echo "      container:    $$CONT"; \
+		exit 1; \
+	fi; \
+	echo "ok ($$HOST)"
 	@echo "✓ linewatch up — http://127.0.0.1:7731"
 
 down: ## Stop the stack

@@ -41,6 +41,20 @@ const STRIP_HEIGHT = 44
  */
 const AXIS_HEIGHT = 22
 
+/**
+ * Horizontal room the edge axis labels need, in px.
+ *
+ * The strip drew its columns edge to edge and its bottom axis centred each label on its own tick,
+ * so the first label — the window's start time, the one fact the axis exists to give — was cut in
+ * half by the left edge of the SVG and the last by the right. Half a label width on each side is
+ * what a centred label at x=0 needs; `AXIS_LABEL_PX` is the width `bucketAxisLabel`'s richest form
+ * measures, so half of it is exactly the inset. The left side takes the wider of that and the
+ * chart gutter the plots below use, so the strip's columns line up with theirs — they share a
+ * hover cursor, and two time axes that start at different x are two axes the eye cannot compare.
+ */
+const PLOT_LEFT = Math.max(56, Math.round(AXIS_LABEL_PX / 2))
+const PLOT_RIGHT = Math.round(AXIS_LABEL_PX / 2)
+
 type Column = {
   key: string
   bucketStart: number
@@ -127,11 +141,12 @@ function StripPlot({
   // The band scale is built before the width guard's early return so the hook order above it stays
   // fixed; `scaleBand` is a plain call, not a hook, so this is only ordering hygiene for readers.
   const labels = columns.map((c) => c.label)
-  const scale = scaleBand<string>({ domain: labels, range: [0, width] })
+  const plotWidth = Math.max(0, width - PLOT_LEFT - PLOT_RIGHT)
+  const scale = scaleBand<string>({ domain: labels, range: [0, plotWidth] })
 
-  if (width < 20 || columns.length === 0) return null
+  if (width < PLOT_LEFT + PLOT_RIGHT + 20 || columns.length === 0) return null
 
-  const step = width / columns.length
+  const step = plotWidth / columns.length
   const barWidth = Math.max(step - 1, 1)
 
   return (
@@ -145,29 +160,33 @@ function StripPlot({
         <defs>
           <HatchPattern id={absentHatchId} color={VX.neutral} opacity={0.7} size={5} />
         </defs>
-        {columns.map((column, i) => (
-          <rect
-            key={column.key}
-            x={i * step}
-            y={0}
-            width={barWidth}
-            height={STRIP_HEIGHT}
-            rx={1}
-            fill={columnFill(column.bucket, absentHatchId)}
-            style={{ cursor: 'pointer' }}
-            onMouseMove={(e) => show(column, e)}
-            onMouseLeave={hide}
+        {/* Columns and axis share one translated group, so the axis ticks land under the columns
+            they label — the inset is the plot's origin, not a decoration applied to one of them. */}
+        <g transform={`translate(${PLOT_LEFT}, 0)`}>
+          {columns.map((column, i) => (
+            <rect
+              key={column.key}
+              x={i * step}
+              y={0}
+              width={barWidth}
+              height={STRIP_HEIGHT}
+              rx={1}
+              fill={columnFill(column.bucket, absentHatchId)}
+              style={{ cursor: 'pointer' }}
+              onMouseMove={(e) => show(column, e)}
+              onMouseLeave={hide}
+            />
+          ))}
+          {/* `axisTickValues` rather than basalt's own `smartTicks`, for the reason its docblock
+              gives: `smartTicks` appends the final value unconditionally and the last two labels
+              land on top of each other. The labels are pre-formatted by `bucketAxisLabel` and pass
+              through `fmtAxisDate` untouched — see `lib/axis.ts`. */}
+          <AxisBottomDate
+            scale={scale}
+            top={STRIP_HEIGHT}
+            tickValues={axisTickValues(labels, plotWidth, AXIS_LABEL_PX)}
           />
-        ))}
-        {/* `axisTickValues` rather than basalt's own `smartTicks`, for the reason its docblock
-            gives: `smartTicks` appends the final value unconditionally and the last two labels
-            land on top of each other. The labels are pre-formatted by `bucketAxisLabel` and pass
-            through `fmtAxisDate` untouched — see `lib/axis.ts`. */}
-        <AxisBottomDate
-          scale={scale}
-          top={STRIP_HEIGHT}
-          tickValues={axisTickValues(labels, width, AXIS_LABEL_PX)}
-        />
+        </g>
       </svg>
       <ChartTooltip tip={tip} tooltipRef={tooltipRef} styles={tooltipStyles}>
         {tip && (

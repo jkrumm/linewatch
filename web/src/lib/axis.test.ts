@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { AXIS_LABEL_PX, axisTickValues, bucketAxisLabel, fitTickCount } from './axis'
+import { AXIS_LABEL_PX, axisTickValues, bucketAxisLabel, fitTickCount, runAxisLabels } from './axis'
 
 const JUL_31_2026_2305 = Date.UTC(2026, 6, 31, 23, 5)
 
@@ -151,5 +151,42 @@ describe('fitTickCount', () => {
    * crowded label, so the ceiling is returned rather than the axis being gutted. */
   test('falls back to the ceiling when nothing clears', () => {
     expect(fitTickCount(300, 11, 120)).toBe(11)
+  })
+})
+
+describe('runAxisLabels', () => {
+  const at = (iso: string) => Date.parse(iso)
+
+  test('labels a run to the minute, in UTC', () => {
+    expect(runAxisLabels([at('2026-08-01T14:03:41Z')])).toEqual(['01.08 14:03'])
+  })
+
+  test('is index-aligned with its input and preserves order', () => {
+    const labels = runAxisLabels([at('2026-08-01T14:03:00Z'), at('2026-08-01T09:00:00Z')])
+    expect(labels).toEqual(['01.08 14:03', '01.08 09:00'])
+  })
+
+  test('breaks a same-minute collision on every member of the group, not only the later one', () => {
+    // A label doubles as the categorical scale's key: two runs sharing one would collapse onto a
+    // single x position and one of them would stop being drawn.
+    const labels = runAxisLabels([at('2026-08-01T14:03:07Z'), at('2026-08-01T14:03:41Z')])
+    expect(labels).toEqual(['01.08 14:03:07', '01.08 14:03:41'])
+    expect(new Set(labels).size).toBe(2)
+  })
+
+  test('leaves uncolliding labels at minute precision while a colliding pair gains seconds', () => {
+    // Mixed precision across the axis is the cost of not dropping a point; mixed precision *within*
+    // a colliding pair would read as a difference in the measurement, which is why the whole group
+    // is disambiguated together.
+    const labels = runAxisLabels([
+      at('2026-08-01T09:00:00Z'),
+      at('2026-08-01T14:03:07Z'),
+      at('2026-08-01T14:03:41Z'),
+    ])
+    expect(labels).toEqual(['01.08 09:00', '01.08 14:03:07', '01.08 14:03:41'])
+  })
+
+  test('an empty series has no labels', () => {
+    expect(runAxisLabels([])).toEqual([])
   })
 })

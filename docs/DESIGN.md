@@ -409,7 +409,7 @@ in-process timer, so restarting the container cannot reset the budget.
 | `GET /api/probes?from&to&target&bucket` | server-bucketed timeseries: median of medians, max loss, p5/p95 band, plus a parallel per-bucket `vantage` series |
 | `GET /api/outages?from&to&minDuration` | list, plus a range `summary` when both bounds are given |
 | `GET /api/speedtests?from&to` | list |
-| `GET /api/speedtests/summary?days` | p50/p95 down/up, best, worst |
+| `GET /api/speedtests/summary?days` | p50/p95 down/up, best, worst. **Not used by the dashboard** — `days` is whole days against the server's own clock, so it cannot answer for the page's selected window; the Speed section computes its percentiles from the run list above. Kept for API consumers that want a fixed-day figure. |
 | `POST /api/speedtests/run` | trigger one now (no bearer; 429 within 5 min of the last run) |
 | `GET /api/events?from&to&kind` | timeline overlay, plus `linkSamplingSince` — without it an empty array reads as "the link held" |
 | `POST /api/interventions` | record a manual action — power-cycle, cable swap — as an `intervention` event (bearer) |
@@ -444,9 +444,36 @@ monitoring down with it.
 
 ## Dashboard
 
-basalt-ui (Mantine v9) + visx, per the `/dataviz` conventions. Five views:
+basalt-ui (Mantine v9) + visx, per the `/dataviz` conventions.
 
-- **Now** — current state, ongoing outage if any, the verdict set, last speed
+**One page, one range control, no navigation chrome.** This was five routes, then
+one route with four tabs, then one route with five stacked sections each hiding a
+second screenful behind a disclosure. What each attempt bought and cost is in
+`web/src/routes/index.tsx`'s docblock; what settled is worth stating here because
+it constrains everything below.
+
+- **Every figure on the page is taken over the window the range control selects.**
+  The one exception is the 30-day availability heatmap, whose shape is a fixed
+  hour × day grid, and it says so on itself. The speed percentiles are computed
+  client-side from the runs inside the window (`web/src/lib/speed-stats.ts`)
+  rather than read from `GET /api/speedtests/summary`, whose `days` parameter is
+  anchored to the server's clock and takes whole days — on the 1 h range it
+  answered for a day while every other number answered for an hour.
+- **A section's evidence lives behind a named view switch, never behind a chevron
+  saying "Details".** The reader can see what each cut contains without opening
+  it, and the *primary* view is the one a verdict's "see the Uptime section" link
+  lands on.
+- **No conclusion is ever behind a switch.** Every rule the engine fires renders
+  in the verdict band above every section, unconditionally.
+- **The three anchors are folded.** The primary latency chart is one band over
+  the median-across-anchors of each statistic, with the router's own median drawn
+  over it — see `foldInternetBuckets` for what each field folds by and why
+  `down_cycles` takes a provable lower bound rather than a plausible guess. Every
+  anchor is still drawn separately in the section's other view.
+
+The five sections, in reading order:
+
+- **Now** (the strip above the sections) — current state, ongoing outage if any, the verdict set, last speed
   test, 24 h availability strip. Two states are not derived from the absence of an outage
   row: a collector that stopped reporting is its own non-green banner (no cycle
   ingested means no outage row can ever open, so "no outage" is not "up"), and a
@@ -469,8 +496,15 @@ basalt-ui (Mantine v9) + visx, per the `/dataviz` conventions. Five views:
   verdict — because the headline is only true to the extent the window was
   measured.
 - **Latency** — SmokePing-style band: median line, p5–p95 shaded, loss as colour.
+  Drawn once over the folded internet series with the router overlaid, and again
+  per target in the section's other view.
 - **Speed** — download/upload over time, hourly heatmap, loaded-vs-idle latency.
-- **Vantage** — what the line is being measured *through*. The current cycle's
+  Runs are plotted oldest-first: `GET /api/speedtests` answers newest-first,
+  which is right for a list and backwards for a time axis.
+- **Throughput** — what the line actually carried, differenced from the interface
+  counters. A different question from Speed, and the two must never be read as
+  one: a quiet night reads as near-zero here and says nothing about capacity.
+- **Path & hardware** — what the line is being measured *through*. The current cycle's
   interface, path class, negotiated media/speed/duplex, the NIC's supported
   ceiling, gateway and DHCP bind time, with `on_home_line: null` rendered as an
   "unknown" chip and never a check mark. Then the carrier's sync rate beside the

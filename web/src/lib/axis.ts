@@ -120,3 +120,35 @@ export function bucketAxisLabel(ts: number, bucketSeconds: ProbeBucketSeconds): 
   const mi = String(d.getUTCMinutes()).padStart(2, '0')
   return `${dd}.${mm} ${hh}:${mi}`
 }
+
+/**
+ * Axis labels for a series drawn one point per event rather than one per bucket.
+ *
+ * The bucketed charts get uniqueness for free: `bucketAxisLabel` is injective over a grid whose
+ * step is at least a minute. A speed-test series has no grid — the runs land wherever the cron
+ * fired, two can share a minute after a manual run, and the label doubles as the categorical
+ * scale's key. Two points sharing a key collapse onto one x position and one of them stops being
+ * drawn, which is a measurement silently dropped.
+ *
+ * So collisions are broken by appending a seconds field to *every* label in a colliding group,
+ * rather than only to the later ones. Disambiguating just the duplicate would put `01.08 14:03`
+ * and `01.08 14:03:41` side by side on one axis, and a reader comparing them would take the
+ * difference in precision for a difference in the measurement.
+ *
+ * Order is preserved and the output is index-aligned with the input, because the caller zips it
+ * back onto the runs it came from.
+ */
+export function runAxisLabels(timestamps: readonly number[]): string[] {
+  const minuteLabel = (ts: number) => bucketAxisLabel(ts, 60)
+  const counts = new Map<string, number>()
+  for (const ts of timestamps) {
+    const label = minuteLabel(ts)
+    counts.set(label, (counts.get(label) ?? 0) + 1)
+  }
+
+  return timestamps.map((ts) => {
+    const label = minuteLabel(ts)
+    if ((counts.get(label) ?? 0) <= 1) return label
+    return `${label}:${String(new Date(ts).getUTCSeconds()).padStart(2, '0')}`
+  })
+}

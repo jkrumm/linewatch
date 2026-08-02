@@ -4,7 +4,6 @@ import {
   getOutages,
   getProbeBuckets,
   getRouter,
-  getSpeedSummary,
   getSpeedTests,
   getStatus,
   getThroughput,
@@ -52,13 +51,6 @@ export const speedTestsQuery = (params: { from: number; to: number }) =>
   queryOptions({
     queryKey: ['speedtests', params.from, params.to],
     queryFn: () => getSpeedTests(params),
-    staleTime: 60_000,
-  })
-
-export const speedSummaryQuery = (days: number) =>
-  queryOptions({
-    queryKey: ['speedtests-summary', days],
-    queryFn: () => getSpeedSummary(days),
     staleTime: 60_000,
   })
 

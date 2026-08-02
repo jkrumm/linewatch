@@ -1,5 +1,7 @@
 import { useMemo } from 'react'
+import { scaleBand } from '@visx/scale'
 import {
+  AxisBottomDate,
   ChartTooltip,
   ResponsiveChart,
   TooltipBody,
@@ -15,16 +17,36 @@ import type { ProbeBucketSeconds, VantageBucket } from '../lib/types'
 import type { LinkBucketState } from '../lib/vantage'
 import { linkBucketState } from '../lib/vantage'
 import { densifyBuckets } from '../lib/densify'
+import { AXIS_LABEL_PX, axisTickValues, bucketAxisLabel } from '../lib/axis'
 import { HatchPattern, hatchFill } from './hatch'
 
 const STRIP_HEIGHT = 44
+
+/**
+ * Room for the time axis this strip used to do without.
+ *
+ * It drew 289 columns of link state with no x-axis at all, so "the NIC renegotiated" was legible
+ * and *when* it renegotiated was only recoverable by hovering the right column — on a chart whose
+ * entire subject is a moment in time. The inset is half a label width on each side, because the
+ * edge labels are centred on their own ticks and would otherwise be cut by the SVG's edges; the
+ * left side takes the wider of that and the plot gutter the charts above use, so the two time axes
+ * on this page start at the same x and can be read against each other.
+ */
+const PLOT_LEFT = Math.max(56, Math.round(AXIS_LABEL_PX / 2))
+const PLOT_RIGHT = Math.round(AXIS_LABEL_PX / 2)
+const AXIS_HEIGHT = 22
 
 /** The height of the transition marker, as a fraction of the strip. It is drawn as a full-height
  * bar of its own colour rather than a value, so it cannot be read off the intensity ramp. */
 const MARKER_INSET = 6
 
 type Column = {
+  /** ISO-8601 of the bucket start — what the tooltip's own date formatting reads. */
   key: string
+  /** The pre-formatted axis label, which is also the band scale's domain value. `AxisBottomDate`
+   * takes no `tickFormat` and reduces an ISO string to `DD.MM`, so this is the only way a time of
+   * day reaches the axis — the same mechanism `availability-strip.tsx` uses. */
+  label: string
   state: LinkBucketState
 }
 
@@ -58,6 +80,7 @@ export function LinkSpeedStrip({
     () =>
       densifyBuckets(vantage, { from, to, bucketSeconds }).map((slot) => ({
         key: slot.key,
+        label: bucketAxisLabel(slot.bucketStart, bucketSeconds),
         state: linkBucketState(slot.value),
       })),
     [vantage, from, to, bucketSeconds],
@@ -73,71 +96,73 @@ export function LinkSpeedStrip({
   }, [columns])
 
   return (
-    <ResponsiveChart height={STRIP_HEIGHT}>
-      {({ width, height }) => (
-        <StripPlot columns={columns} maxMbit={maxMbit} width={width} height={height} />
-      )}
+    <ResponsiveChart height={STRIP_HEIGHT + AXIS_HEIGHT}>
+      {({ width }) => <StripPlot columns={columns} maxMbit={maxMbit} width={width} />}
     </ResponsiveChart>
   )
 }
 
-function StripPlot({
-  columns,
-  maxMbit,
-  width,
-  height,
-}: {
-  columns: Column[]
-  maxMbit: number
-  width: number
-  height: number
-}) {
+function StripPlot({ columns, maxMbit, width }: { columns: Column[]; maxMbit: number; width: number }) {
   const tooltipStyles = useTooltipStyles()
   const { tip, show, hide, tooltipRef } = useChartTooltip<Column>()
   const absentHatchId = 'link-speed-strip-absent'
 
-  if (width < 20 || columns.length === 0) return null
+  const labels = columns.map((c) => c.label)
+  const plotWidth = Math.max(0, width - PLOT_LEFT - PLOT_RIGHT)
+  const scale = scaleBand<string>({ domain: labels, range: [0, plotWidth] })
 
-  const step = width / columns.length
+  if (width < PLOT_LEFT + PLOT_RIGHT + 20 || columns.length === 0) return null
+
+  const height = STRIP_HEIGHT
+  const step = plotWidth / columns.length
   const barWidth = Math.max(step - 1, 1)
 
   return (
     <div style={{ position: 'relative' }}>
       <svg
         width={width}
-        height={height}
+        height={STRIP_HEIGHT + AXIS_HEIGHT}
         role="img"
         aria-label="Negotiated link speed per bucket, with unmeasured buckets hatched and renegotiations marked rather than averaged"
       >
         <defs>
           <HatchPattern id={absentHatchId} color={VX.neutral} opacity={0.7} size={5} />
         </defs>
-        {columns.map((column, i) => (
-          <g key={column.key}>
-            <rect
-              x={i * step}
-              y={0}
-              width={barWidth}
-              height={height}
-              rx={1}
-              fill={columnFill(column.state, maxMbit, absentHatchId)}
-              style={{ cursor: 'pointer' }}
-              onMouseMove={(e) => show(column, e)}
-              onMouseLeave={hide}
-            />
-            {column.state.kind === 'transition' && (
+        <g transform={`translate(${PLOT_LEFT}, 0)`}>
+          {columns.map((column, i) => (
+            <g key={column.key}>
               <rect
                 x={i * step}
-                y={MARKER_INSET}
+                y={0}
                 width={barWidth}
-                height={Math.max(2, height - 2 * MARKER_INSET)}
+                height={height}
                 rx={1}
-                fill={VX.warnSolid}
-                pointerEvents="none"
+                fill={columnFill(column.state, maxMbit, absentHatchId)}
+                style={{ cursor: 'pointer' }}
+                onMouseMove={(e) => show(column, e)}
+                onMouseLeave={hide}
               />
-            )}
-          </g>
-        ))}
+              {column.state.kind === 'transition' && (
+                <rect
+                  x={i * step}
+                  y={MARKER_INSET}
+                  width={barWidth}
+                  height={Math.max(2, height - 2 * MARKER_INSET)}
+                  rx={1}
+                  fill={VX.warnSolid}
+                  pointerEvents="none"
+                />
+              )}
+            </g>
+          ))}
+          {/* `axisTickValues` rather than `smartTicks`, for the reason its docblock gives: the latter
+            appends the final value unconditionally and the last two labels overlap. */}
+          <AxisBottomDate
+            scale={scale}
+            top={STRIP_HEIGHT}
+            tickValues={axisTickValues(labels, plotWidth, AXIS_LABEL_PX)}
+          />
+        </g>
       </svg>
       <ChartTooltip tip={tip} tooltipRef={tooltipRef} styles={tooltipStyles}>
         {tip && (

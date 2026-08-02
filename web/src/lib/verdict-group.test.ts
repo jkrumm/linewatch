@@ -5,7 +5,6 @@ import type { Verdict } from './types'
 function verdict(patch: Partial<Verdict> & Pick<Verdict, 'id'>): Verdict {
   return {
     severity: 'info',
-    title: `${patch.id} title`,
     conclusion: `${patch.id} conclusion`,
     evidence: [{ label: 'e', value: '1' }],
     action: null,
@@ -19,9 +18,9 @@ describe('groupVerdicts', () => {
    * remove must actually collapse, not just render tidier. */
   test('collapses a run of same-id verdicts into one group', () => {
     const groups = groupVerdicts([
-      verdict({ id: 'carrier_resync_dated', title: 'resync at t1' }),
-      verdict({ id: 'carrier_resync_dated', title: 'resync at t2' }),
-      verdict({ id: 'carrier_resync_dated', title: 'resync at t3' }),
+      verdict({ id: 'carrier_resync_dated', conclusion: 'resync at t1' }),
+      verdict({ id: 'carrier_resync_dated', conclusion: 'resync at t2' }),
+      verdict({ id: 'carrier_resync_dated', conclusion: 'resync at t3' }),
     ])
     expect(groups).toHaveLength(1)
     expect(groups[0].instances).toHaveLength(3)
@@ -47,22 +46,21 @@ describe('groupVerdicts', () => {
    * arrive — otherwise a milder sentence that happened to arrive first would understate the group. */
   test('the representative is the first instance at the worst severity, not the first overall', () => {
     const groups = groupVerdicts([
-      verdict({ id: 'r', severity: 'info', title: 'mild, arrived first' }),
-      verdict({ id: 'r', severity: 'critical', title: 'severe, arrived second' }),
-      verdict({ id: 'r', severity: 'critical', title: 'severe, arrived third' }),
+      verdict({ id: 'r', severity: 'info', conclusion: 'mild, arrived first' }),
+      verdict({ id: 'r', severity: 'critical', conclusion: 'severe, arrived second' }),
+      verdict({ id: 'r', severity: 'critical', conclusion: 'severe, arrived third' }),
     ])
-    expect(groups[0].title).toBe('severe, arrived second')
+    expect(groups[0].conclusion).toBe('severe, arrived second')
   })
 
   /** A group of 1 has to be indistinguishable in render from an ungrouped verdict — the panel
    * relies on this to render every group the same way regardless of `instances.length`. */
   test('a single verdict yields a group of 1 carrying its own fields verbatim', () => {
-    const solo = verdict({ id: 'r', title: 'only one', conclusion: 'the only conclusion' })
+    const solo = verdict({ id: 'r', conclusion: 'the only conclusion' })
     const groups = groupVerdicts([solo])
     expect(groups).toHaveLength(1)
     expect(groups[0]).toMatchObject({
       id: 'r',
-      title: 'only one',
       conclusion: 'the only conclusion',
       instances: [solo],
     })

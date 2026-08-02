@@ -1045,7 +1045,6 @@ export function generateVerdicts(from: number, to: number): Verdict[] {
     verdicts.push({
       id: 'probe_coverage_low',
       severity: 'critical',
-      title: `This window is only ${coveragePct.toFixed(1)}% measured`,
       conclusion: `Only ${summary.recordedCycles} of the ${summary.expectedCycles} probe cycles this ${hours} h window should hold were recorded (${coveragePct.toFixed(1)}%). The rest of the window was not measured, which is not the same as up.`,
       evidence: [
         { label: 'Recorded cycles', value: String(summary.recordedCycles) },
@@ -1061,7 +1060,6 @@ export function generateVerdicts(from: number, to: number): Verdict[] {
     verdicts.push({
       id: 'symmetric_loss_not_line',
       severity: 'info',
-      title: `${summary.degradedCycles} loss cycles hit every WAN anchor at once`,
       conclusion: `${summary.degradedCycles} cycles lost at least ${summary.degradedLossPct}% on every WAN anchor at once without any anchor going silent.`,
       evidence: [
         { label: 'Degraded cycles', value: String(summary.degradedCycles) },

@@ -81,14 +81,17 @@ export function VerdictPanel({ verdicts }: { verdicts: Verdict[] }) {
 }
 
 /**
- * `group.title`, never `group.id`. The id is a rule name — `throughput_exceeds_link`,
- * `sub_cycle_path_stall` — and titling a conclusion with one makes the reader decode a slug before
- * they can find out whether anything is wrong. The title is templated server-side by the rule that
- * knows the numbers, for the same reason nothing else in this file is authored here.
+ * `group.conclusion`, never `group.id`. The id is a rule name — `throughput_exceeds_link`,
+ * `sub_cycle_path_stall` — and titling a finding with one makes the reader decode a slug before
+ * they can find out whether anything is wrong. The API sends no separate headline field (see
+ * `Verdict` in `lib/types.ts`), and the conclusion is templated server-side by the rule that knows
+ * the numbers, for the same reason nothing else in this file is authored here — so it doubles as
+ * the title. `VerdictBody` does not repeat it underneath: unlike `VerdictRow` below, nothing here
+ * clips it, so there is nothing left over to show in full.
  */
 function VerdictCallout({ group }: { group: VerdictGroup }) {
   return (
-    <Callout kind={CALLOUT_KIND[group.severity]} title={group.title}>
+    <Callout kind={CALLOUT_KIND[group.severity]} title={group.conclusion}>
       <VerdictBody group={group} />
     </Callout>
   )
@@ -98,10 +101,13 @@ function VerdictCallout({ group }: { group: VerdictGroup }) {
  * A finding drawn as one line, expanding in place to the same body the full card shows.
  *
  * Used for every `warn` and for each routine finding once the disclosure is open. Collapsed it
- * carries the severity accent, the rule's own title, and the occurrence count — enough to decide
- * whether to open it, and nothing that needs reading twice. Nothing is summarised away: opening it
- * yields the identical `VerdictBody` the callout renders, so the compact form costs the reader no
- * information, only a click.
+ * carries the severity accent, the rule's conclusion, and the occurrence count — enough to decide
+ * whether to open it, and nothing that needs reading twice. The collapsed line is `lineClamp={1}`:
+ * a compact row exists to stay compact, and an unclamped conclusion (these run to a full sentence
+ * with cited numbers) would make a "collapsed" row three lines tall. That clamp is lossy, so —
+ * unlike `VerdictCallout`, whose title is never clamped and whose body therefore does not repeat
+ * it — the expanded body here shows the conclusion again in full, unclamped, before the rest of
+ * `VerdictBody`. Opening the row costs the reader no information, only a click.
  */
 function VerdictRow({ group }: { group: VerdictGroup }) {
   const [opened, { toggle }] = useDisclosure(false)
@@ -120,8 +126,8 @@ function VerdictRow({ group }: { group: VerdictGroup }) {
       <UnstyledButton onClick={toggle} aria-expanded={opened} w="100%" px="sm" py={8}>
         <Group gap="xs" wrap="nowrap" align="center">
           <Chevron size={14} color={VX.faint} aria-hidden="true" />
-          <Text size="sm" style={{ flex: 1, minWidth: 0 }}>
-            {group.title}
+          <Text size="sm" lineClamp={1} style={{ flex: 1, minWidth: 0 }}>
+            {group.conclusion}
           </Text>
           {/* The count is on the collapsed row on purpose: "×4" is the difference between one event
               and a pattern, and it is the one fact the reader cannot recover without opening. */}
@@ -134,18 +140,24 @@ function VerdictRow({ group }: { group: VerdictGroup }) {
       </UnstyledButton>
       <Collapse expanded={opened}>
         <Box px="sm" pb="sm" pl={34}>
-          <VerdictBody group={group} />
+          <Stack gap={8}>
+            {/* Unclamped, unlike the collapsed line above — see the comment on this component. */}
+            <Text size="sm">{group.conclusion}</Text>
+            <VerdictBody group={group} />
+          </Stack>
         </Box>
       </Collapse>
     </Box>
   )
 }
 
-/** Everything under a finding's title, identical whichever size it was reached at. */
+/** Everything under a finding's headline, identical whichever size it was reached at. The
+ * conclusion itself is not repeated here — `VerdictCallout` puts it in the `Callout`'s `title`
+ * and `VerdictRow` renders it separately above this (see that component's doc comment) — so this
+ * body starts at the evidence. */
 function VerdictBody({ group }: { group: VerdictGroup }) {
   return (
     <Stack gap={8}>
-      <Text size="sm">{group.conclusion}</Text>
       <EvidenceList evidence={group.evidence} />
       {/*
         `uncertainty` is the sentence saying why a cause was withheld — typically that link
@@ -196,14 +208,15 @@ function EvidenceLink({ id }: { id: string }) {
  * about them. Renders nothing for a group of 1 — that group must be indistinguishable in render
  * from an ungrouped verdict.
  *
- * Only a count label and the other instances' own `title` strings are shown. No connective prose
- * beyond the label: this layer selects, it does not write a new sentence describing the repetition.
+ * Only a count label and the other instances' own `conclusion` strings are shown. No connective
+ * prose beyond the label: this layer selects, it does not write a new sentence describing the
+ * repetition.
  */
 function OtherOccurrences({ group }: { group: VerdictGroup }) {
   if (group.instances.length <= 1) return null
 
-  // The representative is whichever instance supplied `group.title`/etc — the first one at the
-  // group's (worst) severity. Everything else in `instances` is an "other occurrence".
+  // The representative is whichever instance supplied `group.conclusion`/etc — the first one at
+  // the group's (worst) severity. Everything else in `instances` is an "other occurrence".
   const representativeIndex = group.instances.findIndex((instance) => instance.severity === group.severity)
   const others = group.instances.filter((_, index) => index !== representativeIndex)
 
@@ -214,7 +227,7 @@ function OtherOccurrences({ group }: { group: VerdictGroup }) {
       </Text>
       {others.map((instance, index) => (
         <Text key={`${group.id}-other-${index}`} size="xs" c="dimmed" pl="sm">
-          {instance.title}
+          {instance.conclusion}
         </Text>
       ))}
     </Stack>

@@ -20,9 +20,19 @@ import { fmtBytes, fmtDateTime, fmtRate } from '../lib/format'
 import { AXIS_LABEL_PX, axisTickValues } from '../lib/axis'
 import { HatchPattern, hatchFill } from './hatch'
 
-const CHART_HEIGHT = 240
+// 180, not 240. This is a two-sided bar chart with three y ticks per half and no line to trace,
+// so the extra 60 px bought no resolution — it bought a section that pushed the one below it off
+// the fold on a laptop. The dashboard's other full-width plot (the latency band, which does have a
+// curve worth the pixels) is 190.
+const CHART_HEIGHT = 180
 const AXIS_HEIGHT = 22
-const LEFT_GUTTER = 56
+/**
+ * Room for this chart's y labels, which are rates rather than plain numbers: `fmtRate` produces
+ * `1.0 MB/s` and `400 kB/s`, eight characters at the 11 px axis font. At 56 px the widest of them
+ * rendered with its leading character cut off by the SVG's left edge — and a clipped rate label is
+ * worse than a missing one, because `.0 MB/s` still reads as a number.
+ */
+const LEFT_GUTTER = 72
 
 /**
  * Down and up on one mirrored axis: download below the baseline, upload above it.

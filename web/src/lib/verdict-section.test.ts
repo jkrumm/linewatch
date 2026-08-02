@@ -6,8 +6,7 @@ function v(id: string, severity: Severity = 'warn'): Verdict {
   return {
     id,
     severity,
-    title: `${id} fired`,
-    conclusion: 'x',
+    conclusion: `${id} fired`,
     evidence: [{ label: 'l', value: 'v' }],
     action: null,
     uncertainty: null,

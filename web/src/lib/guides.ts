@@ -77,21 +77,28 @@ export const LATENCY_BAND_COPY: ChartCopy = {
   ],
 }
 
-export const LATENCY_COMPARE_COPY: ChartCopy = {
-  subtitle: 'Your router against the internet — which side of the router the slowness is on.',
-  tooltip: 'Ping to the router vs the median ping to three internet anchors, one point per bucket.',
+export const INTERNET_LATENCY_COPY: ChartCopy = {
+  subtitle: 'The three internet anchors as one band, with the router drawn over it.',
+  tooltip: 'Internet RTT — median, p5–p95 spread and worst ping, folded across three anchors — against the router.',
   guide: [
     {
-      body: 'Two lines, because the per-target charts answer one question by comparison and this draws that comparison directly: is the latency on your side of the router or past it? A router line that rises with the internet line is a local problem; an internet line that rises alone is not.',
+      body: 'One band, not three. Cloudflare, Google and Quad9 answer the same question between them — how far away is the internet from this machine — and three near-identical traces stacked on top of each other invite a comparison that is almost never meaningful. Switch to Per target when you want to see an anchor disagree with the other two.',
     },
-    { lead: 'Router', body: 'is a single target, so its line is a reading rather than an aggregate.' },
     {
-      lead: 'Internet',
-      body: 'is the median of whichever of the three anchors answered in that bucket — Cloudflare, Google and Quad9 — because they answer one question between them and three near-identical traces invite a comparison that is almost never meaningful. A median and not a mean, so one badly routed anchor moves it far less than it would move an average. The tooltip states how many anchors the median was taken over, because a one-anchor median and a three-anchor median are different claims and the line cannot show which it drew. An anchor that did not answer is skipped, never counted as zero.',
+      lead: 'The band is the fold, statistic by statistic.',
+      body: 'Median, p5 and p95 are each the median across the anchors that reported them — a median and not a mean, so one badly routed anchor moves it far less than it would move an average, and an anchor that did not answer is skipped rather than counted as zero. The outer line is the slowest single ping any anchor saw, taken as the maximum, because it is the only stored witness of a sub-cycle stall and a median across anchors would erase one.',
     },
-    { lead: 'Dots mark buckets that lost packets', body: 'anywhere — router or anchor.' },
     {
-      body: "No p5–p95 band here: overlapping bands on a shared axis are unreadable. Each target is still drawn in full, with its band, behind this section's per-target toggle.",
+      lead: 'The plain line over the band is the router.',
+      body: 'It is a single target, so it is a reading rather than an aggregate, and it is what tells a local problem from one past your line: a router line that rises with the band is on your side of the router, an internet band that rises alone is not.',
+    },
+    {
+      lead: 'Loss is the internet-wide figure, not the worst anchor.',
+      body: 'One dead anchor out of three is not an internet outage and is not drawn as one; the tooltip names the worst single anchor separately. A bucket is only marked as fully down when the rows prove every anchor was down for the same cycles.',
+    },
+    {
+      lead: 'Hatched columns were not measured at all.',
+      body: 'A different fact from a bucket with no loss, and drawn differently on purpose — the collector being down produces no outage rows, so an unmeasured window would otherwise render as a flawless one.',
     },
   ],
 }

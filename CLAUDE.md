@@ -172,7 +172,26 @@ an invariant of importing the client.
 - This is a public repo: no real MAC, hostname, ISP name, city, public IP or
   credential in tracked files, fixtures and tests included.
 - The dashboard's fetch layer has a single `USE_MOCK` switch. Keep it working;
-  it is how the UI is developed before real data accumulates.
+  it is how the UI is developed before real data accumulates. **The mock must not
+  be more generous than the API** — it once returned a `title` on every verdict
+  that the server has never sent, so the whole verdict band shipped with empty
+  headlines and the client's own type said the field was required.
+- **The dashboard is one page, one range control, and no navigation chrome.** Do
+  not add a route, a sidebar or a second range selector; the five-route version
+  re-scoped the data silently as the reader navigated, which is why it is gone
+  (`web/src/routes/index.tsx`'s docblock has the full history). Every figure is
+  taken over the selected window — including the Speed percentiles, which are
+  computed client-side (`lib/speed-stats.ts`) precisely because
+  `GET /api/speedtests/summary` only takes whole days. The one block the range
+  does not scope is the 30-day heatmap, and it says so on itself. A section's
+  *evidence* may sit behind a named view switch; a **conclusion never may** — every
+  verdict renders in the band above the sections, unconditionally.
+- **Charts pre-format their own x-axis labels.** basalt's `AxisBottomDate` takes
+  no `tickFormat` and reduces an ISO string to `DD.MM`, so a 24 h window drew
+  `01.08` a dozen times. `lib/axis.ts`'s `bucketAxisLabel`/`runAxisLabels` produce
+  the label, and it doubles as the scale's domain value — which is why both
+  guarantee uniqueness. Two points sharing a domain value collapse onto one x
+  position and one stops being drawn: a measurement silently dropped.
 
 ## Validation
 

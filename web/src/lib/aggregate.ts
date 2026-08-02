@@ -109,6 +109,101 @@ export function toComparePoints(
 }
 
 /**
+ * The three WAN anchors folded into one series, in `ProbeBucket`'s own shape.
+ *
+ * Carries two fields a real bucket has no need for, because a folded bucket can misread in two
+ * ways a single target's cannot: the reader cannot tell a three-anchor median from a one-anchor
+ * median, and cannot tell "the internet lost packets" from "one anchor did".
+ */
+export type InternetBucket = ProbeBucket & {
+  /** How many anchors reported anything at all in this bucket. Never 0 — a bucket no anchor
+   * reported is not emitted. */
+  anchors: number
+  /** The worst aggregate loss any single anchor reported. `lossPct` is the median across anchors
+   * and is the internet-wide figure; this is the outlier the median deliberately ignores. */
+  worstAnchorLossPct: number
+}
+
+/**
+ * Fold Cloudflare, Google and Quad9 into one "internet" bucket series.
+ *
+ * The dashboard drew these three as three near-identical stacked bands, and reading them meant
+ * comparing three curves by eye to answer a question none of them asks individually: how bad is
+ * the path off this machine. One anchor's own trace matters only when it disagrees with the other
+ * two, which is a detail view's job — the per-target charts still draw all four in full.
+ *
+ * **Every statistic folds by the same rule the WAN median already uses: the median across the
+ * anchors that reported it, nulls skipped rather than counted as 0.** A mean would let one badly
+ * routed anchor drag the whole series with no trace of having done so; counting a missing anchor
+ * as zero would report a *faster* internet for a bucket that measured less of it.
+ *
+ * Three fields do not fold that way, and each for a stated reason:
+ *
+ * - `minMs`/`maxMs` are the true floor and ceiling of individual pings, and the fold's floor and
+ *   ceiling are the extremes across anchors, not the middle of them. `maxMs` is the only stored
+ *   witness of a sub-cycle stall and taking its median would erase one.
+ * - `maxLossPct` — the worst single cycle — takes the max, for the same reason: it is already an
+ *   extreme statistic, and the median of three extremes is not one.
+ * - `downCycles` is the only field where the honest answer is not derivable, and the fold refuses
+ *   to guess. What the chart draws it as is "the internet was fully unreachable for this many
+ *   cycles", and per-target aggregates cannot tell whether anchor A's three down cycles were the
+ *   *same* three as anchor B's. So this takes the provable lower bound by inclusion–exclusion:
+ *   `max(0, Σ downᵢ − (n−1)·count)`. Exact at both ends that matter — every anchor down for every
+ *   cycle yields `count`, and one anchor answering throughout yields 0 — and never claims an
+ *   internet outage the rows do not prove. Taking the minimum instead would report three
+ *   internet-down cycles for two anchors that failed at different times.
+ *
+ * A bucket that no anchor reported is omitted rather than emitted empty, so `densifyBuckets`
+ * downstream still renders it as unmeasured — which is what it was.
+ */
+export function foldInternetBuckets(byTarget: ReadonlyMap<TargetName, readonly ProbeBucket[]>): InternetBucket[] {
+  const byBucket = new Map<number, ProbeBucket[]>()
+  for (const target of WAN_TARGETS) {
+    for (const row of byTarget.get(target) ?? []) {
+      const entry = byBucket.get(row.bucket)
+      if (entry === undefined) byBucket.set(row.bucket, [row])
+      else entry.push(row)
+    }
+  }
+
+  return [...byBucket.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([bucket, rows]) => {
+      const extreme = (pick: (b: ProbeBucket) => number | null, reduce: (a: number, b: number) => number) => {
+        const present = rows.map(pick).filter((v): v is number => v !== null)
+        // An arrow, not a bare `Math.min` reference: `reduce` passes the index and the array as a
+        // third and fourth argument, and `Math.min(a, b, index, array)` is NaN.
+        return present.length === 0 ? null : present.reduce((a, b) => reduce(a, b))
+      }
+
+      // The most cycles any one anchor recorded. Every anchor is probed once per cycle, so the
+      // three counts agree in the ordinary case; where they do not, the largest is the tightest
+      // lower bound on how many cycles the bucket actually held.
+      const count = rows.reduce((most, r) => Math.max(most, r.count), 0)
+      const downSum = rows.reduce((sum, r) => sum + r.downCycles, 0)
+
+      return {
+        bucket,
+        target: 'internet',
+        anchors: rows.length,
+        medianMs: median(rows.map((r) => r.medianMs)).value,
+        p5Ms: median(rows.map((r) => r.p5Ms)).value,
+        p95Ms: median(rows.map((r) => r.p95Ms)).value,
+        minMs: extreme((r) => r.minMs, Math.min),
+        maxMs: extreme((r) => r.maxMs, Math.max),
+        // `?? 0` is unreachable — `lossPct` is non-null on every row and `rows` is non-empty by
+        // construction — and is here only so the field's type stays `number` as `ProbeBucket`
+        // declares it, rather than widening the fold's shape to admit a null the API cannot send.
+        lossPct: median(rows.map((r) => r.lossPct)).value ?? 0,
+        worstAnchorLossPct: rows.reduce((worst, r) => Math.max(worst, r.lossPct), 0),
+        maxLossPct: rows.reduce((worst, r) => Math.max(worst, r.maxLossPct), 0),
+        downCycles: Math.max(0, downSum - (rows.length - 1) * count),
+        count,
+      }
+    })
+}
+
+/**
  * Four per-target range responses in, one comparison series out.
  *
  * The merge happens *before* densification, on purpose. Each target's rows are sparse in its own

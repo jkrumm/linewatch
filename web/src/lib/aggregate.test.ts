@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { WAN_TARGETS, comparePointsFrom, median, toComparePoints } from './aggregate'
+import { WAN_TARGETS, comparePointsFrom, foldInternetBuckets, median, toComparePoints } from './aggregate'
 import type { ProbeBucket, TargetName } from './types'
 
 function bucket(target: string, medianMs: number | null, lossPct = 0, bucketStart = 0): ProbeBucket {
@@ -155,5 +155,153 @@ describe('comparePointsFrom', () => {
 
   test('a row off the window grid is a contract violation, not a dropped measurement', () => {
     expect(() => comparePointsFrom(byTarget([['gateway', [bucket('gateway', 1, 0, 7)]]]), window)).toThrow()
+  })
+})
+
+describe('foldInternetBuckets', () => {
+  /** A full `ProbeBucket` with every folded field independently settable — the fold's whole job is
+   * that different fields take different reductions, so a helper that ties them together (as
+   * `bucket` above does) cannot test it. */
+  function anchor(target: string, fields: Partial<ProbeBucket> & { bucket?: number } = {}): ProbeBucket {
+    return {
+      bucket: 0,
+      target,
+      medianMs: 10,
+      p5Ms: 8,
+      p95Ms: 20,
+      minMs: 7,
+      maxMs: 30,
+      maxLossPct: 0,
+      lossPct: 0,
+      downCycles: 0,
+      count: 10,
+      ...fields,
+    }
+  }
+
+  const map = (rows: ProbeBucket[]) =>
+    new Map<TargetName, readonly ProbeBucket[]>(
+      (['cloudflare', 'google', 'quad9'] as TargetName[]).map((t) => [t, rows.filter((r) => r.target === t)]),
+    )
+
+  test('the gateway is not an anchor and never reaches the fold', () => {
+    const folded = foldInternetBuckets(
+      new Map<TargetName, readonly ProbeBucket[]>([
+        ['gateway', [anchor('gateway', { medianMs: 1 })]],
+        ['cloudflare', [anchor('cloudflare', { medianMs: 10 })]],
+      ]),
+    )
+    expect(folded).toHaveLength(1)
+    expect(folded[0]!.anchors).toBe(1)
+    expect(folded[0]!.medianMs).toBe(10)
+  })
+
+  test('latency percentiles take the median across anchors', () => {
+    const folded = foldInternetBuckets(
+      map([
+        anchor('cloudflare', { medianMs: 10, p5Ms: 8, p95Ms: 20 }),
+        anchor('google', { medianMs: 12, p5Ms: 9, p95Ms: 24 }),
+        anchor('quad9', { medianMs: 90, p5Ms: 80, p95Ms: 200 }),
+      ]),
+    )
+    expect(folded[0]!.medianMs).toBe(12)
+    expect(folded[0]!.p5Ms).toBe(9)
+    expect(folded[0]!.p95Ms).toBe(24)
+  })
+
+  test('an anchor that reported nothing is skipped, never counted as zero', () => {
+    const folded = foldInternetBuckets(
+      map([
+        anchor('cloudflare', { medianMs: 10 }),
+        anchor('google', { medianMs: null }),
+        anchor('quad9', { medianMs: 12 }),
+      ]),
+    )
+    // Median of {10, 12}, not of {0, 10, 12} — a null anchor read as 0 would report a faster
+    // internet for a bucket that measured less of it.
+    expect(folded[0]!.medianMs).toBe(11)
+    expect(folded[0]!.anchors).toBe(3)
+  })
+
+  test('the envelope takes the extremes, not the middle of them', () => {
+    const folded = foldInternetBuckets(
+      map([
+        anchor('cloudflare', { minMs: 7, maxMs: 30 }),
+        anchor('google', { minMs: 5, maxMs: 40 }),
+        anchor('quad9', { minMs: 9, maxMs: 900 }),
+      ]),
+    )
+    // 900 ms is the only witness of a sub-cycle stall; a median across anchors would erase it.
+    expect(folded[0]!.minMs).toBe(5)
+    expect(folded[0]!.maxMs).toBe(900)
+  })
+
+  test('one dead anchor is not an internet outage, and is still reported', () => {
+    const folded = foldInternetBuckets(
+      map([
+        anchor('cloudflare', { lossPct: 0 }),
+        anchor('google', { lossPct: 100 }),
+        anchor('quad9', { lossPct: 0 }),
+      ]),
+    )
+    expect(folded[0]!.lossPct).toBe(0)
+    expect(folded[0]!.worstAnchorLossPct).toBe(100)
+  })
+
+  test('loss on every anchor is internet loss', () => {
+    const folded = foldInternetBuckets(
+      map([
+        anchor('cloudflare', { lossPct: 40 }),
+        anchor('google', { lossPct: 50 }),
+        anchor('quad9', { lossPct: 60 }),
+      ]),
+    )
+    expect(folded[0]!.lossPct).toBe(50)
+  })
+
+  test('down cycles are only claimed when the rows prove them', () => {
+    // Three anchors, ten cycles each, three down cycles each — which could be nine distinct
+    // cycles. Taking the minimum would announce three cycles of total internet loss that may
+    // never have happened.
+    const disjoint = foldInternetBuckets(
+      map([
+        anchor('cloudflare', { downCycles: 3 }),
+        anchor('google', { downCycles: 3 }),
+        anchor('quad9', { downCycles: 3 }),
+      ]),
+    )
+    expect(disjoint[0]!.downCycles).toBe(0)
+
+    // Every anchor down for every cycle: the overlap is forced, and the fold says so.
+    const total = foldInternetBuckets(
+      map([
+        anchor('cloudflare', { downCycles: 10 }),
+        anchor('google', { downCycles: 10 }),
+        anchor('quad9', { downCycles: 10 }),
+      ]),
+    )
+    expect(total[0]!.downCycles).toBe(10)
+
+    // Nine of ten on each: at least seven cycles must be common to all three.
+    const overlapping = foldInternetBuckets(
+      map([
+        anchor('cloudflare', { downCycles: 9 }),
+        anchor('google', { downCycles: 9 }),
+        anchor('quad9', { downCycles: 9 }),
+      ]),
+    )
+    expect(overlapping[0]!.downCycles).toBe(7)
+  })
+
+  test('buckets come out sorted, and a bucket no anchor reported is absent rather than empty', () => {
+    const folded = foldInternetBuckets(
+      map([
+        anchor('cloudflare', { bucket: 600_000 }),
+        anchor('google', { bucket: 0 }),
+        anchor('quad9', { bucket: 600_000 }),
+      ]),
+    )
+    expect(folded.map((b) => b.bucket)).toEqual([0, 600_000])
+    expect(folded.map((b) => b.anchors)).toEqual([1, 2])
   })
 })

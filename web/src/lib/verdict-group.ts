@@ -11,7 +11,7 @@ function worstSeverity(a: Severity, b: Severity): Severity {
  * One rule collapsed to a single card. `instances` is the full ordered run that formed it — never
  * dropped, because the disclosure this exists to feed has to be able to reach every one of them.
  *
- * The representative fields (`title`/`conclusion`/`evidence`/`action`/`uncertainty`) are always a
+ * The representative fields (`conclusion`/`evidence`/`action`/`uncertainty`) are always a
  * verbatim copy of one instance, never a merge: the rule engine authors sentences from numbers it
  * queried, and this layer only ever selects among what already exists. Writing a new sentence here
  * ("3 resyncs since ...") would be exactly the unevidenced inference `src/lib/verdict.ts` refuses to
@@ -20,7 +20,6 @@ function worstSeverity(a: Severity, b: Severity): Severity {
 export type VerdictGroup = {
   id: string
   severity: Severity
-  title: string
   conclusion: string
   evidence: Evidence[]
   action: string | null
@@ -70,7 +69,6 @@ export function groupVerdicts(verdicts: readonly Verdict[]): VerdictGroup[] {
     return {
       id,
       severity,
-      title: representative.title,
       conclusion: representative.conclusion,
       evidence: representative.evidence,
       action: representative.action,

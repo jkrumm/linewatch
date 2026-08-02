@@ -458,17 +458,23 @@ export type Evidence = {
  * cannot be built, so the UI can render it unconditionally. `uncertainty` is set when a rule
  * withheld a cause — typically because the host link sampler did not cover enough of the window
  * to rule out a link transition inside it. **The UI must render `uncertainty`, never swallow
- * it**: a conclusion shown without its caveat is an inference presented as a measurement. */
+ * it**: a conclusion shown without its caveat is an inference presented as a measurement.
+ *
+ * **There is no `title`/headline field on the wire.** Neither the server's `Verdict` interface
+ * (`src/lib/verdict.ts`) nor `src/routes/verdict.ts` emits one — a client type that declared it
+ * anyway is exactly how this shipped: `fetchJson<T>` casts the response instead of validating it,
+ * so nothing caught the mismatch, and every headline in the verdict band rendered as an empty
+ * string. The fix is not a second authored sentence per rule (thirteen more strings that can drift
+ * from the numbers they describe, on top of the ban on authoring line-about-the-line prose in a
+ * component) — it is using `conclusion` as the headline. See `verdict-panel.tsx`. */
 export type Verdict = {
   /** The rule that fired. An identifier, not a label — a per-row rule emits one verdict per row,
-   * so it is not unique either. Render `title`; showing this puts a slug where the headline goes. */
+   * so it is not unique either. Render `conclusion`; showing this puts a slug where the headline
+   * goes. */
   id: string
   severity: Severity
-  /** The headline, templated server-side from the same numbers as `conclusion`. Rendered as-is:
-   * an id→label map in a component drifts from the rule that fires and states things the rule's
-   * guards refused to state. */
-  title: string
-  /** One sentence, templated from the live inputs. */
+  /** One sentence, templated server-side from the live inputs. Doubles as the headline — see the
+   * type doc above. */
   conclusion: string
   evidence: Evidence[]
   action: string | null

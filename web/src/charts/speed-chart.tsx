@@ -3,7 +3,7 @@ import type { SpeedTest } from '../lib/types'
 import { fmtMbps } from '../lib/format'
 import { AXIS_LABEL_PX, fitTickCount, runAxisLabels } from '../lib/axis'
 import { PendingChart } from './pending'
-import { useCompactMode } from '../lib/compact'
+import { useCardTitle, useCompactMode } from '../lib/compact'
 
 /**
  * It was 260, which was headroom above the download trace rather than resolution in it; 190 —
@@ -99,7 +99,7 @@ export function SpeedChart({
 
   return (
     <ChartCard
-      title="Speed"
+      title={useCardTitle("Speed")}
       // The unit lives here, not on the y ticks. Formatting each tick as `600 Mbps` was the
       // obvious fix for a unitless axis and it made things worse: `MultiLine` draws its axis inside
       // basalt's shared 44 px gutter, sized for bare numbers, so every tick rendered as the bare

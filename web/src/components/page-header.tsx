@@ -100,7 +100,10 @@ export function PageHeader({
         borderBottom: '1px solid var(--mantine-color-default-border)',
       }}
       py="xs"
-      mb="md"
+      // No `mb`. This header is the first child of the page's own `Stack`, so its gap already
+      // separates it from the bar below — a margin here was added on top of that gap, not instead
+      // of it, putting 38px of nothing under a sticky header on a page whose whole brief is
+      // density.
       // Full-bleed across the root Container's gutters. Without it the sticky background stops at
       // the content box and the page scrolls visibly through the 13px strips either side of it.
       mx={{ base: 'calc(-1 * var(--mantine-spacing-sm))', sm: 'calc(-1 * var(--mantine-spacing-lg))' }}

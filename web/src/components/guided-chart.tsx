@@ -3,6 +3,7 @@ import { ChartCard } from 'basalt-ui/charts'
 import { GuideLink } from 'basalt-ui/content'
 import type { ReactNode } from 'react'
 import type { ChartCopy } from '../lib/guides'
+import { useCardTitle } from '../lib/compact'
 
 /**
  * A chart with its explanation one hover (ⓘ) or one click (the guide drawer) away, and no prose
@@ -24,9 +25,11 @@ export function GuidedChart({
   copy: ChartCopy
   children: ReactNode
 }) {
+  const cardTitle = useCardTitle(title)
+
   return (
     <ChartCard
-      title={title}
+      title={cardTitle}
       tooltip={copy.tooltip}
       extra={
         <GuideLink title={title} iconOnly>

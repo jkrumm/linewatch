@@ -6,6 +6,7 @@ import { fmtPct } from '../lib/format'
 import { CategoryGrid, type GridCell } from './category-grid'
 import { localDayKey, localDayStart, localHourKey } from './local-calendar'
 import { PendingChart } from './pending'
+import { useCardTitle } from '../lib/compact'
 
 /**
  * The bucket size this grid is a grid OF. Exported so the route's query and the chart cannot
@@ -131,7 +132,7 @@ export function AvailabilityHeatmap({
 
   return (
     <ChartCard
-      title="Availability"
+      title={useCardTitle("Availability")}
       subtitle="Last 30 days, by hour of your day"
       tooltip="Each cell is one hour's WAN availability, on your own clock — darker means more loss that hour, up to 5% which paints full. Hatched cells were not measured at all, which is not the same as an hour with no loss."
     >

@@ -3,6 +3,7 @@ import type { SpeedTest } from '../lib/types'
 import { fmtMs } from '../lib/format'
 import { AXIS_LABEL_PX, fitTickCount, runAxisLabels } from '../lib/axis'
 import { PendingChart } from './pending'
+import { useCardTitle } from '../lib/compact'
 
 const BUFFERBLOAT_HEIGHT = 260
 
@@ -32,7 +33,7 @@ export function BufferbloatChart({
 
   return (
     <ChartCard
-      title="Latency under load"
+      title={useCardTitle("Latency under load")}
       tooltip="Idle ping is measured at rest; loaded latency is measured while the download or upload saturates the line. One point per run, drawn at equal spacing regardless of the gap between runs. The cursor here does not carry to the charts above."
     >
       {/* See `availability-strip.tsx`'s identical wrapper for why this is a floor, not a height. */}

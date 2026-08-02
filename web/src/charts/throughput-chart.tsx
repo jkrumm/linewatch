@@ -65,7 +65,13 @@ const PLOT_RIGHT = Math.round(AXIS_LABEL_PX / 2)
  */
 const THROUGHPUT_SERIES = [
   { key: 'down', label: 'Download', color: VX.accent, mark: 'bar' as const },
-  { key: 'up', label: 'Upload', color: VX.status.bad, mark: 'bar' as const },
+  // `VX.line`, NOT `VX.status.bad`. Upload was drawn in the error red, so every bar of ordinary
+  // outbound traffic read as a fault — a status hue spent on a categorical series, which is the one
+  // thing DESIGN.md's colour rule forbids outright. It is also the same pair `speed-chart` already
+  // draws for the same two concepts (accent download, neutral upload); one dictionary for one pair.
+  // Colour is not what separates them here anyway — the baseline is: download below it, upload
+  // above.
+  { key: 'up', label: 'Upload', color: VX.line, mark: 'bar' as const },
   { key: 'absent', label: 'Not measured', color: VX.neutral, mark: 'bar' as const },
 ]
 
@@ -439,7 +445,7 @@ function PointRows({ point }: { point: PlotPoint }) {
         ) : (
           <>
             <TooltipRow color={VX.accent} shape="bar" label="Down" value={`${fmtRate(point.downBytesPerS)} · ${fmtBytes(point.downBytes)}`} />
-            <TooltipRow color={VX.status.bad} shape="bar" label="Up" value={`${fmtRate(point.upBytesPerS)} · ${fmtBytes(point.upBytes)}`} />
+            <TooltipRow color={VX.line} shape="bar" label="Up" value={`${fmtRate(point.upBytesPerS)} · ${fmtBytes(point.upBytes)}`} />
             {/* The basis, always — the rate is bytes over *measured* time, and a bucket that
                 measured 2 of 20 intervals is a different claim from one that measured all 20. */}
             <TooltipRow

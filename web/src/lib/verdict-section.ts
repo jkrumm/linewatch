@@ -6,7 +6,7 @@ export type SectionKey = (typeof SECTION_KEYS)[number]
 
 export const SECTION_LABEL: Record<SectionKey, string> = {
   uptime: 'Uptime',
-  latency: 'Latency',
+  latency: 'Ping',
   speed: 'Speed',
   throughput: 'Throughput',
   path: 'Path & hardware',

@@ -48,3 +48,22 @@ export const useCompactMode = createPersistedState({
   version: 1,
   initial: false,
 })
+
+/**
+ * A chart card's title — its section's word in compact, and nothing at all in full view.
+ *
+ * **Exactly one label names a chart block at any time.** In full view the section heading (and the
+ * view switch beside it) already name it; the card repeating the same word directly underneath was
+ * the same string twice, 30px apart. In compact there is no heading, so the card title is the only
+ * label there is. Rather than pick per chart, every `ChartCard` on the page routes its title
+ * through here, so the two modes cannot drift into naming some charts twice and others none.
+ *
+ * The empty string rather than an omitted prop because `ChartCard.title` is `string`, not
+ * `string | undefined` — and that is fine here: the header row still draws, carrying the ⓘ and the
+ * guide `?`, which are the affordances the copy pass moved every stripped qualifier into. Losing
+ * the header would lose those with it.
+ */
+export function useCardTitle(title: string): string {
+  const [compact] = useCompactMode()
+  return compact ? title : ''
+}

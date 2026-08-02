@@ -5,6 +5,7 @@ import { fmtMbps, fmtPct } from '../lib/format'
 import { CategoryGrid, type GridCell } from './category-grid'
 import { localDayKey, localDayStart, localHourKey } from './local-calendar'
 import { PendingChart } from './pending'
+import { useCardTitle } from '../lib/compact'
 
 /** One cell is one hour of the reader's own day, matching the availability grid so the two
  * calendars on this dashboard are read the same way — `local-calendar.ts` carries the argument for
@@ -143,7 +144,7 @@ export function SpeedHeatmap({
 
   return (
     <ChartCard
-      title="Throughput by hour"
+      title={useCardTitle("Throughput by hour")}
       // Not `` `last ${days} days` `` — the page carries exactly one range control, and restating
       // the selected window's day count here duplicated it whenever the selection was already under
       // `MAX_DAYS`. What this view still has to self-report (the repo's own CLAUDE.md: this is the

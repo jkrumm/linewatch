@@ -39,28 +39,37 @@ table is the app's **data dictionary** — which metric maps to which hue, as `{
 wired through `defineSeries()`. This is the one design artifact that legitimately lives in the
 consumer; keep it the single source of truth and never inline a hex elsewhere.
 
-**Empty, and correct.** linewatch registers no app series: every mark on the dashboard is either a
+**One row, and it took a measurement to earn it.** Every other mark on the dashboard is a
 single-series metric drawn neutral (`VX.line`), the one earned accent (`VX.accent`, spent on the
-internet band and the download line), or a status verdict (`VX.status.*`). Nothing here needs
-categorical separation, so nothing has earned a hue of its own. Add a row only when a chart draws
-two or more series that must be told apart by colour — and never inline a hex to do it.
+internet band and the download line), or a status verdict (`VX.status.*`).
+
+`throughput-chart` is the exception: it draws THREE things that must be told apart by colour —
+download, upload, never-measured — and the palette holds only two values that far apart. Spending
+`VX.status.bad` on upload drew ordinary outbound traffic as a fault; moving it to `VX.line` left
+upload 6% in luminance from the never-measured grey (two of three legend swatches, one colour) while
+out-contrasting the accent download is drawn in (11.1:1 against 7.8:1 on the dark panel). That is
+categorical separation going unmet, which is what a series row is for.
+
+**Only `upload` is registered — not the pair.** Download is already the accent by the decision
+above; a second home for it here is one colour in two places for the two to drift apart in. The pair
+is `VX.accent` + `series.upload`, drawn identically by `throughput-chart` and `speed-chart`.
 
 | Series name | Light hex | Dark hex | `defineSeries` key | Role / earned reason |
 |-|-|-|-|-|
-| _(none)_ | | | | |
+| Upload | `#5642a6` | `#bdadff` | `upload` | Categorical: the second direction in the two charts that draw both. basalt's violet family, one shade deeper on light and one lighter on dark — 7.0:1 / 7.1:1 against their panels, matching the accent's weight rather than exceeding it. |
 
 ```ts
 // src/lib/series.ts — the app's guard-exempt series file
 import { defineSeries, groupTokens } from 'basalt-ui/tokens'
 
 const SERIES_MAP = defineSeries({
-  // requests: { light: '#4f78a4', dark: '#7099c4' },
+  upload: { light: '#5642a6', dark: '#bdadff' },
 })
 
-export const series = groupTokens('app', SERIES_MAP) // { requests: 'var(--vx-app-requests)', ... }
+export const series = groupTokens('app', SERIES_MAP) // { upload: 'var(--vx-app-upload)' }
 export const paletteGroups = { 'app-': SERIES_MAP }
 // wire into the provider: <BasaltProvider paletteOptions={{ groups: paletteGroups }} .../>
-// (paletteOptions takes the group map directly — not a CSS string; read `series.requests` in charts)
+// (paletteOptions takes the group map directly — not a CSS string; read `series.upload` in charts)
 ```
 
 Rules for this table (from the `basalt-tokens` / `basalt-charts` rules — do not relax):

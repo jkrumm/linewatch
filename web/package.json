@@ -48,5 +48,13 @@
     "oxlint": "^1.76.0",
     "typescript": "^5",
     "vite": "^8.0.12"
+  },
+  "basalt": {
+    "roots": [
+      "src"
+    ],
+    "exempt": [
+      "src/lib/series.ts"
+    ]
   }
 }

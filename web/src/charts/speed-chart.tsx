@@ -4,6 +4,7 @@ import { fmtMbps } from '../lib/format'
 import { AXIS_LABEL_PX, fitTickCount, runAxisLabels } from '../lib/axis'
 import { PendingChart } from './pending'
 import { useCardTitle, useCompactMode } from '../lib/compact'
+import { series } from '../lib/series'
 
 /**
  * It was 260, which was headroom above the download trace rather than resolution in it; 190 —
@@ -140,10 +141,11 @@ export function SpeedChart({
                   getX={(p) => p.label}
                   series={[
                     {
-                      // `VX.accent`/`VX.line`, not `VX.line`/`VX.line2`: both of the latter resolve to
-                      // plain greys and read as one indistinct hue on the dark panel, which on a
-                      // two-series chart means the reader cannot tell download from upload without the
-                      // legend. The same pair the latency chart uses for its own two-series case.
+                      // Download is the accent by decision (DESIGN.md: "spent on the internet band
+                      // and the download line"); upload is `series.upload`, registered in
+                      // `lib/series.ts`. One pair for the two concepts wherever they are drawn — this
+                      // chart and the throughput bars — rather than each picking its own greys, which
+                      // is how this one previously ended up with two indistinguishable ones.
                       key: 'download',
                       label: 'Download',
                       color: VX.accent,
@@ -153,7 +155,7 @@ export function SpeedChart({
                     {
                       key: 'upload',
                       label: 'Upload',
-                      color: VX.line,
+                      color: series.upload,
                       mark: 'line',
                       getValue: (p) => p.test.uploadMbps,
                     },

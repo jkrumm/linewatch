@@ -19,5 +19,11 @@ collector/watchdog-notify.jsonl
 web/dist
 *.log
 
+# Recovery snapshots an agent session can leave behind: duplicate copies of src/
+# and web/src/, invisible to both gates (bun test skips dot-directories, tsconfig
+# does not include it) and one `git add -A` from being committed as a second,
+# stale copy of the whole codebase.
+.recover
+
 # Carries the real bearer token (rendered by `make up`) — never commit it.
 .env

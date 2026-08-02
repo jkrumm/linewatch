@@ -117,6 +117,12 @@ anyone they disagreed.
   genuine documented exception, one line at a time. The three scoped oxlint overrides
   in `web/.oxlintrc.json` each carry their reason inline; that file is JSONC, so a new
   one must too.
+- **`ChartTooltip` is a `<div>`. Never render one inside `<svg>`.** React creates
+  an element in the SVG namespace there, so the tooltip mounts, takes its props,
+  throws nothing — and is never painted. `latency-band-chart.tsx` carried eight
+  authored tooltip rows that no one had ever seen. Nothing catches this: it
+  typechecks, it lints, and the chart renders correctly in every other respect.
+  The tooltip goes in the wrapper outside the SVG.
 
 ## Conventions
 
@@ -233,6 +239,32 @@ anyone they disagreed.
   the label, and it doubles as the scale's domain value — which is why both
   guarantee uniqueness. Two points sharing a domain value collapse onto one x
   position and one stops being drawn: a measurement silently dropped.
+- **Loading is a third state, and every reachable path renders it.** "Nothing
+  measured yet" and "measured, and nothing was there" are different facts, and a
+  query in flight must never render as the second. `?? []` on a query result is
+  how that rule breaks: an empty bucket array densifies to a fully-hatched *not
+  measured* window, `windowDowntime([])` returns a perfectly defined `0`, and an
+  absent `status` used to render "No cycle has reported what it measured
+  through" — each a finding about the line, asserted over a question nobody had
+  asked. The rule is one; the sentinel varies with the component's shape, which
+  is a known wart rather than a discovery: charts and tables take `isPending`,
+  `CoverageCallout` takes a `'pending'` string, `Stat.value` takes `null`, and
+  the card-owning components (`NowStrip`, `PageHeader`, `VantageCard`,
+  `LinkComparison`, `pathStats`) treat `null`/`undefined` as *not asked yet*.
+  **Guard even where a route loader makes the state unreachable** — the loader
+  guarantee is route config that a later edit can silently remove, and the cost
+  of being wrong is this dashboard announcing that the collector is dead.
+- **A fold carries its unmeasured members.** The three bucketed strips downsample
+  to fit a narrow viewport (`charts/fold.ts`). A fold that calls a group measured
+  because *any* member was measured paints an unmeasured stretch as clean — the
+  founding fabrication, and on the `all` range it triggers below ~830px, not just
+  on a phone. So every fold carries `unmeasuredMembers`, splits its column
+  proportionally, and scales the tooltip denominator by `foldedFrom` (a summed
+  `count` against a per-bucket `expectedCycles` prints "30 of 10"). The mirror
+  lie — a two-thirds-measured column drawn wholly unmeasured — is equally
+  forbidden. Both are pinned by tests. Folding also changes the chart's hover key
+  space, so `foldSourceIndex` maps every unfolded key onto the column that
+  swallowed it; without it the shared cursor blinks on two hovers in three.
 
 ## Validation
 

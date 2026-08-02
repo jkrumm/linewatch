@@ -20,8 +20,14 @@ on:
     branches: [master]
 
 jobs:
+  # macOS, not ubuntu. This is not a preference — CLAUDE.md's first line is "Mac mini only", and
+  # the collector shells out to `route -n get default`, `ifconfig -m`, `netstat`, `networksetup`
+  # and `ipconfig` with no npm deps in between. `collector/vantage.test.ts` stubs `route` through
+  # PATH injection but runs the rest for real, so on a Linux runner those parses return null and
+  # two tests fail for a reason that says nothing about the code. Seeded as ubuntu and caught on
+  # the first CI run, which is the point of having one.
   api:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -31,6 +37,8 @@ jobs:
       - run: bun run typecheck
       - run: bun test
 
+  # ubuntu is correct here: the dashboard is pure TS with no platform-dependent call, and it is
+  # the faster runner.
   dashboard:
     runs-on: ubuntu-latest
     defaults:

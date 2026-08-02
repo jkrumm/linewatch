@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { foldColumns, foldStates } from './link-speed-strip'
+import { foldColumns, foldStates, summariseLink } from './link-speed-strip'
 import { foldSourceIndex } from './fold'
 import type { LinkBucketState } from '../lib/vantage'
 
@@ -13,6 +13,47 @@ const TRANSITION: LinkBucketState = { kind: 'transition', mbits: [100, 1000] }
 function column(key: string, state: LinkBucketState) {
   return { key, bucketStart: Number(key), state }
 }
+
+/**
+ * The verdict line above the strip. It exists because this chart's normal state is a flat band
+ * carrying no information — so what it says has to be true of the RECORD, not of the drawing, and
+ * these pin the three places that could quietly stop being true.
+ */
+describe('summariseLink', () => {
+  test('a steady window names its one speed and no renegotiation', () => {
+    const summary = summariseLink([column('0', STEADY_1000), column('1', STEADY_1000)])
+    expect(summary.mbits).toEqual([1000])
+    expect(summary.transitionBuckets).toBe(0)
+    expect(summary).toMatchObject({ measured: 2, total: 2, noVantage: 0 })
+  })
+
+  /** A speed seen ONLY inside a transition bucket still happened. Reading `mbits` off the steady
+   * buckets alone would drop the very speed the reader is looking for. */
+  test('collects speeds seen only inside a transition bucket', () => {
+    const summary = summariseLink([column('0', STEADY_1000), column('1', TRANSITION)])
+    expect(summary.mbits).toEqual([100, 1000])
+    expect(summary.transitionBuckets).toBe(1)
+  })
+
+  /** The denominator is the whole window, so the sentence can never imply full coverage from a
+   * window that was mostly unmeasured — the same discipline the tooltips' "N of M expected" uses. */
+  test('unmeasured and no-vantage buckets count against the total, not toward measured', () => {
+    const summary = summariseLink([
+      column('0', STEADY_1000),
+      column('1', UNMEASURED),
+      column('2', NO_VANTAGE_5),
+    ])
+    expect(summary).toMatchObject({ measured: 1, total: 3, noVantage: 1 })
+  })
+
+  /** The two "nothing to say" cases the headline distinguishes: cycles that ran and carried no
+   * rate is a different fact from no cycles at all, and `mbits.length === 0` alone cannot tell
+   * them apart. */
+  test('separates a window with no cycles from one whose cycles reported no speed', () => {
+    expect(summariseLink([column('0', UNMEASURED)])).toMatchObject({ mbits: [], noVantage: 0 })
+    expect(summariseLink([column('0', NO_VANTAGE_7)])).toMatchObject({ mbits: [], noVantage: 1 })
+  })
+})
 
 describe('foldStates', () => {
   test('any member already a transition widens the mbit set and stays a transition', () => {

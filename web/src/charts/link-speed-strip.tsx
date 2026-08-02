@@ -2,9 +2,11 @@ import { useCallback, useMemo, useRef } from 'react'
 import { scaleBand } from '@visx/scale'
 import {
   AxisBottomDate,
+  ChartLegend,
   ChartTooltip,
   Crosshair,
   HoverOverlay,
+  type LegendEntry,
   ResponsiveChart,
   TooltipBody,
   TooltipHeader,
@@ -141,6 +143,62 @@ export function foldStates(states: LinkBucketState[]): LinkBucketState {
   return { kind: 'unmeasured' }
 }
 
+/**
+ * What the window as a whole did, in numbers — computed over the UNFOLDED columns, so the sentence
+ * describes the record rather than the drawing.
+ *
+ * The strip's problem is that its subject is almost always constant. On a healthy gigabit line
+ * every column is the same fill, and a reader looking at a flat blue band 288 buckets wide learns
+ * only that something was measured; the one fact worth having — *did the NIC renegotiate, and
+ * what to* — is legible only by hovering columns one at a time looking for a marker that is
+ * usually not there. A chart whose normal state carries no information has to state its own
+ * conclusion, and the marks then become the evidence for it rather than the whole message.
+ *
+ * `transitionBuckets` counts BUCKETS containing a renegotiation, not renegotiations: a bucket
+ * reports the distinct speeds it saw and not how many times it changed between them, so any
+ * count of events would be invented. `mbits` is every distinct speed the window saw, including
+ * those seen only inside a transition bucket.
+ */
+export type LinkSummary = {
+  /** Buckets that reported a link speed. */
+  measured: number
+  /** Buckets in the window, measured or not — the denominator the reader needs to weigh the rest. */
+  total: number
+  /** Buckets measured but reporting no link speed at all: cycles ran, the vantage had no rate. */
+  noVantage: number
+  /** Every distinct negotiated speed the window saw, ascending. */
+  mbits: number[]
+  transitionBuckets: number
+}
+
+export function summariseLink(columns: Column[]): LinkSummary {
+  const mbits = new Set<number>()
+  let measured = 0
+  let noVantage = 0
+  let transitionBuckets = 0
+
+  for (const { state } of columns) {
+    if (state.kind === 'steady') {
+      mbits.add(state.mbit)
+      measured += 1
+    } else if (state.kind === 'transition') {
+      for (const m of state.mbits) mbits.add(m)
+      measured += 1
+      transitionBuckets += 1
+    } else if (state.kind === 'no-vantage') {
+      noVantage += 1
+    }
+  }
+
+  return {
+    measured,
+    total: columns.length,
+    noVantage,
+    mbits: [...mbits].toSorted((a, b) => a - b),
+    transitionBuckets,
+  }
+}
+
 /** The follower's own value, or `null` to render no follower at all — an absent/no-vantage slot has
  * nothing to say, and a follower reading "—" would assert a measured absence. */
 function followerLinkValue(state: LinkBucketState): string | null {
@@ -210,12 +268,85 @@ export function LinkSpeedStrip({
       {isPending === true ? (
         <PendingChart height={STRIP_HEIGHT + AXIS_HEIGHT} />
       ) : (
-        <ResponsiveChart height={STRIP_HEIGHT + AXIS_HEIGHT}>
-          {({ width }) => (
-            <StripPlot columns={columns} maxMbit={maxMbit} bucketSeconds={bucketSeconds} width={width} />
-          )}
-        </ResponsiveChart>
+        <>
+          <LinkVerdict summary={summariseLink(columns)} />
+          <ResponsiveChart height={STRIP_HEIGHT + AXIS_HEIGHT}>
+            {({ width }) => (
+              <StripPlot columns={columns} maxMbit={maxMbit} bucketSeconds={bucketSeconds} width={width} />
+            )}
+          </ResponsiveChart>
+          {/* Four fills, none of them named anywhere until now — see `availability-strip.tsx`'s
+              identical legend. The speed swatch is the ramp's top step because that is what a
+              healthy window is drawn in; the ramp itself is relative to the fastest speed the
+              window saw, which the verdict line above states in words. */}
+          <ChartLegend chartId="link-speed-strip" items={FILL_LEGEND} />
+        </>
       )}
+    </div>
+  )
+}
+
+/** The four fills `columnFill` can return. `fillOpacity` mirrors the real alphas so the legend
+ * cannot describe a fill the chart does not draw. */
+const FILL_LEGEND: LegendEntry[] = [
+  { key: 'speed', label: 'Negotiated speed', color: VX.line, shape: 'bar', fillOpacity: 0.9 },
+  { key: 'transition', label: 'Renegotiated', color: VX.warnSolid, shape: 'bar', fillOpacity: 1 },
+  { key: 'no-vantage', label: 'No link speed reported', color: VX.neutral, shape: 'bar', fillOpacity: 0.18 },
+  { key: 'absent', label: 'Not measured', color: VX.neutral, shape: 'bar', fillOpacity: 0.5 },
+]
+
+/**
+ * The window's conclusion, above the evidence for it.
+ *
+ * Raw elements and `VX.*` rather than Mantine `Text`: `src/charts/**` is the Mantine-free half of
+ * this app (see the basalt-charts rule), and it is the one place a raw element is the correct
+ * remedy rather than a token-system bypass.
+ */
+function LinkVerdict({ summary }: { summary: LinkSummary }) {
+  const { measured, total, noVantage, mbits, transitionBuckets } = summary
+
+  // Nothing reported a speed. Which of the two reasons applies is a real distinction — cycles that
+  // ran and carried no rate is a different fact from no cycles at all — and it is the one the
+  // strip's own hatch-vs-faint split already draws.
+  const headline =
+    mbits.length === 0
+      ? noVantage > 0
+        ? 'Cycles ran, and none of them reported a link speed'
+        : 'No link speed recorded in this window'
+      : mbits.length === 1
+        ? `Steady at ${mbits[0]} Mbit`
+        : `${mbits.map((m) => `${m}`).join(' / ')} Mbit`
+
+  const notes: string[] = []
+  if (mbits.length > 0) {
+    notes.push(
+      transitionBuckets === 0
+        ? 'no renegotiation recorded'
+        : `${transitionBuckets} bucket${transitionBuckets === 1 ? '' : 's'} contained a renegotiation`,
+    )
+  }
+  // The denominator, always — every claim above is only true of the buckets that reported one, and
+  // a window measured a tenth of itself supports a much weaker version of the same sentence.
+  notes.push(`${measured} of ${total} buckets reported a speed`)
+
+  return (
+    // `inline-spacing`'s remedy is a Mantine spacing prop, and `src/charts/**` is the Mantine-free
+    // half of this app — there is no prop form to prefer here. Both literals are 6px, under the
+    // 10px the guard already treats as legitimate micro-spacing wherever it can tell a CSS
+    // declaration from a TSX style object.
+    <div
+      style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        alignItems: 'baseline',
+        gap: 6, // theme-allow: micro-spacing, no Mantine prop reachable from a chart file
+        paddingBottom: 6, // theme-allow: same
+      }}
+    >
+      <span style={{ color: VX.ink, fontSize: VX.text.sm, fontWeight: 600 }}>{headline}</span>
+      {/* `legendText` rather than `text`: this is the same subordinate register as the legend
+          directly under the plot, and the two sit within a few px of each other. */}
+      <span style={{ color: VX.legendText, fontSize: VX.text.xs }}>· {notes.join(' · ')}</span>
     </div>
   )
 }

@@ -2,9 +2,11 @@ import { useCallback, useMemo, useRef } from 'react'
 import { scaleBand } from '@visx/scale'
 import {
   AxisBottomDate,
+  ChartLegend,
   ChartTooltip,
   Crosshair,
   HoverOverlay,
+  type LegendEntry,
   ResponsiveChart,
   TooltipBody,
   TooltipHeader,
@@ -29,9 +31,25 @@ import { SyncedTip } from './synced-tip'
  * availability heatmap uses, so the two views of the same data agree on what "bad" looks like. */
 const FULL_INTENSITY_LOSS_PCT = 5
 
-/** Faint floor under every measured column, so "measured, no loss" is a visible mark rather than
- * blank canvas. Without it a flawless bucket and an unmeasured one are both empty space. */
-const MEASURED_FLOOR_ALPHA = 0.14
+/**
+ * The floor under a measured column, so "measured, no loss" is a visible mark rather than blank
+ * canvas. Without it a flawless bucket and an unmeasured one are both empty space.
+ *
+ * **NEUTRAL, and that is the fix.** This floor was the bad hue at 14% — the loss ramp's own bottom
+ * step — so a window with not one lost packet painted a faint red wash from end to end, and the
+ * chart that answers "was the line up" answered it in the colour this dashboard uses for "no". The
+ * reader's report was exactly that: *why is reachability red all the time even though we are
+ * online?* Nothing was numerically wrong; the ramp was continuous and 0% sat at its floor. But a
+ * ramp that starts at "bad, faintly" has no colour left to mean "fine", and colour is the only
+ * channel a strip this short has.
+ *
+ * So the ramp is split at zero. A clean bucket is neutral ink — present, measured, making no
+ * claim. Loss is the bad hue, and it starts at `LOSS_FLOOR_ALPHA` rather than at nothing, so the
+ * smallest recorded loss is visibly not clean. The step at the boundary is deliberate: any loss at
+ * all is a different fact from none, and this is the chart that has to say so.
+ */
+const CLEAN_ALPHA = 0.14
+const LOSS_FLOOR_ALPHA = 0.34
 
 const STRIP_HEIGHT = 44
 
@@ -203,21 +221,42 @@ export function AvailabilityStrip({
       {isPending === true ? (
         <PendingChart height={STRIP_HEIGHT + AXIS_HEIGHT} />
       ) : (
-        <ResponsiveChart height={STRIP_HEIGHT + AXIS_HEIGHT}>
-          {({ width }) => (
-            <StripPlot
-              target={target}
-              columns={columns}
-              expectedCycles={expectedCycles}
-              bucketSeconds={bucketSeconds}
-              width={width}
-            />
-          )}
-        </ResponsiveChart>
+        <>
+          <ResponsiveChart height={STRIP_HEIGHT + AXIS_HEIGHT}>
+            {({ width }) => (
+              <StripPlot
+                target={target}
+                columns={columns}
+                expectedCycles={expectedCycles}
+                bucketSeconds={bucketSeconds}
+                width={width}
+              />
+            )}
+          </ResponsiveChart>
+          {/* This strip shipped with four distinct fills and nothing anywhere naming them, so the
+              only way to learn that a faint column meant "clean" and a hatched one meant "never
+              measured" was to hover every kind of column until the tooltip said so. A mark that
+              renders and a legend that does not are not independently reviewable — the same lesson
+              the ChartTooltip trap taught this repo, arriving from the other direction. Suppressed
+              while pending, with the plot, per the framework's own rule: a legend naming states
+              nothing on screen can be pointed at is its own small lie. */}
+          <ChartLegend chartId="availability-strip" items={FILL_LEGEND} />
+        </>
       )}
     </div>
   )
 }
+
+/** The four fills `columnFill` can return, named. `fillOpacity` mirrors the real alphas rather
+ * than a swatch-friendly constant, so the legend cannot drift into describing a fill the chart
+ * does not draw — `LegendEntry.fillOpacity` exists for exactly this. The loss swatch sits at the
+ * ramp's midpoint: it stands for a range, not for one value. */
+const FILL_LEGEND: LegendEntry[] = [
+  { key: 'clean', label: 'No loss', color: VX.neutral, shape: 'bar', fillOpacity: CLEAN_ALPHA },
+  { key: 'loss', label: 'Packet loss', color: VX.badSolid, shape: 'bar', fillOpacity: (LOSS_FLOOR_ALPHA + 1) / 2 },
+  { key: 'down', label: 'Every cycle down', color: VX.badSolid, shape: 'bar', fillOpacity: 1 },
+  { key: 'absent', label: 'Not measured', color: VX.neutral, shape: 'bar', fillOpacity: 0.5 },
+]
 
 function StripPlot({
   target,
@@ -430,17 +469,24 @@ function StripPlot({
 }
 
 /**
- * Three states, three fills. A bucket where every cycle got nothing back is solid, not merely the
- * top of the loss ramp: "the line was gone for this whole bucket" and "this bucket lost 5% of its
- * packets" are not neighbouring intensities of one fact.
+ * Four states, four fills, and only two of them are the bad hue.
+ *
+ * A bucket where every cycle got nothing back is solid, not merely the top of the loss ramp: "the
+ * line was gone for this whole bucket" and "this bucket lost 5% of its packets" are not
+ * neighbouring intensities of one fact. A bucket that lost nothing is neutral, not the bottom of
+ * that ramp, for the reason `CLEAN_ALPHA` gives at length.
+ *
+ * Exported for `availability-strip.test.ts`, which pins the one property no amount of prose keeps
+ * true: a clean bucket and a lossy one must not be drawn in the same hue.
  */
-function columnFill(bucket: ProbeBucket | null, absentHatchId: string): string {
+export function columnFill(bucket: ProbeBucket | null, absentHatchId: string): string {
   if (bucket === null) return hatchFill(absentHatchId)
   // `count > 0` guards the degenerate row: 0 down of 0 cycles is not a fully-down bucket, and
   // painting it solid would invent an outage out of an empty aggregate.
   if (bucket.count > 0 && bucket.downCycles >= bucket.count) return VX.badSolid
+  if (bucket.lossPct <= 0) return alpha(VX.neutral, CLEAN_ALPHA)
   const intensity = Math.min(1, bucket.lossPct / FULL_INTENSITY_LOSS_PCT)
-  return alpha(VX.badSolid, MEASURED_FLOOR_ALPHA + (1 - MEASURED_FLOOR_ALPHA) * intensity)
+  return alpha(VX.badSolid, LOSS_FLOOR_ALPHA + (1 - LOSS_FLOOR_ALPHA) * intensity)
 }
 
 function ColumnRows({ column, expectedCycles }: { column: PlotColumn; expectedCycles: number }) {

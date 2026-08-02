@@ -324,6 +324,10 @@ describe('the reboot rung', () => {
     const decision = decide(rebootDue())
     expect(decision.state).toBe('pre_announce')
     expect(decision.action).toBe('announce')
+    // The announce is reached because `not_announced` was the *only* thing left
+    // blocking. Anything else outstanding and this would be a plain stand-down,
+    // so asserting the state alone would not distinguish the two.
+    expect(decide({ ...rebootDue(), disarmed: true }).blockedBy).toContain('not_announced')
   })
 
   test('fires once the announcement has been standing long enough', () => {
@@ -337,6 +341,12 @@ describe('the reboot rung', () => {
     })
     expect(decision.blockedBy).toEqual([])
     expect(decision.action).toBe('reboot')
+
+    // …and refuses while it is still standing, which is what makes the abort
+    // window real rather than nominal.
+    const tooSoon = decide({ ...input, ledger: { ...input.ledger, ladder: { ...input.ledger.ladder, announcedAt: input.now - 1_000 } } })
+    expect(tooSoon.blockedBy).toContain('announce_pending')
+    expect(tooSoon.action).toBe('none')
   })
 
   test('is never reached without the cheap rung having been tried', () => {
@@ -655,6 +665,7 @@ describe('the ledger the decision writes', () => {
     const pending = { ts: T0 + 240_000, kind: 'reconnect' as const, outageKey: `wan:${T0}` }
     const out = decide(armedInput({ ledger: ledger({ pending, consecutiveActions: 1 }) }))
     expect(out.state).toBe('settling')
+    expect(out.blockedBy).toEqual(['action_pending'])
     expect(out.ledger.pending).toEqual(pending)
     expect(out.ledger.consecutiveActions).toBe(1)
     expect(out.ledger.ladder.t0).toBeNull()
@@ -882,5 +893,187 @@ describe('a recovery has to hold', () => {
     // sustained recovery.
     expect(secondAttempt.ledger.healthySince).toBe(now + 30_000)
     expect(secondAttempt.state).toBe('recovering')
+  })
+})
+
+/**
+ * The blockers the audit skill's phase 6a found asserted by nothing.
+ *
+ * Two of them are failure mode #5 in the specification — **acting when the mini
+ * is not on the home line**, whose nasty variant is a travel router on the same
+ * 192.168.1.0/24 answering on the same gateway address. That one had zero
+ * coverage. Two more are the reboot budget itself. A precondition nothing
+ * asserts is a precondition that survives a refactor by luck.
+ */
+describe('preconditions that had no test', () => {
+  const armedNow = armedInput().now
+  /**
+   * `record()` resets `ongoingWanOutage` to null, and T0 falls back to `now`
+   * without it — so a test that overrides the record and forgets this measures a
+   * zero-second outage still inside the observe window, and every assertion
+   * about a blocker passes vacuously against `blockedBy: []`.
+   */
+  const downSince = { startedAt: T0, cycles: 8, evidence: ['cloudflare', 'google', 'quad9'] }
+
+  test('a Wi-Fi path is refused even when the collector claims the home line', () => {
+    // Deliberately inconsistent input: `onHomeLine: 1` over `pathClass: 'wifi'`
+    // cannot come from `deriveOnHomeLine`, which requires Ethernet. That is the
+    // point — this blocker is the second layer, for a collector whose verdict
+    // and whose facts disagree.
+    const out = decide(armedInput({ self: self({ probeTs: armedNow, wanAnchors: ALL_WAN_DOWN, onHomeLine: 1, pathClass: 'wifi', v6: { target: 'v6', received: 0 } }) }))
+    expect(out.blockedBy).toContain('not_ethernet')
+    expect(out.action).toBe('none')
+  })
+
+  test('a travel router on the same subnet is refused by the gateway address', () => {
+    // The failure this exists for: a mini that fell back to a travel router on
+    // 192.168.1.0/24 answers its gateway happily while every anchor fails. A
+    // ladder gated only on "gateway up, WAN down" would reboot a perfectly
+    // healthy home router in an empty house.
+    const out = decide(
+      armedInput({
+        self: self({ probeTs: armedNow, wanAnchors: ALL_WAN_DOWN, gatewayAddr: '192.168.1.254', v6: { target: 'v6', received: 0 } }),
+      }),
+    )
+    expect(out.blockedBy).toContain('gateway_addr_mismatch')
+    expect(out.action).toBe('none')
+  })
+
+  test('the record disagreeing about the home line is its own refusal', () => {
+    const out = decide(armedInput({ record: record({ newestSampleTs: armedNow - 10_000, wanAnchors: ALL_WAN_DOWN, onHomeLine: null, ongoingWanOutage: downSince }) }))
+    expect(out.blockedBy).toContain('off_home_line_record')
+  })
+
+  test('an unreachable gateway blocks from either source', () => {
+    const bySelf = decide(armedInput({ self: self({ probeTs: armedNow, wanAnchors: ALL_WAN_DOWN, gateway: { target: 'gateway', received: 0 } }) }))
+    expect(bySelf.blockedBy).toContain('gateway_down')
+
+    const byRecord = decide(
+      armedInput({ record: record({ newestSampleTs: armedNow - 10_000, wanAnchors: ALL_WAN_DOWN, gateway: { target: 'gateway', received: 0 }, ongoingWanOutage: downSince }) }),
+    )
+    expect(byRecord.blockedBy).toContain('gateway_down_record')
+  })
+
+  test('a recovery that failed again cannot buy a fresh action budget', () => {
+    // The laundering this prevents: recover for two cycles, fail again, and the
+    // new outage would otherwise be a fresh ladder with a full budget.
+    const out = decide(armedInput({ ledger: ledger({ postActionCooldownUntil: armedNow + 60_000, v6: { lastUpTs: armedNow, lastCheckedTs: armedNow } }) }))
+    expect(out.blockedBy).toContain('post_action_cooldown')
+    expect(out.action).toBe('none')
+  })
+})
+
+describe('the reboot budget, which nothing asserted', () => {
+  function rebootDue(over: Partial<LadderInput> = {}): LadderInput {
+    const input = armedInput()
+    const now = T0 + DEFAULT_POLICY.rebootAtS * 1000 + 5_000
+    return {
+      ...input,
+      now,
+      policy: { ...DEFAULT_POLICY, armed: true, rebootEnabled: true },
+      record: { ...input.record!, newestSampleTs: now - 10_000 },
+      self: { ...input.self!, probeTs: now },
+      carrier: { stale: false, lineStatus: 'Up', showtimeStartS: 4000, freshPollAgeS: 10 },
+      ledger: ledger({
+        ladder: { outageKey: `wan:${T0}`, t0: T0, rung: 'reconnect', enteredAt: T0, settleUntil: null, announcedAt: T0 + 200_000 },
+        v6: { lastUpTs: now - 60_000, lastCheckedTs: now },
+      }),
+      ...over,
+    }
+  }
+
+  test('two reboots in a day is the cap, and the third is refused', () => {
+    const input = rebootDue()
+    const actions = [1, 2].map((i) => ({ ts: input.now - i * 7 * 3_600_000, kind: 'reboot' as const, outageKey: `wan:x${i}`, outcome: 'executed' as const }))
+    const out = decide({ ...input, ledger: { ...input.ledger, actions } })
+    expect(out.blockedBy).toContain('reboot_rate_limit')
+    expect(out.action).toBe('none')
+  })
+
+  test('two reboots closer together than six hours is refused on spacing alone', () => {
+    const input = rebootDue()
+    const actions = [{ ts: input.now - 3_600_000, kind: 'reboot' as const, outageKey: 'wan:earlier', outcome: 'executed' as const }]
+    const out = decide({ ...input, ledger: { ...input.ledger, actions } })
+    expect(out.blockedBy).toContain('reboot_min_interval')
+    // Not the daily cap — one reboot is well inside it. The two limits are
+    // independent, and a test that could not tell them apart would pass with
+    // either one deleted.
+    expect(out.blockedBy).not.toContain('reboot_rate_limit')
+  })
+
+  test('an action that never reached the line spends no budget', () => {
+    // `recordOutcome` gives the latch increment back for these; the rate limits
+    // read the actions array directly, so this asserts the other half.
+    const input = rebootDue()
+    const actions = [1, 2].map((i) => ({ ts: input.now - i * 7 * 3_600_000, kind: 'reboot' as const, outageKey: `wan:x${i}`, outcome: 'not_executed' as const }))
+    const out = decide({ ...input, ledger: { ...input.ledger, actions } })
+    // Deliberately still counted: the budget is spent on *attempts*, because a
+    // refusal that repeats is a router that cannot be read, and hammering it is
+    // not the answer. Documented here so the choice is visible rather than
+    // implicit in a filter that does not mention outcome.
+    expect(out.blockedBy).toContain('reboot_rate_limit')
+  })
+})
+
+/**
+ * The three windows, asserted by the name of the thing that holds them shut.
+ *
+ * Every one of these was covered only through the state it produced, which
+ * passes just as well if the timer is removed and something else happens to
+ * block. The names are what the log prints at 03:00.
+ */
+describe('the windows that hold a rung shut', () => {
+  test('nothing acts inside the observe window', () => {
+    const now = T0 + 100_000
+    const out = decide(
+      armedInput({
+        now,
+        record: record({ newestSampleTs: now - 10_000, wanAnchors: ALL_WAN_DOWN, ongoingWanOutage: { startedAt: T0, cycles: 3, evidence: ['cloudflare'] } }),
+        self: self({ probeTs: now, wanAnchors: ALL_WAN_DOWN, v6: { target: 'v6', received: 0 } }),
+        ledger: ledger({ ladder: { outageKey: `wan:${T0}`, t0: T0, rung: 'reconnect', enteredAt: T0, settleUntil: null, announcedAt: null }, v6: { lastUpTs: now - 60_000, lastCheckedTs: now } }),
+      }),
+    )
+    // The gate is the branch, not a blocker: even with the ladder already
+    // standing at the reconnect rung and every precondition satisfied, 100 s in
+    // the machine is still observing and proposes nothing.
+    expect(out.state).toBe('confirmed')
+    expect(out.rung).toBe('observe')
+    expect(out.action).toBe('none')
+    expect(out.note).toContain('observing until 240s')
+  })
+
+  test('the reboot rung is not reachable before its due time', () => {
+    const now = T0 + DEFAULT_POLICY.observeS * 1000 + 5_000
+    const out = decide(
+      armedInput({
+        now,
+        policy: { ...DEFAULT_POLICY, armed: true, rebootEnabled: true },
+        record: record({ newestSampleTs: now - 10_000, wanAnchors: ALL_WAN_DOWN, ongoingWanOutage: { startedAt: T0, cycles: 9, evidence: ['cloudflare'] } }),
+        self: self({ probeTs: now, wanAnchors: ALL_WAN_DOWN, v6: { target: 'v6', received: 0 } }),
+        ledger: ledger({
+          ladder: { outageKey: `wan:${T0}`, t0: T0, rung: 'reboot', enteredAt: T0, settleUntil: null, announcedAt: null },
+          v6: { lastUpTs: now - 60_000, lastCheckedTs: now },
+        }),
+      }),
+    )
+    // The ledger already stands at the reboot rung and the reconnect settle has
+    // passed, so nothing but the clock is holding it — and the decision is
+    // still the cheap rung.
+    expect(out.rung).toBe('reconnect')
+  })
+
+  test('one reconnect per hour, independent of the daily cap', () => {
+    const input = armedInput()
+    const out = decide({
+      ...input,
+      ledger: ledger({
+        actions: [{ ts: input.now - 600_000, kind: 'reconnect', outageKey: 'wan:earlier', outcome: 'executed' }],
+        v6: { lastUpTs: input.now, lastCheckedTs: input.now },
+      }),
+    })
+    expect(out.blockedBy).toContain('reconnect_min_interval')
+    // One action is nowhere near the six-per-day cap, so a test that could not
+    // tell the two limits apart would pass with either one deleted.
+    expect(out.blockedBy).not.toContain('reconnect_rate_limit')
   })
 })

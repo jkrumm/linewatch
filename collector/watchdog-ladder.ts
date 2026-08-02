@@ -541,7 +541,13 @@ function reconnectBlockers(input: LadderInput, t0: number): string[] {
   const { policy, ledger, now, record } = input
   const blocked: string[] = []
 
-  if (now - t0 < policy.observeS * 1000) blocked.push('observe_window')
+  // No `observe_window` blocker here, and its absence is deliberate. One lived
+  // here and could never fire: this function is only called from the branch
+  // guarded by `downForS >= policy.observeS`, and `downForS` is computed from
+  // the same `t0` passed in — so the check was the exact negation of its own
+  // caller's condition. It read as defence in depth and was dead code claiming
+  // to be a precondition, which is the same class of defect as the two the
+  // record-evidence fields left unreachable. The branch is the gate.
 
   // The belt on the timer's braces: the clock says "long enough", the cycle
   // count says "and we measured it that many times". They disagree exactly when
@@ -563,8 +569,10 @@ function rebootBlockers(input: LadderInput, t0: number, outageClass: OutageClass
   if (!policy.rebootEnabled) blocked.push('reboot_disabled')
   if (outageClass === 'v4_only_down' && !policy.rebootOnV4Only) blocked.push('reboot_on_v4_only_disabled')
 
-  const dueAt = outageClass === 'v4_only_down' ? policy.rebootAtSv4Only : policy.rebootAtS
-  if (now - t0 < dueAt * 1000) blocked.push('reboot_window')
+  // Likewise no `reboot_window`: `rebootIsDue` already requires
+  // `downForS >= rebootDueAt` off the same `t0`, so the check could not fire.
+  // The due time still lives in the policy and is still what decides the rung;
+  // it is simply not restated here as a blocker that cannot block.
 
   // The ladder is never skipped: the cheap rung is reached and either executed
   // or blocked-and-reported before the destructive one becomes available.

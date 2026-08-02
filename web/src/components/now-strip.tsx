@@ -1,4 +1,4 @@
-import { Card, Group, SimpleGrid, Stack, Text, ThemeIcon, Tooltip } from '@mantine/core'
+import { Card, Divider, Group, SimpleGrid, Stack, Text, ThemeIcon, Tooltip } from '@mantine/core'
 import {
   IconAlertTriangle,
   IconCircleCheck,
@@ -6,6 +6,7 @@ import {
   IconRouter,
   IconWorld,
 } from '@tabler/icons-react'
+import type { ReactNode } from 'react'
 import type { LiveReading } from '../lib/live'
 import { liveGateway, liveInternet } from '../lib/live'
 import type { OngoingOutage, StatusSample } from '../lib/types'
@@ -52,14 +53,29 @@ const SCOPE_LABEL: Record<OngoingOutage['scope'], string> = {
  * said — drop it and "Loss 0.0%" here reads as contradicting the KPI row's "Worst 5 minutes: 100.0%
  * lost" a few rows down. They are different measurements and only that caption keeps them apart.
  *
+ * **Three labelled cells, left-packed, hairline-separated — not three items spread by
+ * `space-between`.** The spread version distributed the same three children across whatever width
+ * the card had, which on a 1500px monitor put ~400px of nothing between each: the readings floated
+ * unanchored near the middle and the age sat alone against the right edge, so the row read as three
+ * unrelated fragments rather than one strip. Distribution is not composition — nothing said which
+ * fragment belonged to which, and the gaps moved with the viewport. Every cell now has the same
+ * internal shape (a micro-caps `CellLabel` over its content), the cells sit adjacent behind vertical
+ * `Divider`s, and the whole cluster hugs the left. The right-hand emptiness is then plainly margin
+ * rather than three pieces of debris that happen to be far apart.
+ *
+ * `CellLabel` is also what lets the verdict column keep its caption-free headline *and* line up: the
+ * three labels share one baseline, so "All systems up", the two readings and the age all start at
+ * the same y regardless of how many lines the verdict happens to need.
+ *
+ * **The latency figures are the largest type in the strip** (`fz="lg"` mono against `sm`/`xs`
+ * elsewhere). They are the only live measurements here; at uniform `sm` they carried the same weight
+ * as their own captions and the timestamp, so the eye had nowhere to land first.
+ *
  * **Two explicit layouts, not one wrapping row.** At 338px (this card's width on a 360px viewport)
- * the three children — verdict, readings, age — measure ~600px, so a single `wrap="wrap"` row broke
- * onto two or three flex lines, and `justify: space-between` places a lone item on the final line at
- * flex-**start** rather than centring it — the age landed hard left under the readings, unlabelled,
- * reading as a stray fragment. Worse, *which* items shared a line moved with the verdict's own
- * width (one line vs two, with vs without an outage), so the age drifted between renders. With a
- * narrow path that exists on its own terms, `wrap` comes off the wide one and `space-between` means
- * what it looks like.
+ * the three cells measure ~600px, so a single `wrap="wrap"` row broke onto two or three flex lines,
+ * and *which* items shared a line moved with the verdict's own width (one line vs two, with vs
+ * without an outage), so the age drifted between renders. The narrow path stacks the same three
+ * cells with horizontal rules instead — same segmentation, same labels, rotated.
  */
 export function NowStrip({
   status,
@@ -99,64 +115,66 @@ export function NowStrip({
   const gateway = liveGateway(lastSamples)
   const internet = liveInternet(lastSamples)
 
+  const verdict = (
+    <Verdict ongoingOutages={ongoingOutages} reporting={reporting} latestTs={latestTs} now={now} pending={pending} />
+  )
+  const age = (
+    <Text size="sm" c="dimmed" ff="monospace">
+      {latestTs === null ? 'no data' : fmtRelative(latestTs, now)}
+    </Text>
+  )
+
   return (
     <Card py="xs" px="sm">
       <Stack gap="xs" hiddenFrom="sm">
-        <Verdict ongoingOutages={ongoingOutages} reporting={reporting} latestTs={latestTs} now={now} pending={pending} />
-        <Stack gap={2}>
-          <CycleCaption />
+        <Cell label="Status">{verdict}</Cell>
+        <Divider />
+        <Cell label="Latest cycle">
           <SimpleGrid cols={2} spacing="xs">
             <Reading kind="router" reading={gateway} now={now} />
             <Reading kind="internet" reading={internet} now={now} />
           </SimpleGrid>
-        </Stack>
-        <MeasuredAge latestTs={latestTs} now={now} />
+        </Cell>
+        <Divider />
+        <Cell label="Measured">{age}</Cell>
       </Stack>
 
-      <Group justify="space-between" align="flex-start" wrap="nowrap" gap="md" visibleFrom="sm">
-        <Verdict ongoingOutages={ongoingOutages} reporting={reporting} latestTs={latestTs} now={now} pending={pending} />
-        <Stack gap={2}>
-          <CycleCaption />
-          <Group gap="xl" wrap="nowrap">
+      <Group align="stretch" wrap="nowrap" gap="lg" visibleFrom="sm">
+        <Cell label="Status">{verdict}</Cell>
+        <Divider orientation="vertical" />
+        <Cell label="Latest cycle">
+          <Group gap="xl" wrap="nowrap" align="flex-start">
             <Reading kind="router" reading={gateway} now={now} />
             <Reading kind="internet" reading={internet} now={now} />
           </Group>
-        </Stack>
-        <MeasuredAge latestTs={latestTs} now={now} />
+        </Cell>
+        <Divider orientation="vertical" />
+        <Cell label="Measured">{age}</Cell>
       </Group>
     </Card>
   )
 }
 
-/** The shared "Latest cycle" micro-label — unchanged from the pre-fold strip. Dropping it makes
- * "Loss 0.0%" here read as contradicting the KPI row's "Worst 5 minutes: 100.0% lost" a few rows
- * down; they are different measurements and this caption is what keeps them apart. Drawn on both
- * layout paths. */
-function CycleCaption() {
-  return (
-    <Text fz={VX.text.micro} c="dimmed" tt="uppercase" fw={600} style={{ letterSpacing: '0.06em' }}>
-      Latest cycle
-    </Text>
-  )
-}
-
 /**
- * The strip's shared age, as a labelled unit rather than a bare number relying on its position.
+ * One segment of the strip: a micro-caps label over its content.
  *
- * It used to be a right-aligned `Text` at the end of a wrapping row, i.e. its meaning was entirely
- * carried by where flexbox happened to put it — and flexbox put it at flex-start on a line of its
- * own the moment the row wrapped. A label costs one word and works at every width.
+ * Every cell takes this shape so the three labels share a baseline and the strip reads as a grid
+ * rather than as three differently-built clusters that happen to be adjacent. **"Latest cycle" in
+ * particular is load-bearing copy, not decoration** — drop it and "0.0% loss" here reads as
+ * contradicting the KPI row's "Worst 5 minutes: 100.0% lost" a few rows down. They are different
+ * measurements and this caption is the only thing keeping them apart. "Measured" is the same
+ * argument for the age: it used to be a bare right-aligned number whose meaning came entirely from
+ * where flexbox happened to put it, which stopped being anywhere in particular the moment the row
+ * wrapped.
  */
-function MeasuredAge({ latestTs, now }: { latestTs: number | null; now: number }) {
+function Cell({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <Group gap={6} wrap="nowrap" align="baseline">
+    <Stack gap={4} miw={0}>
       <Text fz={VX.text.micro} c="dimmed" tt="uppercase" fw={600} style={{ letterSpacing: '0.06em' }}>
-        Measured
+        {label}
       </Text>
-      <Text size="sm" c="dimmed" ff="monospace">
-        {latestTs === null ? 'no data' : fmtRelative(latestTs, now)}
-      </Text>
-    </Group>
+      {children}
+    </Stack>
   )
 }
 
@@ -189,8 +207,11 @@ function Verdict({
   if (reporting && ongoingOutages.length === 0) {
     return (
       <Group gap="sm" wrap="nowrap">
-        <ThemeIcon size={32} radius="md" color="green" variant="light">
-          <IconCircleCheck size={18} />
+        {/* 28, matching `NotReportingLine`/`OutageLine`. At 32 the card grew a few px taller the
+            moment the verdict went from green to a warning, i.e. the strip changed height for a
+            reason that had nothing to do with what it was saying. */}
+        <ThemeIcon size={28} radius="md" color="green" variant="light">
+          <IconCircleCheck size={16} />
         </ThemeIcon>
         <Stack gap={0}>
           <Text fw={600} size="sm">
@@ -300,10 +321,12 @@ function Reading({ kind, reading, now }: { kind: 'router' | 'internet'; reading:
             {basis}
           </Text>
         </Group>
+        {/* The strip's only live measurements, and the largest type in it — see the module
+            docblock. Everything around them is a caption or a timestamp. */}
         <Group gap="sm" wrap="nowrap" align="baseline">
           <Text
             fw={600}
-            size="sm"
+            fz="lg"
             ff="monospace"
             c={stale ? 'dimmed' : undefined}
             td={stale ? 'line-through' : undefined}
@@ -311,7 +334,7 @@ function Reading({ kind, reading, now }: { kind: 'router' | 'internet'; reading:
             {fmtMs(reading.medMs)}
           </Text>
           <Text
-            size="xs"
+            size="sm"
             ff="monospace"
             c={stale ? 'dimmed' : degraded || down ? 'red' : 'dimmed'}
             td={stale ? 'line-through' : undefined}

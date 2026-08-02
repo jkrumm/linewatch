@@ -133,8 +133,11 @@ structure, the accent only points.
   `mantine-shade-index` (a shade-pinned color — `c="yellow.7"` is one fixed swatch in both schemes;
   use `VX.status.*` or the bare hue name), `raw-html-layout`, `inline-spacing`, `inline-display`.
   Only the Mantine-free `src/charts/**` may use raw `<div>` (still with `VX.*` tokens).
-- **Reach for the shipped composite before wrapping one.** A `StatCard` past a threshold takes
-  `tone="warn" | "bad"` (an accent rail down its leading edge); a chart goes in `ChartCard`. Wrapping
+- **Reach for the shipped composite before wrapping one.** A `StatCard` carrying a threshold verdict
+  takes `tone="good" | "warn" | "bad"` (an accent rail down its leading edge). Omitting `tone` is not
+  the same as `"good"` — omitted means "fine, or nothing measured" and stays untinted, so `"good"` is
+  a positive assertion you opt into for a value that earned it (`0 min` downtime), never a default.
+  A chart goes in `ChartCard`. Wrapping
   a shipped card in a hand-positioned `Box` to add a mark it already has is how an app grows a second
   card idiom — one the guard cannot recognize as a card, and therefore cannot police. If a composite
   genuinely can't express what you need, that is a gap to report, not to route around.

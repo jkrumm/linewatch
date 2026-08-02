@@ -137,24 +137,59 @@ describe('densifyBuckets against a live-shaped /api/probes response', () => {
 })
 
 describe('densifyBuckets contract violations', () => {
-  test('throws when a row lands on no slot instead of silently dropping it', () => {
-    expect(() =>
-      densifyBuckets([{ bucket: HOLE_TO + HOUR_MS }], {
-        from: HOLE_FROM,
-        to: HOLE_TO,
-        bucketSeconds: 3_600,
-      }),
-    ).toThrow(/landed on no slot/)
-  })
-
-  test('throws on a bucket start that is off the grid', () => {
+  /**
+   * The split this function's docblock draws, pinned from both sides. A row that lands on no slot
+   * used to throw whichever reason it had, and one of the two reasons is routine: a placeholder
+   * from a window one step earlier (see the `keepAcrossTimeAdvance` case below).
+   */
+  test('throws on a bucket start inside the window but off the grid', () => {
     expect(() =>
       densifyBuckets([{ bucket: Date.UTC(2026, 6, 30, 11, 30, 0) }], {
         from: HOLE_FROM,
         to: HOLE_TO,
         bucketSeconds: 3_600,
       }),
-    ).toThrow(/landed on no slot/)
+    ).toThrow(/off the 3600 s grid/)
+  })
+
+  test('skips an on-grid row outside the window rather than throwing', () => {
+    const slots = densifyBuckets([{ bucket: HOLE_TO + HOUR_MS }], {
+      from: HOLE_FROM,
+      to: HOLE_TO,
+      bucketSeconds: 3_600,
+    })
+    // The window is still fully densified, and the stray row simply is not in it.
+    expect(slots.every((s) => s.value === null)).toBe(true)
+    expect(slots.some((s) => s.bucketStart === HOLE_TO + HOUR_MS)).toBe(false)
+  })
+
+  /**
+   * The live failure this split exists for, in the shape that produced it.
+   *
+   * `keepAcrossTimeAdvance` serves the previous window's answer under the new key when the window
+   * steps forward — span-identical, shifted by one bucket — so the oldest row falls before the new
+   * `first`. On the 24 h range that is one 5-minute step, and it took the whole page down with
+   * `1 of 288 rows landed on no slot` every five minutes. A placeholder that had been chaining for
+   * an hour threw `13 of 288`; the reported window is this one.
+   */
+  test('a placeholder from one step earlier densifies instead of throwing', () => {
+    const bucketMs = 300_000
+    const to = 1_785_684_600_000
+    const from = to - 86_400_000
+    // Every bucket of the PREVIOUS window, measured — the shape a real response has.
+    const previousWindow = Array.from({ length: 289 }, (_, i) => ({
+      bucket: from - bucketMs + i * bucketMs,
+    }))
+
+    const slots = densifyBuckets(previousWindow, { from, to, bucketSeconds: 300 })
+
+    expect(slots).toHaveLength(289)
+    // Everything the two windows share is drawn...
+    expect(slots.slice(0, -1).every((s) => s.value !== null)).toBe(true)
+    // ...and only the newest slot, which the placeholder cannot know about yet, is empty. That one
+    // null is the accepted cost of the placeholder: it renders "not measured" for well under a
+    // second, until the real fetch lands.
+    expect(slots.at(-1)?.value).toBeNull()
   })
 
   test('throws when two rows share one bucket start', () => {

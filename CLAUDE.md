@@ -239,6 +239,18 @@ anyone they disagreed.
   the label, and it doubles as the scale's domain value — which is why both
   guarantee uniqueness. Two points sharing a domain value collapse onto one x
   position and one stops being drawn: a measurement silently dropped.
+- **`densifyBuckets` tolerates an overlapping window and rejects a wrong grid — two
+  causes, one symptom.** A row landing on no slot used to throw either way, and one
+  of the two causes is routine: `keepAcrossTimeAdvance` serves the previous window's
+  answer as `placeholderData` when the window steps forward, so its oldest rows fall
+  before the new `from`. On the 24 h range that is one 5-minute step, and it took the
+  page down with `1 of 288 rows landed on no slot` **every five minutes** (a
+  placeholder chaining for an hour threw `13 of 288`). Two individually correct
+  designs: densify's docblock asserted "the server filters `ts >= from AND ts <= to`",
+  which the query layer quietly violates by design. So the check is split — off-grid
+  *inside* the window still throws (nothing legitimate produces it), on-grid *outside*
+  the window is skipped. The cost, accepted: while a placeholder is on screen the
+  newest slot has no row and reads "not measured" for well under a second.
 - **Loading is a third state, and every reachable path renders it.** "Nothing
   measured yet" and "measured, and nothing was there" are different facts, and a
   query in flight must never render as the second. `?? []` on a query result is

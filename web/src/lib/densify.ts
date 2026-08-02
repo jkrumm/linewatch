@@ -36,10 +36,31 @@ const MAX_SLOTS = 5_000
  * `from`. Aligning to `from` instead would shift every point by up to one bucket and, far worse,
  * would leave every real bucket unmatched — every measurement rendered as a hole.
  *
- * Rows that land on no slot are a contract violation (the server filters `ts >= from AND ts <= to`,
- * so every bucket it returns is on the grid and inside the window) and throw rather than
- * disappearing. Dropping a measured bucket silently is the same class of bug this function exists
- * to fix.
+ * **A row that lands on no slot has two possible causes, and only one of them is a bug.** This used
+ * to throw on both, which took the whole dashboard down every five minutes:
+ *
+ *  - **Off the grid, inside the window** — the window and the bucket size genuinely do not describe
+ *    this response. Nothing legitimate produces it: the server groups on `(ts / bucketMs) * bucketMs`
+ *    and filters `ts >= from AND ts <= to`, so a row inside the window is on the grid by
+ *    construction. Still throws. Dropping a measured bucket silently is the class of bug this
+ *    function exists to fix, and this is that case.
+ *  - **On the grid, outside the window** — the caller is holding an *overlapping* window's rows.
+ *    That is not a contract violation, it is `keepAcrossTimeAdvance` (`lib/queries.ts`) doing its
+ *    job: when the window steps forward, the previous answer is served as `placeholderData` under
+ *    the new key so the page doesn't drop to skeletons every step. Those rows are span-identical
+ *    but shifted, so the oldest of them fall before `first`. Skipped, because a bucket outside the
+ *    requested window is simply not part of what this call was asked to draw.
+ *
+ * That second case was live and constant: on the 24 h range the window steps one 5-minute bucket at
+ * a time, so a single step put one measured row before `first` and threw
+ * `1 of 288 rows landed on no slot`. A placeholder that had been chaining for an hour (each step's
+ * placeholder drawn from the last, while no fetch landed) threw `13 of 288`.
+ *
+ * The consequence to accept, rather than a thing to fix: for the moment a placeholder is on screen,
+ * the newest slot has no row behind it and densifies to `null` — "not measured" — until the real
+ * fetch lands, well under a second. It is one bucket at the leading edge, and it is the same trade
+ * `keepAcrossTimeAdvance`'s own docblock already makes when it shows a 99.9%-overlapping window
+ * under the current label.
  */
 export function densifyBuckets<T extends { bucket: number }>(
   rows: T[],
@@ -57,24 +78,40 @@ export function densifyBuckets<T extends { bucket: number }>(
     )
   }
 
+  // Duplicate detection runs over the RAW rows, before the window filter below — two rows sharing a
+  // bucket start is a malformed response whichever window it is read against, and checking it after
+  // the filter would let a duplicate pair hide by sitting outside the window.
+  const seen = new Set<number>()
+  for (const row of rows) {
+    if (seen.has(row.bucket)) {
+      throw new RangeError('densifyBuckets: two rows share one bucket start — expected one row per bucket')
+    }
+    seen.add(row.bucket)
+  }
+
   const byBucket = new Map<number, T>()
-  for (const row of rows) byBucket.set(row.bucket, row)
-  if (byBucket.size !== rows.length) {
-    throw new RangeError('densifyBuckets: two rows share one bucket start — expected one row per bucket')
+  let offGrid = 0
+  for (const row of rows) {
+    // Outside the requested window: an overlapping window's row, carried in by a placeholder. Not
+    // this call's subject — see the docblock. Checked FIRST, so an out-of-window row is never also
+    // judged against the grid: the two conditions have different causes and only one is a bug.
+    if (row.bucket < first || row.bucket > opts.to) continue
+    if ((row.bucket - first) % bucketMs !== 0) {
+      offGrid += 1
+      continue
+    }
+    byBucket.set(row.bucket, row)
+  }
+
+  if (offGrid > 0) {
+    throw new RangeError(
+      `densifyBuckets: ${offGrid} of ${rows.length} rows sit inside the window [${opts.from}, ${opts.to}] but off the ${opts.bucketSeconds} s grid — the bucket size does not describe this response`,
+    )
   }
 
   const slots: Slot<T>[] = []
-  let matched = 0
   for (let bucketStart = first; bucketStart <= opts.to; bucketStart += bucketMs) {
-    const value = byBucket.get(bucketStart) ?? null
-    if (value !== null) matched += 1
-    slots.push({ key: new Date(bucketStart).toISOString(), bucketStart, value })
-  }
-
-  if (matched !== byBucket.size) {
-    throw new RangeError(
-      `densifyBuckets: ${byBucket.size - matched} of ${byBucket.size} rows landed on no slot — the window [${opts.from}, ${opts.to}] and the ${opts.bucketSeconds} s bucket size do not describe this response`,
-    )
+    slots.push({ key: new Date(bucketStart).toISOString(), bucketStart, value: byBucket.get(bucketStart) ?? null })
   }
 
   return slots

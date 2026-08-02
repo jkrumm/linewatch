@@ -80,30 +80,56 @@ export function fmtDuration(totalSeconds: number): string {
   return remMinutes === 0 ? `${hours}h` : `${hours}h ${remMinutes}m`
 }
 
-/** Locked to `en-GB` and UTC, not the host's locale.
+/**
+ * The reader's own clock, in the reader's own conventions.
  *
- * `Intl.DateTimeFormat(undefined, …)` rendered "2:28 PM" or "1. Aug., 14:28" depending on the
- * machine, and in neither case said which zone it meant — on a page whose whole purpose is
- * correlating a timeline against verdict cards stamped `UTC`. The zone is written out for the
- * same reason: a bare "14:28" is only readable if you already know the answer. */
-const CLOCK_FORMAT = new Intl.DateTimeFormat('en-GB', {
-  hour: '2-digit',
-  minute: '2-digit',
-  hour12: false,
-  timeZone: 'UTC',
-})
-const DATE_FORMAT = new Intl.DateTimeFormat('en-GB', {
-  month: 'short',
-  day: 'numeric',
-  timeZone: 'UTC',
-})
+ * These were locked to `en-GB` and UTC with the zone written out, and that reasoning was sound as
+ * far as it went: `Intl.DateTimeFormat(undefined, …)` renders differently per machine, and a bare
+ * "14:28" is only readable if you already know which zone it means. What it left out is who reads
+ * this page. One person, on one machine, in one zone, matching a column on a chart against the
+ * memory of a call that dropped — and doing the +02:00 in their head every single time. A
+ * dashboard whose timestamps need arithmetic before they can be held against a wall clock is the
+ * worse ambiguity, and it is the one that was shipping.
+ *
+ * So: host locale, host zone, no suffix. The reader's own zone is the one zone nobody has to be
+ * told they are in.
+ *
+ * **The exported formatters take neither, and the factories do.** A test cannot assert a host
+ * default without pinning the machine it runs on, and one that asserts the host's own answer to
+ * the host's own question has verified nothing. The factories let `format.test.ts` fix both and
+ * check the contract that actually matters — a real wall-clock conversion, and no zone tag — while
+ * the page keeps whatever the browser says.
+ *
+ * `hour12` is deliberately unset rather than forced to `false`: which clock to draw is exactly the
+ * kind of thing "the browser's own conventions" is supposed to decide.
+ */
+export function makeClockFormat(locale?: string, timeZone?: string): Intl.DateTimeFormat {
+  return new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', timeZone })
+}
+
+/** One formatter for the whole stamp, not a date one concatenated to a clock one with " at ".
+ * Where the time sits relative to the date, and what separates them, is a property of the locale —
+ * `de-DE` writes "1. Aug., 14:28" and `en-US` "Aug 1, 2:28 PM", and neither is reachable by gluing
+ * two independently-formatted halves together. */
+export function makeDateTimeFormat(locale?: string, timeZone?: string): Intl.DateTimeFormat {
+  return new Intl.DateTimeFormat(locale, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone,
+  })
+}
+
+const CLOCK_FORMAT = makeClockFormat()
+const DATE_TIME_FORMAT = makeDateTimeFormat()
 
 export function fmtClock(ts: number): string {
-  return `${CLOCK_FORMAT.format(new Date(ts))} UTC`
+  return CLOCK_FORMAT.format(new Date(ts))
 }
 
 export function fmtDateTime(ts: number): string {
-  return `${DATE_FORMAT.format(new Date(ts))} at ${fmtClock(ts)}`
+  return DATE_TIME_FORMAT.format(new Date(ts))
 }
 
 /** How long ago, in a compact glance-friendly form — "just now", "3m ago", "2h ago". */

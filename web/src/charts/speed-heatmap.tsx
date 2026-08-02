@@ -3,16 +3,14 @@ import type { SpeedTest } from '../lib/types'
 import { densifyBuckets } from '../lib/densify'
 import { fmtMbps, fmtPct } from '../lib/format'
 import { CategoryGrid, type GridCell } from './category-grid'
+import { localDayKey, localDayStart, localHourKey } from './local-calendar'
 import { PendingChart } from './pending'
 
-/** One cell is one UTC hour, matching the availability grid so the two calendars on this dashboard
- * are read the same way. Hourly is also the speed test's own cadence (DESIGN.md, "Cadence"). */
+/** One cell is one hour of the reader's own day, matching the availability grid so the two
+ * calendars on this dashboard are read the same way — `local-calendar.ts` carries the argument for
+ * both. Hourly is also the speed test's own cadence (DESIGN.md, "Cadence"). */
 const HOUR_SECONDS = 3_600
-const DAY_FORMAT = new Intl.DateTimeFormat(undefined, {
-  timeZone: 'UTC',
-  month: 'short',
-  day: 'numeric',
-})
+const DAY_FORMAT = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
 const HOUR_LABELS = Array.from({ length: 24 }, (_, h) => String(h).padStart(2, '0'))
 
 /**
@@ -27,7 +25,7 @@ const FULL_INTENSITY_DEFICIT_PCT = 50
 /**
  * The grid draws at most this many days, however long the selected range is.
  *
- * Not cosmetic. The Speed view offers an `all` range of 365 days, and one row per day × 24 UTC
+ * Not cosmetic. The Speed view offers an `all` range of 365 days, and one row per day × 24
  * hours is 8 760 cells — past `densifyBuckets`'s slot cap, and unreadable long before it. Clamping
  * to the trailing month keeps this chart answering the question it is for ("which hours of the day
  * are slow") while the throughput line above it keeps the full range. The subtitle states this
@@ -40,8 +38,20 @@ const MAX_DAYS = 30
 
 type HourRow = { bucket: number; downloads: number[]; failures: SpeedTest[] }
 
-const dayKey = (ts: number) => new Date(ts).toISOString().slice(0, 10)
 const cellKey = (row: string, col: string) => `${row} ${col}`
+
+/** The two hourly buckets an autumn fall-back puts in one local hour, combined. Runs concatenate —
+ * both sets of runs really did happen in that local hour — and the cell's mean is then taken over
+ * the union, which is the same figure it would have been had the clock not moved. */
+function mergeHours(a: HourRow | null, b: HourRow | null): HourRow | null {
+  if (a === null) return b
+  if (b === null) return a
+  return {
+    bucket: a.bucket,
+    downloads: [...a.downloads, ...b.downloads],
+    failures: [...a.failures, ...b.failures],
+  }
+}
 
 /** Hourly "when is the line slow" heatmap, per DESIGN.md's "Speed" view.
  *
@@ -88,33 +98,47 @@ export function SpeedHeatmap({
     bucketSeconds: HOUR_SECONDS,
   })
 
-  const means = new Map<number, number>()
-  for (const slot of slots) {
-    const row = slot.value
-    if (row === null || row.downloads.length === 0) continue
-    means.set(slot.bucketStart, row.downloads.reduce((a, b) => a + b, 0) / row.downloads.length)
-  }
-  const fastest = means.size > 0 ? Math.max(...means.values()) : null
-
-  const cells: GridCell[] = []
+  // Slots are folded onto their LOCAL cell before any mean is taken, because the fall-back hour
+  // puts two of them in one cell and a mean of the union is not the mean of two means. See
+  // `local-calendar.ts`. `order` keeps the calendar chronological.
   const sources = new Map<string, { row: HourRow | null; mean: number | null }>()
+  const coords = new Map<string, { row: string; col: string }>()
+  const order: string[] = []
   for (const slot of slots) {
-    const row = dayKey(slot.bucketStart)
-    const col = String(new Date(slot.bucketStart).getUTCHours()).padStart(2, '0')
-    const mean = means.get(slot.bucketStart) ?? null
-    const kind: GridCell['kind'] =
-      mean !== null ? 'measured' : slot.value !== null ? 'failed' : 'absent'
-    cells.push({
+    const row = localDayKey(slot.bucketStart)
+    const col = localHourKey(slot.bucketStart)
+    const key = cellKey(row, col)
+    const previous = sources.get(key)
+    if (previous === undefined) {
+      sources.set(key, { row: slot.value, mean: null })
+      coords.set(key, { row, col })
+      order.push(key)
+      continue
+    }
+    previous.row = mergeHours(previous.row, slot.value)
+  }
+
+  for (const source of sources.values()) {
+    const runs = source.row?.downloads ?? []
+    if (runs.length > 0) source.mean = runs.reduce((a, b) => a + b, 0) / runs.length
+  }
+  const means = [...sources.values()].map((s) => s.mean).filter((m): m is number => m !== null)
+  const fastest = means.length > 0 ? Math.max(...means) : null
+
+  const cells: GridCell[] = order.map((key) => {
+    const { row, col } = coords.get(key)!
+    const source = sources.get(key)!
+    const mean = source.mean
+    return {
       row,
       col,
-      kind,
+      kind: mean !== null ? 'measured' : source.row !== null ? 'failed' : 'absent',
       intensity:
         mean === null || fastest === null || fastest <= 0
           ? 0
           : Math.min(1, (100 * (fastest - mean)) / fastest / FULL_INTENSITY_DEFICIT_PCT),
-    })
-    sources.set(cellKey(row, col), { row: slot.value, mean })
-  }
+    }
+  })
   const rows = [...new Set(cells.map((c) => c.row))]
 
   return (
@@ -125,7 +149,7 @@ export function SpeedHeatmap({
       // `MAX_DAYS`. What this view still has to self-report (the repo's own CLAUDE.md: this is the
       // one block the range does not fully scope) is the structural cap, stated once and
       // unconditionally rather than re-derived from the current selection.
-      subtitle={`When the line is slow · never more than the trailing ${MAX_DAYS} days, by UTC hour.`}
+      subtitle={`When the line is slow · never more than the trailing ${MAX_DAYS} days, by hour of your day.`}
       tooltip="Darker cells averaged lower download throughput that hour; a cell paints full at half the fastest hour in range. Hatched cells either had no run or had one that failed — the tooltip says which."
     >
       {/* See `availability-strip.tsx`'s identical wrapper for why this is a floor, not a height. Here
@@ -145,7 +169,7 @@ export function SpeedHeatmap({
                 height={height}
                 chartId="speed-heatmap"
                 color={VX.accent}
-                rowLabel={(row) => DAY_FORMAT.format(new Date(`${row}T00:00:00Z`))}
+                rowLabel={(row) => DAY_FORMAT.format(localDayStart(row))}
                 // The captions are the strip's two ends, and they carry the real numbers rather than
                 // bare superlatives: "Slowest" over a range-relative ramp was the lie itself.
                 legend={{

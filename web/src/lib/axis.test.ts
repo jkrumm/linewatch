@@ -8,7 +8,11 @@ import {
   runAxisLabels,
 } from './axis'
 
-const JUL_31_2026_2305 = Date.UTC(2026, 6, 31, 23, 5)
+// Built from LOCAL components, not `Date.UTC`. These labels are the host's wall clock now, so an
+// instant pinned in UTC would render differently on every machine the suite runs on; pinning the
+// local components instead makes the expected string the same everywhere and still exercises the
+// real conversion (a formatter that had stayed on UTC renders these an offset away).
+const JUL_31_2026_2305 = new Date(2026, 6, 31, 23, 5).getTime()
 
 describe('bucketAxisLabel', () => {
   test('a sub-day bucket carries its date and its clock time', () => {
@@ -37,15 +41,18 @@ describe('bucketAxisLabel', () => {
     expect(bucketAxisLabel(aug1, 86_400)).not.toBe(bucketAxisLabel(aug1 + 365 * 86_400_000, 86_400))
   })
 
-  /** Rendered against the host clock, a label would disagree with every other timestamp on the
-   * page — all of which are UTC — and would move for the same instant depending on the machine. */
-  test('is UTC, not the host timezone', () => {
-    expect(bucketAxisLabel(Date.UTC(2026, 0, 1, 0, 30), 3_600)).toBe('01.01 00:30')
-    expect(bucketAxisLabel(Date.UTC(2026, 0, 1, 23, 30), 3_600)).toBe('01.01 23:30')
+  /** The host's wall clock, matching `fmtClock`/`fmtDateTime`. A tick and the tooltip that opens
+   * over it must not be read against two different clocks; both are the reader's own now. */
+  test('is the host timezone, not UTC', () => {
+    expect(bucketAxisLabel(new Date(2026, 0, 1, 0, 30).getTime(), 3_600)).toBe('01.01 00:30')
+    expect(bucketAxisLabel(new Date(2026, 0, 1, 23, 30).getTime(), 3_600)).toBe('01.01 23:30')
+    // Both endpoints sit within an hour of midnight, so on any host off UTC a `getUTC*` regression
+    // moves them to a different DATE, not merely a different hour — which is what makes these two
+    // assertions a real guard rather than a restatement of the formatter.
   })
 
   test('pads single-digit dates and times', () => {
-    expect(bucketAxisLabel(Date.UTC(2026, 7, 3, 4, 7), 60)).toBe('03.08 04:07')
+    expect(bucketAxisLabel(new Date(2026, 7, 3, 4, 7).getTime(), 60)).toBe('03.08 04:07')
   })
 
   /**
@@ -185,34 +192,53 @@ describe('fitTickCount', () => {
 })
 
 describe('runAxisLabels', () => {
-  const at = (iso: string) => Date.parse(iso)
+  /** Local components, for the reason `JUL_31_2026_2305` gives — the labels are the host's wall
+   * clock, so a UTC-pinned instant would render differently per machine. */
+  const at = (h: number, m: number, s = 0) => new Date(2026, 7, 1, h, m, s).getTime()
 
-  test('labels a run to the minute, in UTC', () => {
-    expect(runAxisLabels([at('2026-08-01T14:03:41Z')])).toEqual(['01.08 14:03'])
+  test('labels a run to the minute, on the host clock', () => {
+    expect(runAxisLabels([at(14, 3, 41)])).toEqual(['01.08 14:03'])
   })
 
   test('is index-aligned with its input and preserves order', () => {
-    const labels = runAxisLabels([at('2026-08-01T14:03:00Z'), at('2026-08-01T09:00:00Z')])
+    const labels = runAxisLabels([at(14, 3), at(9, 0)])
     expect(labels).toEqual(['01.08 14:03', '01.08 09:00'])
   })
 
   test('breaks a same-minute collision on every member of the group, not only the later one', () => {
     // A label doubles as the categorical scale's key: two runs sharing one would collapse onto a
     // single x position and one of them would stop being drawn.
-    const labels = runAxisLabels([at('2026-08-01T14:03:07Z'), at('2026-08-01T14:03:41Z')])
+    const labels = runAxisLabels([at(14, 3, 7), at(14, 3, 41)])
     expect(labels).toEqual(['01.08 14:03:07', '01.08 14:03:41'])
     expect(new Set(labels).size).toBe(2)
+  })
+
+  /**
+   * The collision local labels introduced, and the reason seconds are no longer the last resort.
+   *
+   * On the autumn fall-back the wall clock repeats an hour, so two runs 3600 s apart agree down to
+   * the second and the seconds tiebreak hands them one identical key — the silently-dropped
+   * measurement this function exists to prevent, moved from "twice in a minute" to "once a year".
+   *
+   * Constructed in UTC deliberately: the two instants have to straddle a real transition, which is
+   * a property of the zone the suite runs in. Skipped where there is none (a UTC host, or one whose
+   * zone does not observe DST) rather than asserted vacuously.
+   */
+  test('breaks a repeated wall-clock hour with the UTC offset', () => {
+    const first = Date.UTC(2026, 9, 25, 0, 30)
+    const second = first + 3_600_000
+    if (new Date(first).getTimezoneOffset() === new Date(second).getTimezoneOffset()) return
+
+    const labels = runAxisLabels([first, second])
+    expect(new Set(labels).size).toBe(2)
+    expect(labels.every((l) => l.includes('UTC'))).toBe(true)
   })
 
   test('leaves uncolliding labels at minute precision while a colliding pair gains seconds', () => {
     // Mixed precision across the axis is the cost of not dropping a point; mixed precision *within*
     // a colliding pair would read as a difference in the measurement, which is why the whole group
     // is disambiguated together.
-    const labels = runAxisLabels([
-      at('2026-08-01T09:00:00Z'),
-      at('2026-08-01T14:03:07Z'),
-      at('2026-08-01T14:03:41Z'),
-    ])
+    const labels = runAxisLabels([at(9, 0), at(14, 3, 7), at(14, 3, 41)])
     expect(labels).toEqual(['01.08 09:00', '01.08 14:03:07', '01.08 14:03:41'])
   })
 

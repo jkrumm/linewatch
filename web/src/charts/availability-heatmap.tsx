@@ -4,24 +4,18 @@ import { densifyBuckets } from '../lib/densify'
 import { PROBE_CYCLE_MS } from '../lib/range'
 import { fmtPct } from '../lib/format'
 import { CategoryGrid, type GridCell } from './category-grid'
+import { localDayKey, localDayStart, localHourKey } from './local-calendar'
 import { PendingChart } from './pending'
 
 /**
  * The bucket size this grid is a grid OF. Exported so the route's query and the chart cannot
- * disagree: one cell is one UTC hour, and any other bucket size would put two readings in one cell.
+ * disagree: one cell is one hour, and any other bucket size would put two readings in one cell.
  */
 export const AVAILABILITY_BUCKET_SECONDS = 3_600
 
-/** Both axes are UTC. `GET /api/probes` groups on `(ts / bucketMs) * bucketMs`, which is
- * epoch-aligned — i.e. UTC hours. Deriving the column with `getHours()` instead read those UTC
- * buckets through the browser's zone: across the October DST transition two distinct UTC buckets
- * collapse onto one local column (the later silently overwriting the earlier), and across March one
- * column receives nothing and renders as unmeasured. The axis is labelled UTC because it is. */
-const DAY_FORMAT = new Intl.DateTimeFormat(undefined, {
-  timeZone: 'UTC',
-  month: 'short',
-  day: 'numeric',
-})
+/** Both axes are the reader's own zone — see `local-calendar.ts` for why, and for what happens on
+ * the two days a year the local clock and the epoch-aligned bucket grid disagree. */
+const DAY_FORMAT = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
 const HOUR_LABELS = Array.from({ length: 24 }, (_, h) => String(h).padStart(2, '0'))
 
 /** Loss share at which a cell is painted at full strength. ABSOLUTE, not `value / max`: the
@@ -30,10 +24,30 @@ const HOUR_LABELS = Array.from({ length: 24 }, (_, h) => String(h).padStart(2, '
  * on this line — the 2026-07-30 baseline is 0% loss over 30 packets. */
 const FULL_INTENSITY_LOSS_PCT = 5
 
-const dayKey = (ts: number) => new Date(ts).toISOString().slice(0, 10)
 const cellKey = (row: string, col: string) => `${row} ${col}`
 
 type Source = { bucket: ProbeBucket | null }
+
+/**
+ * The two buckets an autumn fall-back puts in one local hour, combined into the one reading that
+ * cell stands for — MAX for the loss shares, SUM for the cycle counts.
+ *
+ * The same max-never-mean rule `foldColumns` states at length: averaging a fully-down bucket into
+ * a clean one describes an hour that never happened. Counts are additive for the same reason they
+ * are there, and `count` genuinely can exceed the hour's expected cycles in this one cell — which
+ * is correct, because that local hour genuinely ran twice.
+ */
+function mergeBuckets(a: ProbeBucket | null, b: ProbeBucket | null): ProbeBucket | null {
+  if (a === null) return b
+  if (b === null) return a
+  return {
+    ...a,
+    lossPct: Math.max(a.lossPct, b.lossPct),
+    maxLossPct: Math.max(a.maxLossPct, b.maxLossPct),
+    downCycles: a.downCycles + b.downCycles,
+    count: a.count + b.count,
+  }
+}
 
 /** Day × hour availability grid, per DESIGN.md's "Uptime" view. Always the trailing 30 days
  * regardless of the outage list's own range filter — the two answer different questions ("when,
@@ -77,19 +91,38 @@ export function AvailabilityHeatmap({
     Math.round((AVAILABILITY_BUCKET_SECONDS * 1000) / PROBE_CYCLE_MS),
   )
 
-  const cells: GridCell[] = []
+  // Merged by CELL, not pushed per slot. Two hourly buckets land in one local hour on the autumn
+  // fall-back, and a straight push would emit two `GridCell`s for one coordinate while `sources`
+  // kept only the later — the grid drawing one reading and the tooltip reporting the other. See
+  // `local-calendar.ts`. `order` keeps the calendar chronological; a `Map` preserves insertion
+  // order anyway, but relying on that for the row axis would be an invisible dependency.
   const sources = new Map<string, Source>()
+  const order: string[] = []
+  const coords = new Map<string, { row: string; col: string }>()
   for (const slot of slots) {
-    const row = dayKey(slot.bucketStart)
-    const col = String(new Date(slot.bucketStart).getUTCHours()).padStart(2, '0')
-    cells.push({
+    const row = localDayKey(slot.bucketStart)
+    const col = localHourKey(slot.bucketStart)
+    const key = cellKey(row, col)
+    const previous = sources.get(key)
+    if (previous === undefined) {
+      sources.set(key, { bucket: slot.value })
+      coords.set(key, { row, col })
+      order.push(key)
+      continue
+    }
+    previous.bucket = mergeBuckets(previous.bucket, slot.value)
+  }
+
+  const cells: GridCell[] = order.map((key) => {
+    const { row, col } = coords.get(key)!
+    const bucket = sources.get(key)!.bucket
+    return {
       row,
       col,
-      kind: slot.value === null ? 'absent' : 'measured',
-      intensity: slot.value === null ? 0 : Math.min(1, slot.value.lossPct / FULL_INTENSITY_LOSS_PCT),
-    })
-    sources.set(cellKey(row, col), { bucket: slot.value })
-  }
+      kind: bucket === null ? 'absent' : 'measured',
+      intensity: bucket === null ? 0 : Math.min(1, bucket.lossPct / FULL_INTENSITY_LOSS_PCT),
+    }
+  })
   // Rows come from the requested WINDOW (`slots`, densified over `from`/`to`), never from the
   // buckets a response happened to contain — so this stays the same 30 rows whether `isPending` is
   // true or not, and the grid height below can't jump the moment the query resolves.
@@ -99,8 +132,8 @@ export function AvailabilityHeatmap({
   return (
     <ChartCard
       title="Availability"
-      subtitle="Last 30 days, by UTC hour"
-      tooltip="Each cell is one UTC hour's WAN availability — darker means more loss that hour, up to 5% which paints full. Hatched cells were not measured at all, which is not the same as an hour with no loss."
+      subtitle="Last 30 days, by hour of your day"
+      tooltip="Each cell is one hour's WAN availability, on your own clock — darker means more loss that hour, up to 5% which paints full. Hatched cells were not measured at all, which is not the same as an hour with no loss."
     >
       {/* See `availability-strip.tsx`'s identical wrapper for why this is a floor, not a height. Here
           the height itself is already computed (`rows.length * 15`), not fixed — this only stops it
@@ -121,7 +154,7 @@ export function AvailabilityHeatmap({
                 // badSolid, not bad: the ramp is alpha(color, intensity), so handing it the
                 // 18%-opacity fill token attenuates it twice into near-invisibility.
                 color={VX.badSolid}
-                rowLabel={(row) => DAY_FORMAT.format(new Date(`${row}T00:00:00Z`))}
+                rowLabel={(row) => DAY_FORMAT.format(localDayStart(row))}
                 legend={{ min: 'No loss', max: '≥5% loss' }}
                 renderTooltip={(cell) => {
                   const bucket = sources.get(cellKey(cell.row, cell.col))?.bucket ?? null

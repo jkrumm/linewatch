@@ -117,16 +117,24 @@ export function fitTickCount(
  *   twice. No year needed — no sub-day bucket size produces a window long enough to wrap one, the
  *   coarsest being 4-hourly over 30 days.
  *
- * UTC, matching `fmtClock`/`fmtDateTime` and the verdict layer, so nothing on the page is rendered
- * against a different clock from anything else.
+ * **Local wall clock, matching `fmtClock`/`fmtDateTime`** — an axis tick and the tooltip that opens
+ * over it must not be read against two different clocks, and the reader's own is the one both now
+ * use. This was UTC, along with everything else on the page, which made every correlation between
+ * a column and a remembered moment an offset calculation done in the reader's head.
+ *
+ * **The shape stays fixed rather than following the host locale, and that is not an oversight.**
+ * `AXIS_LABEL_PX` above is a measured width that the tick spacing, the strips' plot insets and
+ * `fitTickCount` all read; a locale-shaped label is of no predictable width, so handing this to
+ * `Intl` would silently invalidate every one of them. The zone is what a reader needs from a tick.
+ * The punctuation is not.
  */
 export function bucketAxisLabel(ts: number, bucketSeconds: ProbeBucketSeconds): string {
   const d = new Date(ts)
-  const dd = String(d.getUTCDate()).padStart(2, '0')
-  const mm = String(d.getUTCMonth() + 1).padStart(2, '0')
-  if (bucketSeconds >= 86_400) return `${dd}.${mm}.${String(d.getUTCFullYear() % 100).padStart(2, '0')}`
-  const hh = String(d.getUTCHours()).padStart(2, '0')
-  const mi = String(d.getUTCMinutes()).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  const mm = String(d.getMonth() + 1).padStart(2, '0')
+  if (bucketSeconds >= 86_400) return `${dd}.${mm}.${String(d.getFullYear() % 100).padStart(2, '0')}`
+  const hh = String(d.getHours()).padStart(2, '0')
+  const mi = String(d.getMinutes()).padStart(2, '0')
   return `${dd}.${mm} ${hh}:${mi}`
 }
 
@@ -166,20 +174,48 @@ export function bucketTickFormat(bucketSeconds: ProbeBucketSeconds): (key: strin
  * and `01.08 14:03:41` side by side on one axis, and a reader comparing them would take the
  * difference in precision for a difference in the measurement.
  *
+ * **Seconds are no longer the last resort, because the labels are local now.** On the autumn
+ * DST fall-back the local wall clock repeats a whole hour, so two runs 3600 s apart agree on the
+ * date, the hour, the minute AND the second — and a seconds-only tiebreak hands them one identical
+ * key, which is the silently-dropped measurement this whole function exists to prevent. It just
+ * moved from "twice in a minute" to "once a year". A second pass appends the UTC offset to any
+ * group still colliding, which is precisely the fact that distinguishes them; it costs one suffix
+ * on one hour a year and nothing at all on the other 8759.
+ *
  * Order is preserved and the output is index-aligned with the input, because the caller zips it
  * back onto the runs it came from.
  */
 export function runAxisLabels(timestamps: readonly number[]): string[] {
   const minuteLabel = (ts: number) => bucketAxisLabel(ts, 60)
-  const counts = new Map<string, number>()
-  for (const ts of timestamps) {
-    const label = minuteLabel(ts)
-    counts.set(label, (counts.get(label) ?? 0) + 1)
-  }
+  const withSeconds = (ts: number) => `${minuteLabel(ts)}:${String(new Date(ts).getSeconds()).padStart(2, '0')}`
 
-  return timestamps.map((ts) => {
-    const label = minuteLabel(ts)
-    if ((counts.get(label) ?? 0) <= 1) return label
-    return `${label}:${String(new Date(ts).getUTCSeconds()).padStart(2, '0')}`
-  })
+  const toMinute = timestamps.map(minuteLabel)
+  const minuteCounts = tally(toMinute)
+  // Every member of a colliding group gets the seconds, not only the later one — see above.
+  const withTiebreak = timestamps.map((ts, i) => ((minuteCounts.get(toMinute[i]!) ?? 0) <= 1 ? toMinute[i]! : withSeconds(ts)))
+
+  const secondCounts = tally(withTiebreak)
+  return withTiebreak.map((label, i) =>
+    (secondCounts.get(label) ?? 0) <= 1 ? label : `${label} ${utcOffsetLabel(timestamps[i]!)}`,
+  )
+}
+
+function tally(labels: readonly string[]): Map<string, number> {
+  const counts = new Map<string, number>()
+  for (const label of labels) counts.set(label, (counts.get(label) ?? 0) + 1)
+  return counts
+}
+
+/** `UTC+02` / `UTC-05` — the offset the instant is being read through, for the one case where two
+ * instants share a local wall clock. Whole hours only would be wrong for the zones that run on a
+ * :30 or :45 offset, so the minutes are kept when there are any. */
+function utcOffsetLabel(ts: number): string {
+  // `getTimezoneOffset` is minutes to ADD to local to reach UTC, i.e. positive west of Greenwich —
+  // the opposite sign to how an offset is written.
+  const minutes = -new Date(ts).getTimezoneOffset()
+  const sign = minutes < 0 ? '-' : '+'
+  const abs = Math.abs(minutes)
+  const hh = String(Math.floor(abs / 60)).padStart(2, '0')
+  const mm = abs % 60
+  return mm === 0 ? `UTC${sign}${hh}` : `UTC${sign}${hh}:${String(mm).padStart(2, '0')}`
 }

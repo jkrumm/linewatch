@@ -75,7 +75,7 @@ const MIN_DURATION_OPTIONS = [
 /**
  * The heatmap's own span and bucket, independent of the page range.
  *
- * It is a fixed-shape artifact — one cell per UTC hour, one row per day — so a 1 h range would
+ * It is a fixed-shape artifact — one cell per hour, one row per day — so a 1 h range would
  * draw a single cell and the `all` range an unreadable wall. It always shows 30 days and its own
  * caption says so, rather than silently reinterpreting the range control at the top. The bucket
  * size is the chart's own constant: a mismatch would put two readings in one cell and lose one.
@@ -449,7 +449,7 @@ function DashboardPage() {
                   // the wrapper was a no-op.
                   <Stack gap={4}>
                     <Text size="xs" c="dimmed">
-                      Always the last 30 days by UTC hour. The range selector doesn’t scope this
+                      Always the last 30 days, by hour of your own day. The range selector doesn’t scope this
                       block — its shape is a fixed hour × day grid.
                     </Text>
                     <AvailabilityHeatmap

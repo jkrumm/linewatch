@@ -1,43 +1,71 @@
 import { describe, expect, test } from 'bun:test'
-import { fmtBytes, fmtClock, fmtDateTime, fmtRate } from './format'
+import { fmtBytes, fmtClock, fmtDateTime, fmtRate, makeClockFormat, makeDateTimeFormat } from './format'
 
-// Aug 1 2026, 14:28:00 UTC — an afternoon time, so a 12-hour-clock regression (AM/PM instead of
-// 24h) would be visible immediately rather than accidentally matching.
-const AFTERNOON_UTC = Date.UTC(2026, 7, 1, 14, 28, 0)
-// Jan 5 2026, 09:05:00 UTC — single-digit hour/day/month, so a dropped leading zero or a
-// month-order slip (day-before-month vs month-before-day) would show up too.
-const EARLY_JAN_UTC = Date.UTC(2026, 0, 5, 9, 5, 0)
+// 12:28 UTC on 1 Aug 2026 — which is 14:28 in Berlin, an hour the wall clock and UTC cannot agree
+// on. That gap is the whole subject of these tests: a formatter that had quietly stayed on UTC
+// would print 12:28 and every assertion below would fail on the digits, not on a locale detail.
+const SUMMER_AFTERNOON = Date.UTC(2026, 7, 1, 12, 28, 0)
+// 08:05 UTC on 5 Jan 2026 — 09:05 in Berlin. Single-digit hour, day and month, so a dropped
+// leading zero or a month-order slip shows up; and a WINTER instant, so the offset it is read
+// through is +01:00 rather than +02:00. A formatter that hard-coded one offset instead of doing a
+// real zone conversion passes one of these two tests and fails the other.
+const WINTER_MORNING = Date.UTC(2026, 0, 5, 8, 5, 0)
 
-describe('fmtClock', () => {
-  /**
-   * Locked to `en-GB`/UTC regardless of the host's locale — `Intl.DateTimeFormat(undefined, ...)`
-   * used to render "2:28 PM" or "14.28" or worse depending on the machine it ran on; a future
-   * locale change (host or default) must not silently move this string.
-   */
-  test('renders a fixed-locale 24-hour clock with an explicit UTC label', () => {
-    expect(fmtClock(AFTERNOON_UTC)).toBe('14:28 UTC')
+/**
+ * The exported `fmtClock`/`fmtDateTime` read the host's locale and zone, which is the point of
+ * them and also the reason they cannot be asserted directly: pinning a string here would pin the
+ * machine the suite runs on, and asserting the host's own answer to the host's own question
+ * verifies nothing at all. So the contract is checked through the factories, with both fixed.
+ */
+describe('makeClockFormat', () => {
+  /** A real zone conversion, not a UTC render with a different label on it. */
+  test('renders the wall clock of the given zone', () => {
+    expect(makeClockFormat('de-DE', 'Europe/Berlin').format(SUMMER_AFTERNOON)).toBe('14:28')
+    expect(makeClockFormat('de-DE', 'Europe/Berlin').format(WINTER_MORNING)).toBe('09:05')
   })
 
-  /** Single-digit hour and minute still get their leading zero — "9:5 UTC" is not a valid clock. */
-  test('pads single-digit hour and minute', () => {
-    expect(fmtClock(EARLY_JAN_UTC)).toBe('09:05 UTC')
+  /** No zone suffix. It was ` UTC` and it is now nothing: the reader's own zone is the one zone
+   * they do not have to be told they are in, and a tag repeated on every axis tick and table cell
+   * is a column of noise saying so. */
+  test('carries no zone tag', () => {
+    expect(makeClockFormat('en-GB', 'Europe/Berlin').format(SUMMER_AFTERNOON)).toBe('14:28')
+  })
+
+  /** The locale decides the clock, deliberately — `hour12` is unset rather than forced. */
+  test('lets the locale pick 12- or 24-hour', () => {
+    expect(makeClockFormat('en-US', 'America/New_York').format(SUMMER_AFTERNOON)).toContain('AM')
   })
 })
 
-describe('fmtDateTime', () => {
-  /**
-   * The load-bearing case: this used to be `Intl.DateTimeFormat(undefined, ...)`, so on a
-   * German-locale host it rendered "1. Aug., 14:28" — no timezone stated at all, on a page whose
-   * entire purpose is correlating events against the verdict cards' `UTC` timestamps. Pinning the
-   * exact string here is what stops a future locale change from reintroducing that ambiguity.
-   */
-  test('renders a fixed-locale short date-time with an explicit UTC label', () => {
-    expect(fmtDateTime(AFTERNOON_UTC)).toBe('1 Aug at 14:28 UTC')
+describe('makeDateTimeFormat', () => {
+  /** One formatter for the whole stamp. Both the separator and the order of the two halves are
+   * locale properties, and neither survives gluing an independently-formatted date to an
+   * independently-formatted clock — which is what this used to do. */
+  test('renders date and time as one locale-shaped string', () => {
+    expect(makeDateTimeFormat('de-DE', 'Europe/Berlin').format(SUMMER_AFTERNOON)).toBe('1. Aug., 14:28')
+    expect(makeDateTimeFormat('en-GB', 'Europe/Berlin').format(SUMMER_AFTERNOON)).toBe('1 Aug at 14:28')
   })
 
-  /** Single-digit day and month still read correctly, in day-before-month order. */
   test('renders a single-digit day and month correctly', () => {
-    expect(fmtDateTime(EARLY_JAN_UTC)).toBe('5 Jan at 09:05 UTC')
+    expect(makeDateTimeFormat('en-GB', 'Europe/Berlin').format(WINTER_MORNING)).toBe('5 Jan at 09:05')
+  })
+})
+
+describe('fmtClock / fmtDateTime', () => {
+  /** What can be asserted about the host-default pair without pinning the host: they agree with
+   * the factories called with no arguments, i.e. nothing is smuggled in on top of the browser's
+   * own defaults — no residual zone, no residual locale, no suffix. */
+  test('are the host-default factories and nothing more', () => {
+    expect(fmtClock(SUMMER_AFTERNOON)).toBe(makeClockFormat().format(new Date(SUMMER_AFTERNOON)))
+    expect(fmtDateTime(SUMMER_AFTERNOON)).toBe(makeDateTimeFormat().format(new Date(SUMMER_AFTERNOON)))
+  })
+
+  /** The regression that would silently undo all of this: a `timeZone: 'UTC'` creeping back in.
+   * Only meaningful off UTC, so it is skipped on a UTC host rather than asserted vacuously. */
+  test('follow the host zone, not UTC', () => {
+    const offset = new Date(SUMMER_AFTERNOON).getTimezoneOffset()
+    if (offset === 0) return
+    expect(fmtClock(SUMMER_AFTERNOON)).not.toBe(makeClockFormat(undefined, 'UTC').format(SUMMER_AFTERNOON))
   })
 })
 

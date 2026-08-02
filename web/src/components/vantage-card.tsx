@@ -13,6 +13,31 @@ function value(v: string | number | null, suffix = ''): string {
   return `${v}${suffix}`
 }
 
+/** Joins the parts of a merged card, dropping the ones that were never parsed. All-null is a dash,
+ * not an empty string: the card still has to say it knows nothing rather than look blank. */
+function joined(parts: (string | number | null)[]): string {
+  const present = parts.filter((p) => p !== null)
+  return present.length === 0 ? '—' : present.join(' · ')
+}
+
+/**
+ * The negotiated rate against the adapter's own ceiling, on one card.
+ *
+ * These were two cards, and separating them buried the only question either answers. A bare
+ * "100 Mbit" is not a finding — a 100 Mbit adapter running at 100 is perfect, a gigabit adapter
+ * running at 100 is a cable fault, and the difference lived on the other card. Read together they
+ * are one reading; read apart the reader has to already know to compare them.
+ *
+ * So the ceiling is stated only when it DIFFERS. `1000 of 1000 Mbit` is noise on the card that is
+ * fine, every cycle, forever; `100 of 1000 Mbit` is the entire finding.
+ */
+function linkSpeedValue(vantage: Vantage): string {
+  const { linkMbit, linkMaxMbit } = vantage
+  if (linkMbit === null) return linkMaxMbit === null ? '—' : `— of ${linkMaxMbit} Mbit`
+  if (linkMaxMbit === null || linkMaxMbit === linkMbit) return `${linkMbit} Mbit`
+  return `${linkMbit} of ${linkMaxMbit} Mbit`
+}
+
 /**
  * What the newest cycle measured *through* — the answer to "is this even my line", which every
  * other number on this dashboard silently assumes.
@@ -78,31 +103,29 @@ export function VantageCard({ vantage, now }: { vantage: Vantage | null | undefi
           {chip.description}
         </Text>
 
-        {/* One column below sm, not two. At two-up each card holds ~147px of content against a
-            24px mono hero, and `overflow: hidden` on the card silently cut the gateway address (13
-            chars, 187px, and browsers do not break at dots), the DHCP bind time, and the duplex.
-            Eight cards in a column is tall; a truncated gateway on the card that answers "is this
-            even my line" is wrong. */}
-        <SimpleGrid cols={{ base: 1, sm: 3, lg: 4 }} spacing="md">
-          <StatCard label="Interface" value={value(vantage.pathIf)} />
-          <StatCard label="Path class" value={value(vantage.pathClass)} />
-          <StatCard label="Media" value={value(vantage.linkMedia)} />
-          <StatCard label="Negotiated" value={value(vantage.linkMbit, ' Mbit')} />
-          <StatCard label="Duplex" value={value(vantage.linkDuplex)} />
-          {/* The NIC's supported ceiling, not its negotiated rate. Equal values mean the link is
-              running at everything the adapter has; a ceiling above the negotiated rate is what
-              separates a cable fault from a 100 Mbit adapter. A dash is neither. */}
-          <StatCard label="NIC ceiling" value={value(vantage.linkMaxMbit, ' Mbit')} />
-          <StatCard label="Gateway" value={value(vantage.gatewayAddr)} />
-          <StatCard
-            label="DHCP bound"
-            value={vantage.dhcpBoundAt === null ? '—' : fmtDateTime(vantage.dhcpBoundAt)}
-          />
+        {/* **Three cards, from eight.** The eight were each individually defensible and together
+            unreadable — a wall of mono heroes in which the two that change (the negotiated rate,
+            the bind time) sat at the same weight as the six that have not moved since the machine
+            was plugged in. Reference detail is not deleted; it is demoted to the line below, where
+            it is still there to read and no longer competes with a finding.
+
+            What merged, merged because the parts only mean anything together: an interface without
+            its path class does not say whether this is even the home line, and a negotiated rate
+            without the adapter's ceiling cannot tell a cable fault from a 100 Mbit NIC.
+
+            One column below sm, still. At two-up each card holds ~147px of content against a 24px
+            mono hero, and `overflow: hidden` on the card silently cut the longer values. */}
+        <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
+          <StatCard label="Interface" value={joined([vantage.pathIf, vantage.pathClass])} />
+          <StatCard label="Link speed" value={linkSpeedValue(vantage)} />
+          <StatCard label="Media" value={joined([vantage.linkMedia, vantage.linkDuplex])} />
         </SimpleGrid>
 
         <Text size="xs" c="dimmed">
-          A change in the DHCP bind time proves the interface re-bound; an unchanged one proves
-          nothing about link stability — two link-downs on this host left it untouched.
+          Gateway {value(vantage.gatewayAddr)} · DHCP bound{' '}
+          {vantage.dhcpBoundAt === null ? '—' : fmtDateTime(vantage.dhcpBoundAt)}. A change in the
+          bind time proves the interface re-bound; an unchanged one proves nothing about link
+          stability — two link-downs on this host left it untouched.
         </Text>
       </Stack>
     </Card>

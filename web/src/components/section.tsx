@@ -1,7 +1,27 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Box, Group, SegmentedControl, Stack, Text, Title } from '@mantine/core'
+import { Box, Collapse, Group, SegmentedControl, Stack, Text, UnstyledButton, Title } from '@mantine/core'
+import { IconChevronDown } from '@tabler/icons-react'
+import { createPersistedState } from 'basalt-ui/state'
 import { SECTION_LABEL, sectionAnchor, type SectionKey } from '../lib/verdict-section'
+
+/**
+ * Which sections the reader has explicitly opened or closed.
+ *
+ * A record of OVERRIDES, not of open sections: absent means "never touched this", which has to
+ * stay distinguishable from "closed it", or a section's own `defaultOpen` could never be honoured
+ * on a first visit. Same three-valued discipline the data layer uses everywhere else on this page.
+ *
+ * `createPersistedState` rather than a URL param: which reference block a reader keeps folded is a
+ * preference about their own screen, not a description of what is being shown, and this dashboard
+ * deliberately carries exactly one thing in its URL (the range) plus the outage filter. A second
+ * class of state there would make every shared link carry someone else's furniture.
+ */
+const useSectionOverrides = createPersistedState({
+  key: 'section-open',
+  version: 1,
+  initial: {} as Partial<Record<SectionKey, boolean>>,
+})
 
 /**
  * One switchable view of a section.
@@ -44,6 +64,8 @@ export function Section({
   subtitle,
   meta,
   views,
+  collapsible = false,
+  defaultOpen = true,
 }: {
   id: SectionKey
   /** One line stating the question this section answers — not a description of the charts in it. */
@@ -51,9 +73,62 @@ export function Section({
   /** The section's headline figures, drawn between the heading and the view. Usually a `StatStrip`. */
   meta?: ReactNode
   views: SectionView[]
+  /**
+   * Whether this section's VIEWS can be folded away. Opt-in, and the docblock above is the reason
+   * it has to be: a disclosure that hides a finding is exactly what this component replaced.
+   *
+   * What makes it defensible on one section is that the heading, the subtitle and `meta` all stay
+   * drawn — so a collapsed section still states its own headline figures — and that every verdict
+   * renders in the band at the top of the page regardless. Folding is a choice about how much
+   * EVIDENCE to keep on screen, and only earns its place where the evidence is largely reference:
+   * hardware that has not changed since the machine was plugged in.
+   */
+  collapsible?: boolean
+  /** What an untouched section does. Only consulted when `collapsible`. */
+  defaultOpen?: boolean
 }) {
   const [active, setActive] = useState(views[0]?.key ?? '')
   const current = views.find((view) => view.key === active) ?? views[0]
+  const [overrides, setOverrides] = useSectionOverrides()
+
+  const opened = !collapsible || (overrides[id] ?? defaultOpen)
+  const bodyId = `${sectionAnchor(id)}-body`
+
+  // `overrides` in a ref so the listener below can merge into the current value without being torn
+  // down and rebuilt on every write — `createPersistedState`'s setter takes a value, not an updater.
+  const overridesRef = useRef(overrides)
+  overridesRef.current = overrides
+
+  /**
+   * A verdict's "see the Path & hardware section ↓" link must never land the reader on a closed
+   * box — that is the one hard rule the docblock above states, and a fold is the obvious way to
+   * break it.
+   *
+   * **It is honoured by OPENING the section, not by overriding the reader.** The first attempt let
+   * a live finding force the section open for as long as it held, and on this line one holds more
+   * or less permanently (carrier poll coverage sits under its threshold most days) — so the
+   * section was open on every visit, the chevron did nothing visible when pressed, and the fold
+   * the reader asked for did not exist. A control that silently does nothing is worse than no
+   * control.
+   *
+   * The hash is the precise moment the guarantee is needed: the reader followed a link *here*. So
+   * that flips the stored preference to open, once, and every later press of the chevron is
+   * theirs again. `VerdictPanel` renders a plain `#section-…` anchor, which is why this listens to
+   * the hash rather than to the verdict set.
+   */
+  useEffect(() => {
+    if (!collapsible) return
+    const openIfTargeted = () => {
+      if (window.location.hash !== `#${sectionAnchor(id)}`) return
+      if (overridesRef.current[id] === true) return
+      setOverrides({ ...overridesRef.current, [id]: true })
+    }
+    openIfTargeted()
+    window.addEventListener('hashchange', openIfTargeted)
+    return () => window.removeEventListener('hashchange', openIfTargeted)
+  }, [collapsible, id, setOverrides])
+
+  const toggle = () => setOverrides({ ...overrides, [id]: !opened })
 
   return (
     // The offset is measured, not guessed. `page-header.tsx` writes its own height to
@@ -64,13 +139,41 @@ export function Section({
     <Box component="section" id={sectionAnchor(id)} style={{ scrollMarginTop: 'var(--lw-header-h, 96px)' }}>
       <Stack gap="sm">
         <Group justify="space-between" align="flex-end" wrap="wrap" gap="xs">
+          {/* The whole heading is the target when it can fold, not a chevron beside it — a 16px hit
+              area for the one control that decides whether a third of the page is drawn is the kind
+              of thing that reads as decoration. `UnstyledButton` keeps it a real button (Enter,
+              Space, focus ring) without bringing any of Mantine's button chrome into a heading. */}
           <Box style={{ minWidth: 0 }}>
-            <Title order={4}>{SECTION_LABEL[id]}</Title>
-            <Text size="sm" c="dimmed">
-              {subtitle}
-            </Text>
+            {collapsible ? (
+              <UnstyledButton onClick={toggle} aria-expanded={opened} aria-controls={bodyId} style={{ textAlign: 'left' }}>
+                <Group gap={6} wrap="nowrap">
+                  <Title order={4}>{SECTION_LABEL[id]}</Title>
+                  <IconChevronDown
+                    size={16}
+                    // Rotation only, and only on the glyph: the doctrine's 120–200ms band for a
+                    // state flip, on a transform rather than on layout.
+                    style={{
+                      transition: 'transform 150ms',
+                      transform: opened ? 'rotate(0deg)' : 'rotate(-90deg)',
+                    }}
+                  />
+                </Group>
+                <Text size="sm" c="dimmed">
+                  {subtitle}
+                </Text>
+              </UnstyledButton>
+            ) : (
+              <>
+                <Title order={4}>{SECTION_LABEL[id]}</Title>
+                <Text size="sm" c="dimmed">
+                  {subtitle}
+                </Text>
+              </>
+            )}
           </Box>
-          {views.length > 1 && (
+          {/* Hidden while folded. A view switch over content nobody can see is a control with no
+              observable effect, and pressing it would silently change what appears on unfold. */}
+          {views.length > 1 && opened && (
             <>
               {/* Below sm the switch gets its own full-width row and grows to a real tap target. At
                   360px the three Speed labels measure ~307px against a ~334px line — they fit by
@@ -103,8 +206,22 @@ export function Section({
             </>
           )}
         </Group>
+        {/* `meta` stays outside the fold. A collapsed section that reports nothing at all is a
+            heading and a chevron — the reader has to open it to learn whether it was worth
+            opening. Its headline figures are the thing that makes folding safe. */}
         {meta}
-        {current?.render()}
+        {collapsible ? (
+          // The guard inside is not redundant with `expanded`. `Collapse` keeps its children
+          // mounted by default (React 19 `Activity`), so handing it `current.render()` outright
+          // would call the thunk and build every chart in the section to then hide them — exactly
+          // what `SectionView.render` being a thunk exists to avoid. Guarded, a folded section
+          // costs no SVG at all.
+          <Collapse expanded={opened} id={bodyId}>
+            {opened && current?.render()}
+          </Collapse>
+        ) : (
+          current?.render()
+        )}
       </Stack>
     </Box>
   )

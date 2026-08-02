@@ -688,6 +688,12 @@ function DashboardPage() {
             id="path"
             subtitle="Which wire this machine used, and whether it’s at full speed."
             meta={<StatStrip stats={pathStats(status?.vantage, nowTick)} />}
+            // The one folded section on the page, and the only one whose evidence is mostly
+            // reference: an interface name, a media type and a gateway that have not changed since
+            // the machine was plugged in, under three view tabs. Its headline figures stay drawn
+            // above the fold, and a verdict linking here opens it — see `Section`'s hash listener.
+            collapsible
+            defaultOpen={false}
             views={[
               {
                 key: 'vantage',

@@ -1,4 +1,5 @@
-import { Badge, Box, Divider, Group, Skeleton, Stack, Table, Text, Tooltip } from '@mantine/core'
+import { useState } from 'react'
+import { Badge, Box, Divider, Group, Pagination, Skeleton, Stack, Table, Text, Tooltip } from '@mantine/core'
 import { IconEyeOff } from '@tabler/icons-react'
 import { EmptyState } from 'basalt-ui'
 import type { LinewatchEvent } from '../lib/types'
@@ -17,6 +18,23 @@ const KIND_COLOR: Record<LinewatchEvent['kind'], string> = {
   config_change: 'gray',
   note: 'gray',
 }
+
+/**
+ * Rows per page.
+ *
+ * This list was unpaged, and `GET /api/events` has no `limit` — it returns every event in the
+ * window, newest first. That was survivable while the record was days old and is not the shape it
+ * grows into: the events table takes a row per link transition, per config change and per non-clean
+ * poll, which measured at ~60/day, so the `all` range reaches five figures inside a year. Rendering
+ * them is one enormous scroll a reader cannot navigate and, on the mobile path, that many mounted
+ * `Tooltip`s.
+ *
+ * Paged rather than capped, deliberately. A `limit` on the query would be this repo's own
+ * silent-truncation failure — the list would look complete and be a slice — while a page control
+ * states the total on itself and can reach every row. The payload is still the whole window; that
+ * is the next thing to fix here, and it is a server change, not this one.
+ */
+const PAGE_SIZE = 25
 
 /**
  * Every recorded transition in the window: path changes, sub-cycle link flaps, carrier resyncs and
@@ -59,6 +77,24 @@ export function TransitionTimeline({
    * yet — which is the exact over-claim `timelineEmptyState`'s two branches exist to avoid. */
   isPending?: boolean
 }) {
+  const [page, setPage] = useState(1)
+
+  // Reset to the first page when the underlying list changes — switching the range while on page 4
+  // should not land the reader in the middle of a different window's events.
+  //
+  // Keyed on a cheap SIGNATURE rather than the array's identity, and that is not a micro-
+  // optimisation: `routes/index.tsx` passes `events?.events ?? []`, so while the query is
+  // unresolved every render produces a fresh empty array. An identity comparison would see a change
+  // every time, set state during render, and re-render into the same comparison — a loop. The
+  // signature is stable for an empty list and for TanStack Query's structurally-shared refetches,
+  // and changes exactly when the window's newest event or its count does.
+  const signature = `${events.length}:${events[0]?.id ?? ''}`
+  const [seen, setSeen] = useState(signature)
+  if (seen !== signature) {
+    setSeen(signature)
+    setPage(1)
+  }
+
   if (events.length === 0 && isPending === true) {
     return (
       <Stack gap="xs">
@@ -81,6 +117,13 @@ export function TransitionTimeline({
     )
   }
 
+  const pageCount = Math.max(1, Math.ceil(events.length / PAGE_SIZE))
+  // Clamped rather than trusted. The signature reset above handles a window change, but a refetch
+  // that merely shortens the list (an event ageing out of the window) leaves `page` past the end,
+  // and an out-of-range slice renders as an empty table under a control that says otherwise.
+  const current = Math.min(page, pageCount)
+  const shown = events.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE)
+
   return (
     <>
       <Table.ScrollContainer minWidth={560} type="native" visibleFrom="sm">
@@ -99,7 +142,7 @@ export function TransitionTimeline({
             </Table.Tr>
           </Table.Thead>
           <Table.Tbody>
-            {events.map((event) => {
+            {shown.map((event) => {
               const source = eventSourceLabel(event.source)
               return (
                 <Table.Tr key={event.id}>
@@ -147,7 +190,7 @@ export function TransitionTimeline({
       </Table.ScrollContainer>
 
       <Stack gap={0} hiddenFrom="sm">
-        {events.map((event, i) => {
+        {shown.map((event, i) => {
           const source = eventSourceLabel(event.source)
           return (
             <Box key={event.id}>
@@ -179,6 +222,28 @@ export function TransitionTimeline({
           )
         })}
       </Stack>
+
+      {/* The control is drawn only when it has something to do, but the COUNT is stated either way
+          — "24 transitions" over a single page is the fact a reader needs to know the list is
+          whole, and it is the same sentence that stops a paged list from reading as the whole
+          record. `withEdges` because the newest and oldest transitions are the two a reader jumps
+          to; stepping there one page at a time over a year of events is not navigation. */}
+      <Group justify="space-between" align="center" wrap="wrap" gap="xs" pt="xs">
+        <Text size="xs" c="dimmed">
+          {events.length} transition{events.length === 1 ? '' : 's'} in this window
+          {pageCount > 1 && ` · showing ${(current - 1) * PAGE_SIZE + 1}\u2013${(current - 1) * PAGE_SIZE + shown.length}`}
+        </Text>
+        {pageCount > 1 && (
+          <Pagination
+            size="sm"
+            withEdges
+            total={pageCount}
+            value={current}
+            onChange={setPage}
+            aria-label="Transition timeline pages"
+          />
+        )}
+      </Group>
     </>
   )
 }

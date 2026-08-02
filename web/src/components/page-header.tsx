@@ -4,6 +4,7 @@ import { useElementSize } from '@mantine/hooks'
 import { ThemeToggle } from 'basalt-ui'
 import { VX } from 'basalt-ui/charts'
 import { RangeSelector } from './range-selector'
+import { CompactToggle } from '../lib/compact'
 import { RANGE_OPTIONS, type RangeOption } from '../lib/range'
 import { isStale } from '../lib/freshness'
 import { fmtMs, fmtRelative } from '../lib/format'
@@ -132,6 +133,7 @@ export function PageHeader({
               </Tooltip>
             </Box>
             <LiveChip live={live} />
+            <CompactToggle />
             <ThemeToggle />
           </Group>
         </Group>

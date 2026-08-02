@@ -4,6 +4,7 @@ import { IconArrowsRightLeft, IconChevronDown, IconChevronRight } from '@tabler/
 import { VX } from 'basalt-ui/charts'
 import type { SpeedTest } from '../lib/types'
 import { fmtDateTime } from '../lib/format'
+import { useCompactMode } from '../lib/compact'
 
 type ServerChange = { ts: number; from: string | null; to: SpeedTest }
 
@@ -51,8 +52,13 @@ export function ServerChangeNote({
 }) {
   const changes = detectServerChanges(tests)
   const [opened, { toggle }] = useDisclosure(false)
+  const [compact] = useCompactMode()
   const Chevron = opened ? IconChevronDown : IconChevronRight
 
+  // Supporting detail on how the speed numbers were taken, not a finding about the line — so it
+  // goes in compact mode, along with the reserved-height branch below it, which exists only to stop
+  // this note appearing and disappearing under the chart. See `lib/compact.tsx`.
+  if (compact) return null
   if (changes.length === 0 && isPending === true) return <Box h={22} />
   if (changes.length === 0) return null
 

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { Box, Collapse, Group, SegmentedControl, Stack, Text, UnstyledButton, Title } from '@mantine/core'
 import { IconChevronDown } from '@tabler/icons-react'
 import { createPersistedState } from 'basalt-ui/state'
+import { useCompactMode } from '../lib/compact'
 import { SECTION_LABEL, sectionAnchor, type SectionKey } from '../lib/verdict-section'
 
 /**
@@ -95,6 +96,7 @@ export function Section({
   /** What an untouched section does. Only consulted when `collapsible`. */
   defaultOpen?: boolean
 }) {
+  const [compact] = useCompactMode()
   const [active, setActive] = useState(views[0]?.key ?? '')
   const current = views.find((view) => view.key === active) ?? views[0]
   const [overrides, setOverrides] = useSectionOverrides()
@@ -218,10 +220,13 @@ export function Section({
             </>
           )}
         </Group>
-        {/* `meta` stays outside the fold. A collapsed section that reports nothing at all is a
-            heading and a chevron — the reader has to open it to learn whether it was worth
-            opening. Its headline figures are the thing that makes folding safe. */}
-        {meta}
+        {/* `meta` stays outside the FOLD — a collapsed section that reports nothing at all is a
+            heading and a chevron, and the reader has to open it to learn whether it was worth
+            opening. Its headline figures are what makes folding safe.
+            Compact mode is the other axis and drops it: there the reader has asked for the charts
+            and the findings, and every figure in a strip is also drawn in the chart under it or
+            stated in the bar at the top. Nothing a strip says is only said there. */}
+        {compact ? null : meta}
         {collapsible ? (
           // The guard inside is not redundant with `expanded`. `Collapse` keeps its children
           // mounted by default (React 19 `Activity`), so handing it `current.render()` outright

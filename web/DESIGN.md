@@ -39,10 +39,15 @@ table is the app's **data dictionary** — which metric maps to which hue, as `{
 wired through `defineSeries()`. This is the one design artifact that legitimately lives in the
 consumer; keep it the single source of truth and never inline a hex elsewhere.
 
+**Empty, and correct.** linewatch registers no app series: every mark on the dashboard is either a
+single-series metric drawn neutral (`VX.line`), the one earned accent (`VX.accent`, spent on the
+internet band and the download line), or a status verdict (`VX.status.*`). Nothing here needs
+categorical separation, so nothing has earned a hue of its own. Add a row only when a chart draws
+two or more series that must be told apart by colour — and never inline a hex to do it.
+
 | Series name | Light hex | Dark hex | `defineSeries` key | Role / earned reason |
 |-|-|-|-|-|
-| _e.g. requests_ | `#4f78a4` | `#7099c4` | `requests` | Primary metric (earned accent hue) |
-| | | | | |
+| _(none)_ | | | | |
 
 ```ts
 // src/lib/series.ts — the app's guard-exempt series file

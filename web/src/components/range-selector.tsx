@@ -7,16 +7,23 @@ export function RangeSelector<T extends RangeOption>({
   value,
   options,
   onChange,
+  fullWidth,
 }: {
   value: T
   options: readonly T[]
   onChange: (value: T) => void
+  /** Forwarded to `SegmentedControl`. Below `sm` the selector gets its own row and fills it: five
+   * labels sharing 334px is ~66px each, far above the ellipsis threshold, where sharing a row with
+   * the brand and the toggle it was ~19px each. Kept a plain passthrough so the generic `T` is
+   * untouched. */
+  fullWidth?: boolean
 }) {
   return (
     <SegmentedControl
       value={value}
       onChange={(next) => onChange(next as T)}
       data={options.map((opt) => ({ label: RANGE_LABEL[opt], value: opt }))}
+      fullWidth={fullWidth}
     />
   )
 }

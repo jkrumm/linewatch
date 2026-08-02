@@ -1,4 +1,4 @@
-import { Card, Group, Stack, Text, ThemeIcon, Tooltip } from '@mantine/core'
+import { Card, Group, SimpleGrid, Stack, Text, ThemeIcon, Tooltip } from '@mantine/core'
 import {
   IconAlertTriangle,
   IconCircleCheck,
@@ -39,28 +39,61 @@ const SCOPE_LABEL: Record<OngoingOutage['scope'], string> = {
  * history, not evidence the target is up or down. What changes is *where* the age is said. The old
  * tiles each printed their own age underneath, which was fine at full width but is the exact
  * repetition this fold removes — both readings usually share one probe cycle, so two ages next to
- * each other say the same thing twice. The strip instead says the age once, on the right, for the
- * newest sample overall. A reading's own age comes back — "promoted", per the fold's brief, larger
- * and no longer a footnote — only when that reading has gone stale on its own and the shared age no
- * longer describes it; that divergence is a fact the strip-level age cannot carry and would
- * otherwise be lost. The `N of M answering` partial state stays its own explicit mark rather than
- * folding into the loss figure, for the same reason live-tile kept it separate: one dead anchor out
- * of three and an internet-wide outage must not read as the same number.
+ * each other say the same thing twice. The strip instead says the age once, as a labelled unit
+ * (`MeasuredAge`), for the newest sample overall. A reading's own age comes back — "promoted", per
+ * the fold's brief, larger and no longer a footnote — only when that reading has gone stale on its
+ * own and the shared age no longer describes it; that divergence is a fact the strip-level age
+ * cannot carry and would otherwise be lost. The `N of M answering` partial state stays its own
+ * explicit mark rather than folding into the loss figure, for the same reason live-tile kept it
+ * separate: one dead anchor out of three and an internet-wide outage must not read as the same
+ * number.
  *
  * "Latest cycle" is said once for the whole strip rather than once per reading, but it is still
  * said — drop it and "Loss 0.0%" here reads as contradicting the KPI row's "Worst 5 minutes: 100.0%
  * lost" a few rows down. They are different measurements and only that caption keeps them apart.
+ *
+ * **Two explicit layouts, not one wrapping row.** At 338px (this card's width on a 360px viewport)
+ * the three children — verdict, readings, age — measure ~600px, so a single `wrap="wrap"` row broke
+ * onto two or three flex lines, and `justify: space-between` places a lone item on the final line at
+ * flex-**start** rather than centring it — the age landed hard left under the readings, unlabelled,
+ * reading as a stray fragment. Worse, *which* items shared a line moved with the verdict's own
+ * width (one line vs two, with vs without an outage), so the age drifted between renders. With a
+ * narrow path that exists on its own terms, `wrap` comes off the wide one and `space-between` means
+ * what it looks like.
  */
 export function NowStrip({
-  ongoingOutages,
-  lastSamples,
+  status,
   now,
 }: {
-  ongoingOutages: OngoingOutage[]
-  lastSamples: StatusSample[]
+  /**
+   * `null` only while `GET /api/status` has genuinely not resolved — the same guard
+   * `PageHeader`'s `live` prop enforces on the identical query, extended here to close the gap
+   * that let it slip past.
+   *
+   * `ongoingOutages={status?.ongoingOutages ?? []}` used to coalesce "not asked yet" into "asked,
+   * and got nothing" — and an empty `ongoingOutages` with no samples makes `reporting` false, which
+   * used to render `NotReportingLine`'s "No data yet — collector has never reported": a verdict
+   * about a DEAD collector, drawn over a query nobody had answered. Five lines up in the same
+   * render, `PageHeader` already gets this right (`status === undefined ? null : {...}`), so the
+   * same undefined status produced a dash in the header and a claim about a dead collector in the
+   * card beneath it — two readings of one fact that cannot both be right.
+   *
+   * GUARD CONSISTENTLY, on purpose. `statusQuery` IS in the route loader, so `null` should be
+   * unreachable in practice — but that guarantee is a property of the route config, not of this
+   * component, and a future edit (someone moves the query out of the loader, a `gcTime` eviction
+   * lands between renders) can silently remove it with no signal here. The failure mode of being
+   * wrong is asserting the collector is dead; the failure mode of guarding anyway is one branch
+   * that never fires. This is the same convention `PageHeader`'s `live`, `VantageCard`'s and
+   * `LinkComparison`'s skeletons, and `pathStats`'s own `vantage === undefined` branch already
+   * follow — one deliberate rule across four call sites, not four independent accidents.
+   */
+  status: { ongoingOutages: OngoingOutage[]; lastSamples: StatusSample[] } | null
   /** The dashboard's floored clock (`rangeToWindow`'s `to`). */
   now: number
 }) {
+  const pending = status === null
+  const ongoingOutages = status?.ongoingOutages ?? []
+  const lastSamples = status?.lastSamples ?? []
   const latestTs = latestSampleTs(lastSamples)
   const reporting = latestTs !== null && !isStale(latestTs, now)
   const gateway = liveGateway(lastSamples)
@@ -68,24 +101,62 @@ export function NowStrip({
 
   return (
     <Card py="xs" px="sm">
-      <Group justify="space-between" align="center" wrap="wrap" gap="md">
-        <Verdict ongoingOutages={ongoingOutages} reporting={reporting} latestTs={latestTs} now={now} />
-
+      <Stack gap="xs" hiddenFrom="sm">
+        <Verdict ongoingOutages={ongoingOutages} reporting={reporting} latestTs={latestTs} now={now} pending={pending} />
         <Stack gap={2}>
-          <Text fz={VX.text.micro} c="dimmed" tt="uppercase" fw={600} style={{ letterSpacing: '0.06em' }}>
-            Latest cycle
-          </Text>
-          <Group gap="xl" wrap="wrap">
+          <CycleCaption />
+          <SimpleGrid cols={2} spacing="xs">
+            <Reading kind="router" reading={gateway} now={now} />
+            <Reading kind="internet" reading={internet} now={now} />
+          </SimpleGrid>
+        </Stack>
+        <MeasuredAge latestTs={latestTs} now={now} />
+      </Stack>
+
+      <Group justify="space-between" align="flex-start" wrap="nowrap" gap="md" visibleFrom="sm">
+        <Verdict ongoingOutages={ongoingOutages} reporting={reporting} latestTs={latestTs} now={now} pending={pending} />
+        <Stack gap={2}>
+          <CycleCaption />
+          <Group gap="xl" wrap="nowrap">
             <Reading kind="router" reading={gateway} now={now} />
             <Reading kind="internet" reading={internet} now={now} />
           </Group>
         </Stack>
-
-        <Text size="sm" c="dimmed" ta="right">
-          {latestTs === null ? 'no data' : fmtRelative(latestTs, now)}
-        </Text>
+        <MeasuredAge latestTs={latestTs} now={now} />
       </Group>
     </Card>
+  )
+}
+
+/** The shared "Latest cycle" micro-label — unchanged from the pre-fold strip. Dropping it makes
+ * "Loss 0.0%" here read as contradicting the KPI row's "Worst 5 minutes: 100.0% lost" a few rows
+ * down; they are different measurements and this caption is what keeps them apart. Drawn on both
+ * layout paths. */
+function CycleCaption() {
+  return (
+    <Text fz={VX.text.micro} c="dimmed" tt="uppercase" fw={600} style={{ letterSpacing: '0.06em' }}>
+      Latest cycle
+    </Text>
+  )
+}
+
+/**
+ * The strip's shared age, as a labelled unit rather than a bare number relying on its position.
+ *
+ * It used to be a right-aligned `Text` at the end of a wrapping row, i.e. its meaning was entirely
+ * carried by where flexbox happened to put it — and flexbox put it at flex-start on a line of its
+ * own the moment the row wrapped. A label costs one word and works at every width.
+ */
+function MeasuredAge({ latestTs, now }: { latestTs: number | null; now: number }) {
+  return (
+    <Group gap={6} wrap="nowrap" align="baseline">
+      <Text fz={VX.text.micro} c="dimmed" tt="uppercase" fw={600} style={{ letterSpacing: '0.06em' }}>
+        Measured
+      </Text>
+      <Text size="sm" c="dimmed" ff="monospace">
+        {latestTs === null ? 'no data' : fmtRelative(latestTs, now)}
+      </Text>
+    </Group>
   )
 }
 
@@ -95,12 +166,26 @@ function Verdict({
   reporting,
   latestTs,
   now,
+  pending,
 }: {
   ongoingOutages: OngoingOutage[]
   reporting: boolean
   latestTs: number | null
   now: number
+  /** True while `status` (the module's docblock) is `null` — see that comment for why this must
+   * short-circuit before `reporting`, not be folded into it. */
+  pending: boolean
 }) {
+  // A dash, same as `PageHeader`'s `LiveChip` renders for the identical unresolved query — not
+  // `NotReportingLine`, which is a claim about a collector that has answered and gone quiet.
+  if (pending) {
+    return (
+      <Text size="sm" c="dimmed" ff="monospace">
+        —
+      </Text>
+    )
+  }
+
   if (reporting && ongoingOutages.length === 0) {
     return (
       <Group gap="sm" wrap="nowrap">
@@ -132,7 +217,8 @@ function Verdict({
 /** Neither green nor red: nothing is known about the line, which is its own state — yellow because
  * a stalled collector is evidence the question is currently unanswerable, not evidence of an
  * outage. The visible line already states the conclusion; the tooltip only adds the timestamp and
- * the reason outage detection can't fill the gap on its own. */
+ * the reason outage detection can't fill the gap on its own. `touch: true` because Mantine's
+ * default is touch-off — a phone has no hover, and the reason is otherwise unreachable there. */
 function NotReportingLine({ latestTs, now }: { latestTs: number | null; now: number }) {
   const short =
     latestTs === null
@@ -144,8 +230,8 @@ function NotReportingLine({ latestTs, now }: { latestTs: number | null; now: num
       : `Last sample ${fmtDateTime(latestTs)}. Outages are only detected when a cycle arrives, so the line's state is unknown — not up.`
 
   return (
-    <Tooltip label={detail} multiline w={280}>
-      <Group gap="sm" wrap="nowrap">
+    <Tooltip label={detail} multiline w={280} events={{ hover: true, focus: true, touch: true }}>
+      <Group gap="sm" wrap="nowrap" tabIndex={0} style={{ width: 'fit-content' }}>
         <ThemeIcon size={28} radius="md" color="yellow" variant="light">
           <IconPlugConnectedX size={16} />
         </ThemeIcon>
@@ -161,13 +247,18 @@ function NotReportingLine({ latestTs, now }: { latestTs: number | null; now: num
 }
 
 /** One row per concurrent outage — a gateway outage and a WAN outage can be open at once, so this
- * is called once per `ongoingOutages` entry rather than assuming at most one. */
+ * is called once per `ongoingOutages` entry rather than assuming at most one. Same touch-reachable
+ * tooltip treatment as `NotReportingLine` — this one carries the start time, which a phone otherwise
+ * has no way to see. */
 function OutageLine({ outage, now }: { outage: OngoingOutage; now: number }) {
   const short = `${SCOPE_LABEL[outage.scope]} in progress · ${fmtDuration((now - outage.startedAt) / 1000)} so far`
 
   return (
-    <Tooltip label={`Started ${fmtDateTime(outage.startedAt)}`}>
-      <Group gap="sm" wrap="nowrap">
+    <Tooltip
+      label={`Started ${fmtDateTime(outage.startedAt)}`}
+      events={{ hover: true, focus: true, touch: true }}
+    >
+      <Group gap="sm" wrap="nowrap" tabIndex={0} style={{ width: 'fit-content' }}>
         <ThemeIcon size={28} radius="md" color="red" variant="light">
           <IconAlertTriangle size={16} />
         </ThemeIcon>
@@ -236,12 +327,12 @@ function Reading({ kind, reading, now }: { kind: 'router' | 'internet'; reading:
             {reading.upCount} of {reading.total} answering
           </Text>
         )}
-        {/* The strip's one shared age (top-right) covers the common case where both readings share
-            a probe cycle. This reading's own age comes back, promoted, only when it has gone stale
-            on its own — a fact the shared age cannot carry. */}
+        {/* The strip's one shared age (`MeasuredAge`) covers the common case where both readings
+            share a probe cycle. This reading's own age comes back, promoted, only when it has gone
+            stale on its own — a fact the shared age cannot carry. */}
         {(stale || nothing) && (
           <Text fz={stale ? undefined : VX.text.micro} size={stale ? 'xs' : undefined} c="dimmed" fw={stale ? 600 : undefined}>
-            {nothing ? 'no data' : `Last seen ${fmtRelative(reading.ts as number, now)} — not current`}
+            {reading.ts === null ? 'no data' : `Last seen ${fmtRelative(reading.ts, now)} — not current`}
           </Text>
         )}
       </Stack>

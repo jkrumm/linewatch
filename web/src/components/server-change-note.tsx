@@ -40,11 +40,20 @@ function detectServerChanges(tests: SpeedTest[]): ServerChange[] {
  * behind a disclosure that names its own count. The rows are unchanged, cap included: this only
  * changes when they're drawn, not what's in the list.
  */
-export function ServerChangeNote({ tests }: { tests: SpeedTest[] }) {
+export function ServerChangeNote({
+  tests,
+  isPending,
+}: {
+  tests: SpeedTest[]
+  /** True while the speed-test query for this window is in flight. Without it a key rotation empties
+   * `tests`, this returns null, and the expanded change list closes itself. */
+  isPending?: boolean
+}) {
   const changes = detectServerChanges(tests)
   const [opened, { toggle }] = useDisclosure(false)
   const Chevron = opened ? IconChevronDown : IconChevronRight
 
+  if (changes.length === 0 && isPending === true) return <Box h={22} />
   if (changes.length === 0) return null
 
   const shown = changes.slice(-SHOWN_CHANGES).toReversed()

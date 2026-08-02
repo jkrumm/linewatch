@@ -29,8 +29,11 @@ const FULL_INTENSITY_DEFICIT_PCT = 50
  * Not cosmetic. The Speed view offers an `all` range of 365 days, and one row per day × 24 UTC
  * hours is 8 760 cells — past `densifyBuckets`'s slot cap, and unreadable long before it. Clamping
  * to the trailing month keeps this chart answering the question it is for ("which hours of the day
- * are slow") while the throughput line above it keeps the full range. The subtitle names the span
- * actually drawn, so the clamp is visible rather than a quiet disagreement with the range selector.
+ * are slow") while the throughput line above it keeps the full range. The subtitle states this
+ * constant, so the clamp is visible rather than a quiet disagreement with the range selector — as a
+ * fixed ceiling, not a `${days} days` readout of the actual span drawn: the page's own range
+ * control already states the selection, and echoing its day count here duplicated it every time the
+ * selection was already under `MAX_DAYS`.
  */
 const MAX_DAYS = 30
 
@@ -46,7 +49,6 @@ const cellKey = (row: string, col: string) => `${row} ${col}`
  * errored, and hatched-neutral for an hour with no run at all. */
 export function SpeedHeatmap({ tests, from, to }: { tests: SpeedTest[]; from: number; to: number }) {
   const windowFrom = Math.max(from, to - MAX_DAYS * 86_400_000)
-  const days = Math.max(1, Math.round((to - windowFrom) / 86_400_000))
 
   const byHour = new Map<number, HourRow>()
   for (const test of tests) {
@@ -98,73 +100,83 @@ export function SpeedHeatmap({ tests, from, to }: { tests: SpeedTest[]; from: nu
   return (
     <ChartCard
       title="Throughput by hour"
-      subtitle={`When the line is slow · ${days === 1 ? 'last 24 hours' : `last ${days} days`}, by UTC hour`}
+      // Not `` `last ${days} days` `` — the page carries exactly one range control, and restating
+      // the selected window's day count here duplicated it whenever the selection was already under
+      // `MAX_DAYS`. What this view still has to self-report (the repo's own CLAUDE.md: this is the
+      // one block the range does not fully scope) is the structural cap, stated once and
+      // unconditionally rather than re-derived from the current selection.
+      subtitle={`When the line is slow · never more than the trailing ${MAX_DAYS} days, by UTC hour.`}
       tooltip="Darker cells averaged lower download throughput that hour; a cell paints full at half the fastest hour in range. Hatched cells either had no run or had one that failed — the tooltip says which."
     >
-      <ResponsiveChart height={Math.max(220, rows.length * 15)}>
-        {({ width, height }) => (
-          <CategoryGrid
-            cells={cells}
-            rows={rows}
-            cols={HOUR_LABELS}
-            width={width}
-            height={height}
-            chartId="speed-heatmap"
-            color={VX.accent}
-            rowLabel={(row) => DAY_FORMAT.format(new Date(`${row}T00:00:00Z`))}
-            // The captions are the strip's two ends, and they carry the real numbers rather than
-            // bare superlatives: "Slowest" over a range-relative ramp was the lie itself.
-            legend={{
-              min: fastest === null ? 'No successful run' : `Fastest ${fmtMbps(fastest)}`,
-              max: `≥${FULL_INTENSITY_DEFICIT_PCT}% slower`,
-            }}
-            renderTooltip={(cell) => {
-              const source = sources.get(cellKey(cell.row, cell.col))
-              const hour = source?.row ?? null
-              const mean = source?.mean ?? null
-              if (hour === null) {
-                return <TooltipRow color={VX.neutral} shape="bar" label="No run" value="Not measured" />
-              }
-              return (
-                <>
-                  {mean !== null && (
-                    <TooltipRow
-                      color={VX.accent}
-                      shape="bar"
-                      label={hour.downloads.length > 1 ? 'Download (mean)' : 'Download'}
-                      value={fmtMbps(mean)}
-                    />
-                  )}
-                  {mean !== null && fastest !== null && fastest > 0 && (
-                    <TooltipRow
-                      color={VX.neutral}
-                      shape="bar"
-                      label="Below fastest hour"
-                      value={fmtPct((100 * (fastest - mean)) / fastest)}
-                    />
-                  )}
-                  {hour.downloads.length > 0 && (
-                    <TooltipRow
-                      color={VX.neutral}
-                      shape="bar"
-                      label="Successful runs"
-                      value={String(hour.downloads.length)}
-                    />
-                  )}
-                  {hour.failures.length > 0 && (
-                    <TooltipRow
-                      color={VX.warnSolid}
-                      shape="bar"
-                      label="Failed runs"
-                      value={`${hour.failures.length}${failureReason(hour.failures)}`}
-                    />
-                  )}
-                </>
-              )
-            }}
-          />
-        )}
-      </ResponsiveChart>
+      {/* See `availability-strip.tsx`'s identical wrapper for why this is a floor, not a height. Here
+          the height itself is already computed (`rows.length * 15`), not fixed — this only stops it
+          from momentarily reporting 0 before the first measurement. */}
+      <div style={{ minHeight: 220 }}>
+        <ResponsiveChart height={Math.max(220, rows.length * 15)}>
+          {({ width, height }) => (
+            <CategoryGrid
+              cells={cells}
+              rows={rows}
+              cols={HOUR_LABELS}
+              width={width}
+              height={height}
+              chartId="speed-heatmap"
+              color={VX.accent}
+              rowLabel={(row) => DAY_FORMAT.format(new Date(`${row}T00:00:00Z`))}
+              // The captions are the strip's two ends, and they carry the real numbers rather than
+              // bare superlatives: "Slowest" over a range-relative ramp was the lie itself.
+              legend={{
+                min: fastest === null ? 'No successful run' : `Fastest ${fmtMbps(fastest)}`,
+                max: `≥${FULL_INTENSITY_DEFICIT_PCT}% slower`,
+              }}
+              renderTooltip={(cell) => {
+                const source = sources.get(cellKey(cell.row, cell.col))
+                const hour = source?.row ?? null
+                const mean = source?.mean ?? null
+                if (hour === null) {
+                  return <TooltipRow color={VX.neutral} shape="bar" label="No run" value="Not measured" />
+                }
+                return (
+                  <>
+                    {mean !== null && (
+                      <TooltipRow
+                        color={VX.accent}
+                        shape="bar"
+                        label={hour.downloads.length > 1 ? 'Download (mean)' : 'Download'}
+                        value={fmtMbps(mean)}
+                      />
+                    )}
+                    {mean !== null && fastest !== null && fastest > 0 && (
+                      <TooltipRow
+                        color={VX.neutral}
+                        shape="bar"
+                        label="Below fastest hour"
+                        value={fmtPct((100 * (fastest - mean)) / fastest)}
+                      />
+                    )}
+                    {hour.downloads.length > 0 && (
+                      <TooltipRow
+                        color={VX.neutral}
+                        shape="bar"
+                        label="Successful runs"
+                        value={String(hour.downloads.length)}
+                      />
+                    )}
+                    {hour.failures.length > 0 && (
+                      <TooltipRow
+                        color={VX.warnSolid}
+                        shape="bar"
+                        label="Failed runs"
+                        value={`${hour.failures.length}${failureReason(hour.failures)}`}
+                      />
+                    )}
+                  </>
+                )
+              }}
+            />
+          )}
+        </ResponsiveChart>
+      </div>
     </ChartCard>
   )
 }

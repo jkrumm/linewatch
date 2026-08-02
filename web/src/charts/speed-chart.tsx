@@ -59,52 +59,55 @@ export function SpeedChart({ tests, refLines = [] }: { tests: SpeedTest[]; refLi
           derived from a width measured out here — the same wrapper the latency comparison used for
           the same reason. Left to its default, every one of a 24 h window's runs got a tick and the
           axis rendered as one unbroken smear of overlapping timestamps. */}
-      <ResponsiveChart height={SPEED_HEIGHT}>
-        {({ width }) => {
-          // The *plot* width, not the container's: `MultiLine` spends `VX.margin` on its axes, and
-          // sizing the tick count off the outer width overestimates by 60 px. Harmless at 1600 px
-          // and not at 390, where it was the difference between four legible timestamps and five
-          // overlapping ones.
-          const plotWidth = Math.max(1, width - VX.margin.left - VX.margin.right)
-          return (
-            <MultiLine
-              data={points}
-              chartId="speed-throughput"
-              ariaLabel="Download against upload in Mbps, one point per speed-test run"
-              numTicksX={fitTickCount(
-                points.length,
-                Math.max(2, Math.floor(plotWidth / AXIS_LABEL_PX)),
-                plotWidth,
-              )}
-              getX={(p) => p.label}
-              series={[
-                {
-                  // `VX.accent`/`VX.line`, not `VX.line`/`VX.line2`: both of the latter resolve to
-                  // plain greys and read as one indistinct hue on the dark panel, which on a
-                  // two-series chart means the reader cannot tell download from upload without the
-                  // legend. The same pair the latency chart uses for its own two-series case.
-                  key: 'download',
-                  label: 'Download',
-                  color: VX.accent,
-                  mark: 'line',
-                  getValue: (p) => p.test.downloadMbps,
-                },
-                {
-                  key: 'upload',
-                  label: 'Upload',
-                  color: VX.line,
-                  mark: 'line',
-                  getValue: (p) => p.test.uploadMbps,
-                },
-              ]}
-              refLines={refLines.map((ref) => ({ value: ref.value, color: ref.color, dashed: true }))}
-              yDomain="auto"
-              formatValue={fmtMbps}
-              height={SPEED_HEIGHT}
-            />
-          )
-        }}
-      </ResponsiveChart>
+      {/* See `availability-strip.tsx`'s identical wrapper for why this is a floor, not a height. */}
+      <div style={{ minHeight: SPEED_HEIGHT }}>
+        <ResponsiveChart height={SPEED_HEIGHT}>
+          {({ width }) => {
+            // The *plot* width, not the container's: `MultiLine` spends `VX.margin` on its axes, and
+            // sizing the tick count off the outer width overestimates by 60 px. Harmless at 1600 px
+            // and not at 390, where it was the difference between four legible timestamps and five
+            // overlapping ones.
+            const plotWidth = Math.max(1, width - VX.margin.left - VX.margin.right)
+            return (
+              <MultiLine
+                data={points}
+                chartId="speed-throughput"
+                ariaLabel="Download against upload in Mbps, one point per speed-test run"
+                numTicksX={fitTickCount(
+                  points.length,
+                  Math.max(2, Math.floor(plotWidth / AXIS_LABEL_PX)),
+                  plotWidth,
+                )}
+                getX={(p) => p.label}
+                series={[
+                  {
+                    // `VX.accent`/`VX.line`, not `VX.line`/`VX.line2`: both of the latter resolve to
+                    // plain greys and read as one indistinct hue on the dark panel, which on a
+                    // two-series chart means the reader cannot tell download from upload without the
+                    // legend. The same pair the latency chart uses for its own two-series case.
+                    key: 'download',
+                    label: 'Download',
+                    color: VX.accent,
+                    mark: 'line',
+                    getValue: (p) => p.test.downloadMbps,
+                  },
+                  {
+                    key: 'upload',
+                    label: 'Upload',
+                    color: VX.line,
+                    mark: 'line',
+                    getValue: (p) => p.test.uploadMbps,
+                  },
+                ]}
+                refLines={refLines.map((ref) => ({ value: ref.value, color: ref.color, dashed: true }))}
+                yDomain="auto"
+                formatValue={fmtMbps}
+                height={SPEED_HEIGHT}
+              />
+            )
+          }}
+        </ResponsiveChart>
+      </div>
       {/* `MultiLine` draws ref lines but names none of them, and an unlabelled rule across a
           throughput chart is an assertion the reader has to guess at. The labels ride here, in
           their own reference-role legend, with the numbers their caller measured. */}

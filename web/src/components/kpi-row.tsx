@@ -1,4 +1,4 @@
-import { Center, SimpleGrid, Text } from '@mantine/core'
+import { Box, Center, SimpleGrid, Text } from '@mantine/core'
 import { DeltaBadge, StatCard } from 'basalt-ui'
 import { BarSparkline, LineSparkline, ResponsiveChart, VX } from 'basalt-ui/charts'
 import type { LatencyComparePoint } from '../lib/aggregate'
@@ -9,6 +9,7 @@ import {
   denseSparkline,
   downtimeTint,
   measuredFraction,
+  poolTo,
   windowDownloadMedian,
   windowWanMedian,
   worstBucketLoss,
@@ -17,6 +18,7 @@ import {
 } from '../lib/kpi'
 import { fmtMbps, fmtMinutes, fmtMs, fmtPct } from '../lib/format'
 import type { ProbeBucketSeconds, SpeedTest } from '../lib/types'
+import type { RangeOption } from '../lib/range'
 
 /** Sparkline height — width is measured per card by `ResponsiveChart`, never a fixed constant
  * (a fixed 260px overflowed the 390px mobile viewport by 74px, clipping mid-curve). */
@@ -36,6 +38,35 @@ export interface KpiWindow {
 }
 
 /**
+ * How the preceding window is named on a comparison badge.
+ *
+ * "vs prev" was jargon for a chip the whole row hangs on, and "prev" is not a word. The first fix
+ * spelled the period out in full — "vs last 24 hours" — which read fine alone but, at 768px
+ * (`cols=2`, ~328px of card content), grew the badge to ~168px inside a `Group
+ * justify="space-between" wrap="nowrap"` header row: Mantine's `Badge` label is nowrap + ellipsis,
+ * so the badge itself never truncated, but it squeezed the wrapping card label ("DOWNLOAD · TYPICAL
+ * OF 12 RUNS") down to a sliver and that one wrapped across five lines instead. The second fix kept
+ * the width down with calendar nouns — "yesterday", "last week" — and that one is short enough but
+ * wrong: `prevFrom = from - (to - from)` (`routes/index.tsx`) makes the comparison window a ROLLING
+ * span ending exactly where the current one starts, e.g. `[now-48h, now-24h)` for the 24h range,
+ * which is not "yesterday" (a calendar day) and collides with what "last 24 hours" already means —
+ * the current window itself, which the range control beside this badge already names.
+ *
+ * "X before" states the true relationship without borrowing a calendar word: the span is the same
+ * length as the current window and it ends exactly where the current one begins, which is what
+ * "before" says and "yesterday"/"last week" do not. It is also short — shorter than the spelled-out
+ * form that broke the header row above — so both constraints (a rolling window's actual shape, and
+ * the badge's width) are met by the same three-or-so characters this map already had room for.
+ */
+const RANGE_PERIOD_LABEL: Record<RangeOption, string> = {
+  '1h': '1h before',
+  '24h': '24h before',
+  '7d': '7d before',
+  '30d': '30d before',
+  all: '365d before',
+}
+
+/**
  * The four numbers the dashboard opens with, each against the preceding window of the same length.
  *
  * Chosen so each is exactly computable from what the range routes return, which ruled out the
@@ -46,7 +77,10 @@ export interface KpiWindow {
  * "Worst 5-min bucket loss" names an implementation detail of the SQL aggregation, and "WAN median
  * RTT" is three pieces of jargon for "ping". The numbers are identical; only the words changed, and
  * the units the reader actually needs — which window, and how it compares — moved out of a docblock
- * and onto the screen.
+ * and onto the screen. The window itself is no longer restated in a caption above the row: the range
+ * control lives in the sticky header now, visible from anywhere on the page, and the comparison
+ * period moved onto each badge (`RANGE_PERIOD_LABEL`) — "vs 24h before" beats a sentence above the
+ * row that the reader has to carry down to it.
  *
  * Every card is an aggregate over the *measured* part of the window. That caveat is not repeated
  * on four cards; it is stated once, in words, by the coverage verdict in the band above, which is
@@ -58,20 +92,33 @@ export interface KpiWindow {
  * (`worstLossTint`) have thresholds this codebase can defend; Ping and Download do not, so they
  * stay neutral. `undefined` — nothing wrong, or nothing measured — draws no mark at all: absence is
  * neither a good reading nor a bad one, and the tint functions return `undefined` for a null
- * reading precisely so this cannot happen by omission.
+ * reading precisely so this cannot happen by omission. Downtime's threshold bands rather than fires
+ * on any accrued second — see `downtimeTint`.
+ *
+ * **Only Downtime can go green, and only behind a coverage gate.** basalt-ui 1.8.0 added `'good'`
+ * to `StatCardTone`, and a green rail is a POSITIVE ASSERTION — "this was measured and it earned a
+ * clean verdict" — not the absence of a complaint. `worstLossTint` therefore still never returns it
+ * (a null worst-loss already means "nothing measured", so there is nothing to assert), and
+ * `downtimeTint` returns it only when `coverage` clears `COMPARABLE_COVERAGE`: a window nobody
+ * watched yields the same `{ seconds: 0, openCount: 0 }` a genuinely clean one does, and painting
+ * that green would be this project's founding failure mode wearing a badge. Both tone props also
+ * pass `undefined` outright while their own source is `pending`, so a card cannot go green off
+ * zeroed placeholder data one render before its query lands.
  *
  * That rail used to be a hand-rolled `ThresholdRail` here — a `Box` absolutely positioning a 3px
  * bar over the card's leading edge, written because `StatCard.value` is typed `string` and the
  * number itself could not be recoloured from outside. It was a second card idiom in this app,
  * drawn by this app's code, and it was colour-only: nothing about the threshold reached a screen
- * reader. basalt-ui 1.7.0 ships `StatCard.tone`, which draws the same rail from inside the card and
- * adds a `VisuallyHidden` label naming the threshold. The wrapper is gone.
+ * reader. `StatCard.tone` draws the same rail from inside the card and adds a `VisuallyHidden`
+ * label naming the threshold. The wrapper is gone.
  */
 export function KpiRow({
   current,
   previous,
   bucketSeconds = 300,
-  rangeLabel,
+  range,
+  windowSeconds,
+  pending,
 }: {
   current: KpiWindow
   /** The window of equal length immediately before `current`, or `null` while it is still loading. */
@@ -84,8 +131,33 @@ export function KpiRow({
    * Defaults to `rangeToBucket('24h')` (300s), the page's default range.
    */
   bucketSeconds?: ProbeBucketSeconds
-  /** How the selected range is written on the range control, so the caption names the same thing. */
-  rangeLabel: string
+  /** The selected range, so the comparison badges can name the period they're measured against —
+   * see `RANGE_PERIOD_LABEL`. Replaces a bare `rangeLabel: string`: the period vocabulary now lives
+   * with the row that renders it, not with the caller. */
+  range: RangeOption
+  /** `(to - from) / 1000` — the span `downtimeTint` bands its threshold against. */
+  windowSeconds: number
+  /**
+   * Per-source pending flags, not one OR'd boolean. A single `isPending` used to gate only the
+   * sparklines and the "Trend lines withheld" caption — every card's VALUE still rendered from
+   * `current`, which defaults to empty/zeroed data while its own query is in flight, so Downtime
+   * read "0 min" and Download's label read "typical of 0 runs" over a window nobody had fetched
+   * yet — one render before the strip beside it correctly showed "—" for the same figure. Each
+   * card's value/label/tone now withholds on its own source (`downtime`, `series`, `tests`); the
+   * sparkline area still reserves and releases together (`plottablePending` below), unchanged — a
+   * resolved Loss card drawing its curve next to a Download card still drawing dead space reads as
+   * one broken card, not two honestly-withheld ones.
+   */
+  pending: {
+    /** Gates the Downtime card. Source: the UNFILTERED outage query (`allOutageData` in
+     * `routes/index.tsx`) — `search.minDuration` scopes the Outages count/table only, never this
+     * figure. */
+    downtime: boolean
+    /** Gates the Worst-bucket-loss and Ping cards, which both derive from `current.points`. */
+    series: boolean
+    /** Gates the Download card, which derives from `current.tests`. */
+    tests: boolean
+  }
 }) {
   const wanMedianMs = windowWanMedian(current.points)
   const worstLoss = worstBucketLoss(current.points)
@@ -148,76 +220,134 @@ export function KpiRow({
       ? { loss: lossSeries, rtt: rttSeries, download: downloadSeries }
       : null
 
+  // The sparkline area still gates as one unit across all four cards, unlike the values below —
+  // see `pending`'s own docblock for why that split is deliberate, not an oversight.
+  const plottablePending = pending.series || pending.tests
+
+  const period = `vs ${RANGE_PERIOD_LABEL[range]}`
+
   return (
     <>
-      {/* The window, and what the badges are measured against, said once for the row rather than
-          four times on four labels. "Downtime: 12 min" is not a fact until you know over what. */}
-      <Text size="xs" c="dimmed" mb="xs">
-        Last {rangeLabel}, each figure against the {rangeLabel} before it
-      </Text>
-      <SimpleGrid cols={{ base: 2, lg: 4 }} spacing="md">
+      {/* One column below `sm`. At two-up on a 390px viewport each card holds ~147px of content
+          against a 24px mono hero — about ten characters — and "100.0% lost" is eleven, so
+          `StatCard`'s `overflow: hidden` cut the one reading the Worst-bucket card exists to report.
+          The label suffers the same squeeze: "DOWNLOAD · TYPICAL OF 12 RUNS" shares a nowrap `Group`
+          with the badge and wrapped to five lines at two-up. */}
+      <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="md">
         {/* Downtime never draws a real sparkline — see `NoSeriesSlot` — but still needs a slot of
             the same height whenever its neighbours draw theirs, or the row goes uneven exactly when
             it looks most finished. */}
         <StatCard
-          tone={downtimeTint(current.downtime)}
-          label={current.downtime.openCount > 0 ? `Downtime · ${current.downtime.openCount} still open` : 'Downtime'}
-          value={fmtMinutes(current.downtime.seconds)}
-          menu={<ComparisonBadge comparison={downtimeDelta} />}
-          sparkline={allSeries === null ? undefined : <NoSeriesSlot />}
+          tone={pending.downtime ? undefined : downtimeTint(current.downtime, windowSeconds, coverage)}
+          label={
+            pending.downtime
+              ? 'Downtime'
+              : current.downtime.openCount > 0
+                ? `Downtime · ${current.downtime.openCount} still open`
+                : 'Downtime'
+          }
+          value={pending.downtime ? '—' : fmtMinutes(current.downtime.seconds)}
+          menu={previous === null ? <Box mih={22} /> : <ComparisonBadge comparison={downtimeDelta} period={period} />}
+          sparkline={plottablePending ? <Box mih={SPARK_H} /> : allSeries === null ? undefined : <NoSeriesSlot />}
         />
         <StatCard
-          tone={worstLossTint(worstLoss)}
+          tone={pending.series ? undefined : worstLossTint(worstLoss)}
           // "Worst 5 minutes", not "worst 5-min bucket loss": the bucket is how the figure is
           // computed, not what it says. What it says is that there was a five-minute stretch in
           // which this share of pings never came back — so the share is the value and the stretch
           // is the label, and neither needs the word "bucket" to land.
           label={`Worst ${bucketLabel(bucketSeconds)}`}
-          value={worstLoss === null ? '—' : `${fmtPct(worstLoss)} lost`}
-          menu={<ComparisonBadge comparison={lossDelta} />}
+          value={pending.series ? '—' : worstLoss === null ? '—' : `${fmtPct(worstLoss)} lost`}
+          menu={previous === null ? <Box mih={22} /> : <ComparisonBadge comparison={lossDelta} period={period} />}
           sparkline={
-            allSeries === null ? undefined : (
-              <ResponsiveChart height={SPARK_H}>
-                {({ width, height }) => (
-                  <BarSparkline data={allSeries.loss} width={width} height={height} ariaLabel="Worst packet loss per bucket" />
-                )}
-              </ResponsiveChart>
+            plottablePending ? (
+              <Box mih={SPARK_H} />
+            ) : allSeries === null ? undefined : (
+              <Box mih={SPARK_H}>
+                <ResponsiveChart height={SPARK_H}>
+                  {({ width, height }) => {
+                    // Downsampled to the width it is actually drawn at. `BarSparkline` computes
+                    // `barWidth = max(step - 1, 1)`, so 288 buckets in 173px is a 1px bar on a
+                    // 0.60px pitch — bars overlapping by 40%, and a single 100%-loss bucket
+                    // invisible inside a uniform grey block. MAX for loss, because the number above
+                    // this card is a maximum over buckets and a sparkline that averaged the spike
+                    // away would contradict it.
+                    const cap = Math.max(8, Math.floor(width / 3))
+                    return (
+                      <BarSparkline
+                        data={poolTo(allSeries.loss, cap, 'max')}
+                        width={width}
+                        height={height}
+                        ariaLabel="Worst packet loss per bucket"
+                      />
+                    )
+                  }}
+                </ResponsiveChart>
+              </Box>
             )
           }
         />
         <StatCard
           label="Ping · internet"
-          value={fmtMs(wanMedianMs)}
-          menu={<ComparisonBadge comparison={pingDelta} />}
+          value={pending.series ? '—' : fmtMs(wanMedianMs)}
+          menu={previous === null ? <Box mih={22} /> : <ComparisonBadge comparison={pingDelta} period={period} />}
           sparkline={
-            allSeries === null ? undefined : (
-              <ResponsiveChart height={SPARK_H}>
-                {({ width, height }) => (
-                  <LineSparkline data={allSeries.rtt} width={width} height={height} ariaLabel="Median round-trip time to the internet per bucket" />
-                )}
-              </ResponsiveChart>
+            plottablePending ? (
+              <Box mih={SPARK_H} />
+            ) : allSeries === null ? undefined : (
+              <Box mih={SPARK_H}>
+                <ResponsiveChart height={SPARK_H}>
+                  {({ width, height }) => {
+                    // MEDIAN, not max: this is a typical-case reading, and a max would draw an
+                    // envelope rather than a trend.
+                    const cap = Math.max(8, Math.floor(width / 3))
+                    return (
+                      <LineSparkline
+                        data={poolTo(allSeries.rtt, cap, 'median')}
+                        width={width}
+                        height={height}
+                        ariaLabel="Median round-trip time to the internet per bucket"
+                      />
+                    )
+                  }}
+                </ResponsiveChart>
+              </Box>
             )
           }
         />
         <StatCard
           // The run count rides on the label: a typical taken over 3 runs and one taken over 300
           // are different claims, and this is the only card whose sample size the reader cannot
-          // infer from the range.
-          label={`Download · typical of ${current.tests.length} run${current.tests.length === 1 ? '' : 's'}`}
-          value={fmtMbps(downloadMbps)}
-          menu={<ComparisonBadge comparison={downloadDelta} />}
+          // infer from the range. Withheld while pending — "typical of 0 runs" once genuinely read
+          // as a real answer over a window whose speed tests hadn't arrived yet.
+          label={pending.tests ? 'Download' : `Download · typical of ${current.tests.length} run${current.tests.length === 1 ? '' : 's'}`}
+          value={pending.tests ? '—' : fmtMbps(downloadMbps)}
+          menu={previous === null ? <Box mih={22} /> : <ComparisonBadge comparison={downloadDelta} period={period} />}
           sparkline={
-            allSeries === null ? undefined : (
-              <ResponsiveChart height={SPARK_H}>
-                {({ width, height }) => (
-                  <LineSparkline data={allSeries.download} width={width} height={height} color={VX.line} ariaLabel="Download throughput per run" />
-                )}
-              </ResponsiveChart>
+            plottablePending ? (
+              <Box mih={SPARK_H} />
+            ) : allSeries === null ? undefined : (
+              <Box mih={SPARK_H}>
+                <ResponsiveChart height={SPARK_H}>
+                  {({ width, height }) => {
+                    const cap = Math.max(8, Math.floor(width / 3))
+                    return (
+                      <LineSparkline
+                        data={poolTo(allSeries.download, cap, 'median')}
+                        width={width}
+                        height={height}
+                        color={VX.line}
+                        ariaLabel="Download throughput per run"
+                      />
+                    )
+                  }}
+                </ResponsiveChart>
+              </Box>
             )
           }
         />
       </SimpleGrid>
-      {allSeries === null && (
+      {!plottablePending && allSeries === null && (
         <Text size="xs" c="dimmed" mt={4}>
           Trend lines withheld — this window has an unmeasured gap, so the shapes above would misstate it. The totals are
           still exact over what was measured.
@@ -239,9 +369,9 @@ export function KpiRow({
  * It rides `StatCard`'s `menu` slot (the card's consumer-owned header-right corner) because the
  * card's own `delta` prop takes a bare number and renders the glyph this deliberately suppresses.
  */
-function ComparisonBadge({ comparison }: { comparison: Comparison | null }) {
+function ComparisonBadge({ comparison, period }: { comparison: Comparison | null; period: string }) {
   if (comparison === null) return null
-  return <DeltaBadge value={comparison.tone} format={() => comparison.label} withGlyph={false} period="vs prev" />
+  return <DeltaBadge value={comparison.tone} format={() => comparison.label} withGlyph={false} period={period} />
 }
 
 /**
@@ -259,7 +389,8 @@ function ComparisonBadge({ comparison }: { comparison: Comparison | null }) {
  * when the *other* three are about to draw theirs, which is the only state where a bare Downtime
  * card would otherwise look broken rather than expected. When `allSeries` is null every card is
  * plain (no sparkline prop passed at all) and the row is already uniform at the base 118px height,
- * so no slot is needed then.
+ * so no slot is needed then. While `plottablePending`, all four cards render the same reserved
+ * `Box` instead — this component draws only in the settled, holed case.
  */
 function NoSeriesSlot() {
   return (

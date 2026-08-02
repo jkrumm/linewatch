@@ -1,4 +1,4 @@
-import { Card, Group, SimpleGrid, Stack, Text, Title } from '@mantine/core'
+import { Card, Group, Skeleton, SimpleGrid, Stack, Text, Title } from '@mantine/core'
 import { StatCard } from 'basalt-ui'
 import { Callout } from 'basalt-ui/content'
 import type { RouterSnapshot, StatusSpeedTest, Vantage } from '../lib/types'
@@ -16,6 +16,13 @@ import { fmtPct, fmtRelative } from '../lib/format'
  * polls, so the carrier figure is routinely tens of minutes old beside a 30-second-old vantage.
  * A percentage across that gap is a disagreement between two moments dressed up as a fact about
  * one. `compareCarrierHost` decides; this file only draws what it returns.
+ *
+ * **Pending is a skeleton, not a call to `compareCarrierHost` with fabricated inputs.** `router`,
+ * `vantage` and `speedTest` come from two independent queries, and `compareCarrierHost` cannot
+ * tell "this query hasn't answered" apart from "this source genuinely has nothing" — both arrive
+ * as `null`. Gating on all three before that call keeps a merely-loading page from producing one
+ * of `compareCarrierHost`'s real, worded refusals (e.g. "the carrier side is unknown") over a
+ * request nobody has made yet.
  */
 export function LinkComparison({
   router,
@@ -23,21 +30,32 @@ export function LinkComparison({
   speedTest,
   now,
 }: {
-  router: RouterSnapshot | null
-  vantage: Vantage | null
-  speedTest: StatusSpeedTest | null
+  router: RouterSnapshot | null | undefined
+  vantage: Vantage | null | undefined
+  speedTest: StatusSpeedTest | null | undefined
   /** The dashboard's floored clock, so every age here is quantised like the data. */
   now: number
 }) {
+  if (router === undefined || vantage === undefined || speedTest === undefined) {
+    return (
+      <Card py="xs" px="sm">
+        <Stack gap="sm">
+          <Title order={4}>Router → carrier</Title>
+          <Skeleton h={90} />
+        </Stack>
+      </Card>
+    )
+  }
+
   const comparison = compareCarrierHost({ router, vantage, speedTest, now })
 
   return (
     <Card py="xs" px="sm">
       <Stack gap="md">
         <Stack gap={0}>
-          <Title order={4}>Carrier vs host</Title>
+          <Title order={4}>Router → carrier</Title>
           <Text size="sm" c="dimmed">
-            Two negotiated rates and one measured transfer. They share a unit and nothing else.
+            Carrier sync, host link, and one measured transfer — sharing a unit, nothing else.
           </Text>
         </Stack>
 

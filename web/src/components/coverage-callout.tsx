@@ -109,9 +109,23 @@ function CompactCoverage({ summary }: { summary: RangeSummary }) {
  * Size tracks severity: `info` (the ordinary, nothing-wrong case) collapses to `CompactCoverage`
  * above; `warn`/`bad` — where the numbers below this describe a minority of the window, or coverage
  * could not be expressed at all — keep the full `Callout`, every sentence visible, unconditionally.
+ *
+ * Three states, not two. `null` is the server having had no window to compute coverage over and
+ * renders nothing, unchanged. `'pending'` is nobody having asked yet — and it must not collapse to
+ * `null`, because this component unmounting and remounting on a query-key rotation is what made an
+ * expanded coverage explanation snap shut on its own every time the window advanced.
  */
-export function CoverageCallout({ summary }: { summary: RangeSummary | null }) {
+export function CoverageCallout({ summary }: { summary: RangeSummary | null | 'pending' }) {
   if (summary === null) return null
+  if (summary === 'pending') {
+    return (
+      <Box>
+        <Text size="xs" c="dimmed">
+          Coverage — measuring…
+        </Text>
+      </Box>
+    )
+  }
 
   const kind = coverageKind(summary)
   if (kind === 'info') return <CompactCoverage summary={summary} />

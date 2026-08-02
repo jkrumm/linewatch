@@ -38,7 +38,7 @@ export const AVAILABILITY_COPY: ChartCopy = {
   tooltip: 'Packet loss per bucket over the selected range, with unmeasured buckets marked.',
   guide: [
     {
-      body: 'One column per bucket, and always the same number of columns for the window — the axis comes from the range, not from the rows that came back.',
+      body: 'One column per bucket — the axis comes from the range, not from the rows that came back.',
     },
     {
       lead: 'Shading is loss.',
@@ -46,11 +46,11 @@ export const AVAILABILITY_COPY: ChartCopy = {
     },
     {
       lead: 'Hatching is absence.',
-      body: 'A hatched column was not measured at all. That is a different fact from a bucket with no loss, and the two must never look alike: the collector being down produces no outage rows, so an unmeasured window would otherwise render as a flawless one.',
+      body: 'A hatched column was not measured at all — the collector being down produces no outage rows, so an unmeasured window would otherwise render as a flawless one.',
     },
     {
       lead: 'Why buckets and not raw samples.',
-      body: 'probe_sample grows by roughly 4.2 million rows a year, so every range query aggregates in SQL. What you see is the aggregate of each bucket, never a subsample of it.',
+      body: 'probe_sample grows by roughly 4.2 million rows a year, so every range query aggregates in SQL — never a subsample of it.',
     },
   ],
 }
@@ -60,7 +60,7 @@ export const LATENCY_BAND_COPY: ChartCopy = {
   tooltip: 'Per-target round-trip time: median, spread, worst ping, and loss.',
   guide: [
     {
-      body: 'Median round-trip time with the p5–p95 spread shaded behind it, SmokePing-style, and a faint outer line at the slowest single ping in each bucket.',
+      body: 'Median round-trip time with the p5–p95 spread shaded behind it, and a faint outer line at the slowest single ping in each bucket.',
     },
     {
       lead: 'Dots mark cycles with packet loss.',
@@ -68,7 +68,7 @@ export const LATENCY_BAND_COPY: ChartCopy = {
     },
     {
       lead: 'Hatched columns were not measured at all.',
-      body: 'A red column is a bucket where cycles got nothing back. The two are opposite facts and are drawn differently on purpose.',
+      body: 'A red column is a bucket where cycles got nothing back — opposite facts, drawn differently on purpose.',
     },
     {
       lead: 'The hatched rail along the bottom',
@@ -82,15 +82,19 @@ export const INTERNET_LATENCY_COPY: ChartCopy = {
   tooltip: 'Internet RTT — median, p5–p95 spread and worst ping, folded across three anchors — against the router.',
   guide: [
     {
-      body: 'One band, not three. Cloudflare, Google and Quad9 answer the same question between them — how far away is the internet from this machine — and three near-identical traces stacked on top of each other invite a comparison that is almost never meaningful. Switch to Per target when you want to see an anchor disagree with the other two.',
+      body: 'One band, not three. Cloudflare, Google and Quad9 answer the same question — how far away is the internet from this machine — and three near-identical traces invite a comparison that is almost never meaningful. Switch to Per target to see an anchor disagree with the other two.',
     },
     {
       lead: 'The band is the fold, statistic by statistic.',
-      body: 'Median, p5 and p95 are each the median across the anchors that reported them — a median and not a mean, so one badly routed anchor moves it far less than it would move an average, and an anchor that did not answer is skipped rather than counted as zero. The outer line is the slowest single ping any anchor saw, taken as the maximum, because it is the only stored witness of a sub-cycle stall and a median across anchors would erase one.',
+      body: 'Median, p5 and p95 are each the median across the anchors that reported them — a median, not a mean, so one badly routed anchor moves it far less than an average would, and an anchor that did not answer is skipped rather than counted as zero. The outer line is the slowest single ping any anchor saw, taken as the maximum, because it is the only stored witness of a sub-cycle stall and a median across anchors would erase one.',
     },
     {
       lead: 'The plain line over the band is the router.',
-      body: 'It is a single target, so it is a reading rather than an aggregate, and it is what tells a local problem from one past your line: a router line that rises with the band is on your side of the router, an internet band that rises alone is not.',
+      body: 'It is a single target — a reading rather than an aggregate — and it tells a local problem from one past your line: a router line that rises with the band is on your side of the router, an internet band that rises alone is not.',
+    },
+    {
+      lead: 'Dots mark cycles with packet loss.',
+      body: 'The median is taken over the packets that came back, so a lossy bucket and a clean one can plot at the same height — the dot is what distinguishes them. The legend names the two bands the dot colour splits on.',
     },
     {
       lead: 'Loss is the internet-wide figure, not the worst anchor.',
@@ -110,7 +114,7 @@ export const LINK_SPEED_COPY: ChartCopy = {
     { body: 'One column per bucket over the whole window.' },
     {
       lead: 'Hatched columns were never measured.',
-      body: 'Faint columns were measured, by cycles that reported no link speed — measured-but-unknown, which is not the same as unmeasured and not the same as unchanged.',
+      body: 'Faint columns were measured, by cycles that reported no link speed — measured-but-unknown, different from both unmeasured and unchanged.',
     },
     {
       lead: 'A bucket where the NIC renegotiated is marked, not averaged.',
@@ -119,24 +123,6 @@ export const LINK_SPEED_COPY: ChartCopy = {
     {
       lead: 'Link speed is not throughput.',
       body: 'It is what the NIC and the switch port agreed to carry. Whether the line can fill it is a separate measurement, in the Speed section.',
-    },
-  ],
-}
-
-export const SPEED_COPY: ChartCopy = {
-  subtitle: 'One point per run, at equal spacing regardless of the gap between runs.',
-  tooltip: 'Ookla download and upload, one point per run, sharing one axis.',
-  guide: [
-    {
-      body: 'Ookla runs, one point each, drawn at equal spacing regardless of the real interval between them — the x-axis is categorical, so a gap in the middle of the chart is not visible as a gap. Check the run count against the range before reading a trend into the shape.',
-    },
-    {
-      lead: 'The dashed rules are ceilings, not verdicts.',
-      body: "One is the host's negotiated Ethernet link, the other the carrier's downstream sync rate. Each is drawn only while its reading is current: a stale ceiling drawn across today's tests would present an old measurement as a present one, so a missing rule means the reading was absent or too old, never that the ceiling is unlimited.",
-    },
-    {
-      lead: 'A throughput number above the link rule is a record fault, not a fast line.',
-      body: 'The verdict layer raises it as "speed test moved more than the recorded link could carry" when it happens.',
     },
   ],
 }
@@ -151,7 +137,7 @@ export const THROUGHPUT_COPY: ChartCopy = {
     },
     {
       lead: 'Where the numbers come from.',
-      body: "The collector already reads the interface's cumulative byte counters every 30 s cycle, out of the same netstat row as its error counters, so this costs no extra sampler. It also means the resolution is the 30 s cycle: a smoothed rate that cannot show a burst.",
+      body: "The collector already reads the interface's cumulative byte counters every 30 s cycle, out of the same netstat row as its error counters — no extra sampler needed. The resolution is that same 30 s cycle: a smoothed rate that cannot show a burst.",
     },
     {
       lead: 'The two halves are scaled independently.',

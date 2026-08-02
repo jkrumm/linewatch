@@ -47,7 +47,29 @@ const SEVERITY_COLOR: Record<Severity, string> = {
  * `info`/`ok` go behind a single closed toggle that names its own count. The rule that an
  * actionable finding is never hidden behind a disclosure is unchanged — see `triageVerdicts`.
  */
-export function VerdictPanel({ verdicts }: { verdicts: Verdict[] }) {
+export function VerdictPanel({ verdicts }: { verdicts: Verdict[] | undefined }) {
+  if (verdicts === undefined) {
+    /**
+     * A THIRD state, and it must not borrow either of the other two's words.
+     *
+     * The page used to render this component only once the query resolved, so the whole band —
+     * one dim line at its shortest, several full Callouts at its longest — vanished and returned
+     * on every query-key rotation, dragging every section under it up and back down, and resetting
+     * the `useDisclosure` in every `VerdictRow` and in `RoutineGroups` so an expanded finding shut
+     * itself.
+     *
+     * It renders always now, and "not asked yet" gets its own sentence. It cannot reuse the
+     * no-verdicts one below: that sentence draws a real and load-bearing distinction — no rule
+     * reached a conclusion is not a clean bill of health — and putting it over a window nobody has
+     * queried asserts a measured-and-silent result that was never measured.
+     */
+    return (
+      <Text size="xs" c="dimmed">
+        Evaluating this window…
+      </Text>
+    )
+  }
+
   if (verdicts.length === 0) {
     // One dim line, not a callout. The distinction it draws is real and worth keeping — no rule
     // fired is not the same fact as a healthy line, because a rule with absent inputs stays silent
@@ -102,11 +124,15 @@ function VerdictCallout({ group }: { group: VerdictGroup }) {
  *
  * Used for every `warn` and for each routine finding once the disclosure is open. Collapsed it
  * carries the severity accent, the rule's conclusion, and the occurrence count — enough to decide
- * whether to open it, and nothing that needs reading twice. The collapsed line is `lineClamp={1}`:
- * a compact row exists to stay compact, and an unclamped conclusion (these run to a full sentence
- * with cited numbers) would make a "collapsed" row three lines tall. That clamp is lossy, so —
- * unlike `VerdictCallout`, whose title is never clamped and whose body therefore does not repeat
- * it — the expanded body here shows the conclusion again in full, unclamped, before the rest of
+ * whether to open it, and nothing that needs reading twice. The collapsed line is `lineClamp={2}`:
+ * at 1548px one line holds ~115 characters of a templated conclusion; at 338px — the one tier where
+ * an actionable `warn` is allowed to be collapsed at all — it holds ~40, so a single-line clamp cut
+ * a real finding to a sentence fragment (`The line lost 4.2% of packets on ever…`). Two lines,
+ * unconditionally, is the cost of keeping the row decidable at every width: the row must carry
+ * enough to decide whether to open it, and the expanded body re-renders the conclusion unclamped
+ * anyway, so the cost is one row-height on a wide screen. That clamp is still lossy, so — unlike
+ * `VerdictCallout`, whose title is never clamped and whose body therefore does not repeat it — the
+ * expanded body here shows the conclusion again in full, unclamped, before the rest of
  * `VerdictBody`. Opening the row costs the reader no information, only a click.
  */
 function VerdictRow({ group }: { group: VerdictGroup }) {
@@ -126,7 +152,7 @@ function VerdictRow({ group }: { group: VerdictGroup }) {
       <UnstyledButton onClick={toggle} aria-expanded={opened} w="100%" px="sm" py={8}>
         <Group gap="xs" wrap="nowrap" align="center">
           <Chevron size={14} color={VX.faint} aria-hidden="true" />
-          <Text size="sm" lineClamp={1} style={{ flex: 1, minWidth: 0 }}>
+          <Text size="sm" lineClamp={2} style={{ flex: 1, minWidth: 0 }}>
             {group.conclusion}
           </Text>
           {/* The count is on the collapsed row on purpose: "×4" is the difference between one event

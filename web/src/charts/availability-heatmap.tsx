@@ -4,6 +4,7 @@ import { densifyBuckets } from '../lib/densify'
 import { PROBE_CYCLE_MS } from '../lib/range'
 import { fmtPct } from '../lib/format'
 import { CategoryGrid, type GridCell } from './category-grid'
+import { ChartPending } from './chart-pending'
 
 /**
  * The bucket size this grid is a grid OF. Exported so the route's query and the chart cannot
@@ -45,15 +46,26 @@ type Source = { bucket: ProbeBucket | null }
  * Intensity is the bucket's aggregate `lossPct`, not `maxLossPct`: a single lost cycle in an hour
  * is ~0.03% of that hour, and colouring the cell by the worst cycle painted the whole hour as
  * fully down. The worst cycle and the fully-down count stay in the tooltip, where they inform
- * rather than mislead. */
+ * rather than mislead.
+ *
+ * **`isPending` guards the same fabrication `ThroughputChart` had to be given its own for.** The
+ * heatmap's query is not in the route loader either, so on the pattern view's first render
+ * `heatmapData?.buckets ?? []` densified to every cell hatched-absent and every tooltip reading "0
+ * of 30 expected cycles" — a claim, over a window nobody had asked about, that thirty days of
+ * measurement came back empty. Hatching happens to be the conservative reading here (it never
+ * claims the line was up), which is the one thing that kept this milder than `ThroughputChart`'s
+ * version of the same bug — but it is the same class, and the fix is the same `isPending` prop. */
 export function AvailabilityHeatmap({
   buckets,
   from,
   to,
+  isPending,
 }: {
   buckets: ProbeBucket[]
   from: number
   to: number
+  /** True while the probe-buckets query behind this grid is in flight — see the component docblock. */
+  isPending?: boolean
 }) {
   const slots = densifyBuckets(buckets, {
     from,
@@ -78,7 +90,11 @@ export function AvailabilityHeatmap({
     })
     sources.set(cellKey(row, col), { bucket: slot.value })
   }
+  // Rows come from the requested WINDOW (`slots`, densified over `from`/`to`), never from the
+  // buckets a response happened to contain — so this stays the same 30 rows whether `isPending` is
+  // true or not, and the grid height below can't jump the moment the query resolves.
   const rows = [...new Set(cells.map((c) => c.row))]
+  const gridHeight = Math.max(220, rows.length * 15)
 
   return (
     <ChartCard
@@ -86,64 +102,73 @@ export function AvailabilityHeatmap({
       subtitle="Last 30 days, by UTC hour"
       tooltip="Each cell is one UTC hour's WAN availability — darker means more loss that hour, up to 5% which paints full. Hatched cells were not measured at all, which is not the same as an hour with no loss."
     >
-      <ResponsiveChart height={Math.max(220, rows.length * 15)}>
-        {({ width, height }) => (
-          <CategoryGrid
-            cells={cells}
-            rows={rows}
-            cols={HOUR_LABELS}
-            width={width}
-            height={height}
-            chartId="availability-heatmap"
-            // badSolid, not bad: the ramp is alpha(color, intensity), so handing it the
-            // 18%-opacity fill token attenuates it twice into near-invisibility.
-            color={VX.badSolid}
-            rowLabel={(row) => DAY_FORMAT.format(new Date(`${row}T00:00:00Z`))}
-            legend={{ min: 'No loss', max: '≥5% loss' }}
-            renderTooltip={(cell) => {
-              const bucket = sources.get(cellKey(cell.row, cell.col))?.bucket ?? null
-              if (bucket === null) {
-                return (
-                  <TooltipRow
-                    color={VX.neutral}
-                    shape="bar"
-                    label="Not measured"
-                    value={`0 of ${expectedCycles} expected cycles`}
-                  />
-                )
-              }
-              return (
-                <>
-                  <TooltipRow
-                    color={VX.badSolid}
-                    shape="bar"
-                    label="Loss"
-                    value={fmtPct(bucket.lossPct, 2)}
-                  />
-                  <TooltipRow
-                    color={VX.warnSolid}
-                    shape="dot"
-                    label="Worst cycle"
-                    value={fmtPct(bucket.maxLossPct)}
-                  />
-                  <TooltipRow
-                    color={VX.badSolid}
-                    shape="dot"
-                    label="Cycles fully down"
-                    value={String(bucket.downCycles)}
-                  />
-                  <TooltipRow
-                    color={VX.neutral}
-                    shape="bar"
-                    label="Measured"
-                    value={`${bucket.count} of ${expectedCycles} expected cycles`}
-                  />
-                </>
-              )
-            }}
-          />
+      {/* See `availability-strip.tsx`'s identical wrapper for why this is a floor, not a height. Here
+          the height itself is already computed (`rows.length * 15`), not fixed — this only stops it
+          from momentarily reporting 0 before the first measurement. */}
+      <div style={{ minHeight: 220 }}>
+        {isPending ? (
+          <ChartPending height={gridHeight} />
+        ) : (
+          <ResponsiveChart height={gridHeight}>
+            {({ width, height }) => (
+              <CategoryGrid
+                cells={cells}
+                rows={rows}
+                cols={HOUR_LABELS}
+                width={width}
+                height={height}
+                chartId="availability-heatmap"
+                // badSolid, not bad: the ramp is alpha(color, intensity), so handing it the
+                // 18%-opacity fill token attenuates it twice into near-invisibility.
+                color={VX.badSolid}
+                rowLabel={(row) => DAY_FORMAT.format(new Date(`${row}T00:00:00Z`))}
+                legend={{ min: 'No loss', max: '≥5% loss' }}
+                renderTooltip={(cell) => {
+                  const bucket = sources.get(cellKey(cell.row, cell.col))?.bucket ?? null
+                  if (bucket === null) {
+                    return (
+                      <TooltipRow
+                        color={VX.neutral}
+                        shape="bar"
+                        label="Not measured"
+                        value={`0 of ${expectedCycles} expected cycles`}
+                      />
+                    )
+                  }
+                  return (
+                    <>
+                      <TooltipRow
+                        color={VX.badSolid}
+                        shape="bar"
+                        label="Loss"
+                        value={fmtPct(bucket.lossPct, 2)}
+                      />
+                      <TooltipRow
+                        color={VX.warnSolid}
+                        shape="dot"
+                        label="Worst cycle"
+                        value={fmtPct(bucket.maxLossPct)}
+                      />
+                      <TooltipRow
+                        color={VX.badSolid}
+                        shape="dot"
+                        label="Cycles fully down"
+                        value={String(bucket.downCycles)}
+                      />
+                      <TooltipRow
+                        color={VX.neutral}
+                        shape="bar"
+                        label="Measured"
+                        value={`${bucket.count} of ${expectedCycles} expected cycles`}
+                      />
+                    </>
+                  )
+                }}
+              />
+            )}
+          </ResponsiveChart>
         )}
-      </ResponsiveChart>
+      </div>
     </ChartCard>
   )
 }

@@ -709,4 +709,12 @@ check: ## Typecheck (API + collector, then the dashboard) + run the test suite
 	@# its own pass — it has different lib/jsx settings and a generated route tree.
 	@# Without this, a broken web/ typechecks clean and only fails at image build.
 	cd web && bun run typecheck
-	bun test
+	@# Two packages, two installs, so two scoped runs. A bare `bun test` at the root
+	@# walks into web/ as well, which passes here only because a previous `cd web &&
+	@# bun install` left web/node_modules on this machine — CI's api job installs the
+	@# root package alone, and the dashboard's render tests import react-dom, @mantine
+	@# and @tanstack/react-query. Scope the filter with `./src ./collector`, not
+	@# `src collector`: bun matches those as path substrings and `src` also selects
+	@# web/src.
+	bun test ./src ./collector
+	cd web && bun test

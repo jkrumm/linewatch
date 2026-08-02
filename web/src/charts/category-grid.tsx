@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useEffect, useRef } from 'react'
 import {
   ChartTooltip,
   Group,
@@ -107,6 +108,24 @@ export function CategoryGrid({
   const { tip, show, hide, tooltipRef } = useChartTooltip<GridCell>()
   const absentHatchId = `${chartId}-absent`
   const failedHatchId = `${chartId}-failed`
+  const svgRef = useRef<SVGSVGElement | null>(null)
+
+  // `CategoryGrid` stays outside the shared cursor (see the module docblock in the charts that join
+  // it) but still needs to be reachable on a phone. `useChartTooltip`'s own `show`/`hide` are wired
+  // per-cell below via pointer events instead of mouse events; the one thing per-cell wiring cannot
+  // give for free is a way to dismiss on touch, where `pointerleave` fires on lift and would close
+  // the tooltip the instant it opened. One listener for the whole grid, not one per cell.
+  useEffect(() => {
+    if (tip === null) return
+    const dismiss = (event: PointerEvent) => {
+      const svg = svgRef.current
+      if (svg === null) return
+      if (event.target instanceof Node && svg.contains(event.target)) return
+      hide()
+    }
+    document.addEventListener('pointerdown', dismiss, true)
+    return () => document.removeEventListener('pointerdown', dismiss, true)
+  }, [tip, hide])
 
   const lookup = new Map(cells.map((c) => [cellKey(c.row, c.col), c]))
 
@@ -126,9 +145,22 @@ export function CategoryGrid({
   const cellH = rows.length > 0 ? gridH / rows.length : 0
   const legendGradientId = `${chartId}-legend`
 
+  // Thin the COLUMN LABELS the way every time axis on this page does. 24 hour labels over a 280px
+  // grid is 11.7px per column against a 13.2px label — adjacent labels overlap and the axis reads as
+  // one run of digits. At desktop widths `labelStep` is 1 and nothing changes.
+  //
+  // Labels only. Never thin the CELLS: every cell must keep being drawn, `absent` ones included, or
+  // the calendar silently closes up — the exact bug `AvailabilityHeatmap`'s docblock records fixing
+  // by sourcing its rows from the window rather than from the response.
+  const labelStep = cellW > 0 ? Math.max(1, Math.ceil(14 / cellW)) : 1
+  // Same idea for row labels, applied only where the grid actually needs it — a day label per row is
+  // legible at every width today, so `rowLabelStep` computes to 1 (no thinning) unless a future
+  // caller's `cellH` genuinely demands it.
+  const rowLabelStep = cellH > 0 ? Math.max(1, Math.ceil(14 / cellH)) : 1
+
   return (
     <div style={{ position: 'relative' }}>
-      <svg width={width} height={height}>
+      <svg ref={svgRef} width={width} height={height}>
         <defs>
           <HatchPattern id={absentHatchId} color={VX.neutral} opacity={0.7} size={5} />
           <HatchPattern id={failedHatchId} color={failedColor} opacity={0.9} size={5} />
@@ -153,42 +185,52 @@ export function CategoryGrid({
                   rx={CELL_RADIUS}
                   fill={cellFill(cell, color, absentHatchId, failedHatchId)}
                   style={{ cursor: cell ? 'pointer' : 'default' }}
-                  onMouseMove={(e) => cell && show(cell, e)}
-                  onMouseLeave={hide}
+                  onPointerMove={(e) => cell && show(cell, e)}
+                  onPointerLeave={(e) => {
+                    // Mirrors `PointerOverlay`'s own rule: only a mouse leaving means "stop showing
+                    // this" — on touch, `pointerleave` fires the instant the finger lifts, which is
+                    // exactly when the reader started reading. The document listener above is what
+                    // dismisses a touch tooltip instead.
+                    if (e.pointerType === 'mouse') hide()
+                  }}
                 />
               )
             }),
           )}
         </Group>
         <Group left={0} top={PAD_TOP}>
-          {rows.map((row, ri) => (
-            <text
-              key={row}
-              x={padLeft - 6}
-              y={ri * cellH + cellH / 2 + 4}
-              textAnchor="end"
-              fontSize={VX.axisFont}
-              fontFamily={LABEL_FONT_FAMILY}
-              fill={VX.faint}
-            >
-              {rowLabel(row)}
-            </text>
-          ))}
+          {rows.map((row, ri) =>
+            ri % rowLabelStep === 0 ? (
+              <text
+                key={row}
+                x={padLeft - 6}
+                y={ri * cellH + cellH / 2 + 4}
+                textAnchor="end"
+                fontSize={VX.axisFont}
+                fontFamily={LABEL_FONT_FAMILY}
+                fill={VX.faint}
+              >
+                {rowLabel(row)}
+              </text>
+            ) : null,
+          )}
         </Group>
         <Group left={padLeft} top={PAD_TOP + gridH}>
-          {cols.map((col, ci) => (
-            <text
-              key={col}
-              x={ci * cellW + cellW / 2}
-              y={16}
-              textAnchor="middle"
-              fontSize={VX.axisFont}
-              fontFamily={LABEL_FONT_FAMILY}
-              fill={VX.faint}
-            >
-              {colLabel(col)}
-            </text>
-          ))}
+          {cols.map((col, ci) =>
+            ci % labelStep === 0 ? (
+              <text
+                key={col}
+                x={ci * cellW + cellW / 2}
+                y={16}
+                textAnchor="middle"
+                fontSize={VX.axisFont}
+                fontFamily={LABEL_FONT_FAMILY}
+                fill={VX.faint}
+              >
+                {colLabel(col)}
+              </text>
+            ) : null,
+          )}
         </Group>
         {legend && (
           <Group left={padLeft} top={PAD_TOP + gridH + PAD_BOTTOM}>

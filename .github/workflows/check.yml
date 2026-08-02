@@ -35,7 +35,12 @@ jobs:
           bun-version: latest
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
-      - run: bun test
+      # Scoped, because this job installs the root package only and a bare `bun test` at the root
+      # also collects web/src — where the render tests import react-dom, @mantine and
+      # @tanstack/react-query. The dashboard job below runs those, after its own install. The
+      # filters must carry `./`: bun matches a bare `src` as a path substring, which selects
+      # web/src too.
+      - run: bun test ./src ./collector
 
   # ubuntu is correct here: the dashboard is pure TS with no platform-dependent call, and it is
   # the faster runner.

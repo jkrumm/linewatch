@@ -6,12 +6,22 @@ import {
   denseSparkline,
   downtimeTint,
   measuredFraction,
+  poolTo,
   windowDownloadMedian,
   windowWanMedian,
   worstBucketLoss,
   worstLossTint,
 } from './kpi'
 import type { LatencyComparePoint } from './aggregate'
+
+const WINDOW_1H = 3_600
+const WINDOW_24H = 86_400
+const WINDOW_30D = 30 * 86_400
+const WINDOW_YEAR = 365 * 86_400
+
+/** `downtimeTint`'s coverage gate only matters for the zero-downtime path — most tests below carry
+ * real (nonzero, or open) evidence and can pass `FULLY_COVERED` without it affecting the outcome. */
+const FULLY_COVERED = 1
 
 function point(patch: Partial<LatencyComparePoint>): LatencyComparePoint {
   return { key: 'k', bucketStart: 0, gatewayMs: null, wanMs: null, wanAnchors: 0, worstLossPct: 0, ...patch }
@@ -117,16 +127,101 @@ describe('worstLossTint', () => {
 })
 
 describe('downtimeTint', () => {
-  test('a clean window with nothing open is untinted', () => {
-    expect(downtimeTint({ seconds: 0, openCount: 0 })).toBeUndefined()
+  test('a clean, well-covered window earns green', () => {
+    expect(downtimeTint({ seconds: 0, openCount: 0 }, WINDOW_24H, FULLY_COVERED)).toBe('good')
   })
 
-  test('any accrued downtime tints bad', () => {
-    expect(downtimeTint({ seconds: 1, openCount: 0 })).toBe('bad')
+  /**
+   * The load-bearing case, and the one the finding named directly: `windowDowntime` returns the
+   * identical `{ seconds: 0, openCount: 0 }` for "a genuinely clean line" and for "a dead collector
+   * that ingested nothing, so no outage row could ever open." Reading a defined zero as green
+   * without checking how much of the window was actually watched paints this project's central
+   * failure mode as a badge instead of a banner. A `coverage` under `COMPARABLE_COVERAGE` must
+   * withhold the rail entirely — never fall back to `'bad'` either, since "nobody looked" is not
+   * evidence that the line was down.
+   */
+  test('zero downtime from an unwatched window must not read as green', () => {
+    expect(downtimeTint({ seconds: 0, openCount: 0 }, WINDOW_24H, 0)).toBeUndefined()
+    expect(downtimeTint({ seconds: 0, openCount: 0 }, WINDOW_24H, COMPARABLE_COVERAGE - 0.01)).toBeUndefined()
   })
 
-  test('a still-open outage tints bad even before it has accrued a second', () => {
-    expect(downtimeTint({ seconds: 0, openCount: 1 })).toBe('bad')
+  test('coverage exactly at the comparable-coverage bar still earns green', () => {
+    expect(downtimeTint({ seconds: 0, openCount: 0 }, WINDOW_24H, COMPARABLE_COVERAGE)).toBe('good')
+  })
+
+  /** The whole point of the original three-state change. Every home line drops a cycle now and
+   * then; a tint that fires on all of them is a tint that carries no information. */
+  test('a single blip on a 24 h window is marked, not condemned', () => {
+    expect(downtimeTint({ seconds: 60, openCount: 0 }, WINDOW_24H, FULLY_COVERED)).toBe('warn')
+  })
+
+  /**
+   * The finding's exact complaint: five minutes of cumulative downtime — a plausible "one dropped
+   * cycle a week" year — must not condemn a `30d` or `all` window. Under the old unscaled 300 s
+   * floor it did (99.988% and 99.999% availability both rendered `bad`). The fraction rule alone
+   * cannot reach `bad` here either (0.5% of 30 days is 3.6 hours; of a year, 43.8), so both ranges
+   * land on `warn` — a real, marked reading, not a false alarm.
+   */
+  test('a good year does not condemn on a residual few minutes of downtime', () => {
+    expect(downtimeTint({ seconds: 300, openCount: 0 }, WINDOW_30D, FULLY_COVERED)).toBe('warn')
+    expect(downtimeTint({ seconds: 300, openCount: 0 }, WINDOW_YEAR, FULLY_COVERED)).toBe('warn')
+  })
+
+  test('the absolute threshold still catches a substantial outage the fraction rule cannot see', () => {
+    // 4 hours inside a 365-day window is 0.05% — invisible to the 0.5% fraction rule, and still
+    // unmistakably bad: the exact case the absolute rule was written to catch.
+    expect(downtimeTint({ seconds: 4 * 3600, openCount: 0 }, WINDOW_YEAR, FULLY_COVERED)).toBe('bad')
+    expect(downtimeTint({ seconds: 3_599, openCount: 0 }, WINDOW_YEAR, FULLY_COVERED)).toBe('warn')
+    expect(downtimeTint({ seconds: 3_600, openCount: 0 }, WINDOW_YEAR, FULLY_COVERED)).toBe('bad')
+  })
+
+  /** The relative threshold is what makes a short range answer "is it working now". One minute out
+   * of the last hour is 1.7% of the window, and the reader on the 1h range is asking about now. */
+  test('the fraction threshold catches a short window the absolute one would miss', () => {
+    expect(downtimeTint({ seconds: 60, openCount: 0 }, WINDOW_1H, FULLY_COVERED)).toBe('bad')
+    expect(downtimeTint({ seconds: 17, openCount: 0 }, WINDOW_1H, FULLY_COVERED)).toBe('warn')
+  })
+
+  test('a still-open outage is bad before it has accrued a second, on any window', () => {
+    expect(downtimeTint({ seconds: 0, openCount: 1 }, WINDOW_YEAR, FULLY_COVERED)).toBe('bad')
+  })
+
+  /** A detected outage is real evidence regardless of how little of the rest of the window was
+   * watched — unlike the zero-downtime path, `bad`/`warn` are never withheld for low coverage. */
+  test('detected downtime is trusted even from a barely-covered window', () => {
+    expect(downtimeTint({ seconds: 0, openCount: 1 }, WINDOW_YEAR, 0)).toBe('bad')
+    expect(downtimeTint({ seconds: 60, openCount: 0 }, WINDOW_24H, 0.1)).toBe('warn')
+  })
+
+  /** A malformed span must not silently downgrade a real outage: NaN >= x is false, so an unguarded
+   * division would let a zero-length window swallow the fraction test entirely. */
+  test('a zero-length window falls back to the absolute rule rather than to NaN', () => {
+    expect(downtimeTint({ seconds: 3_600, openCount: 0 }, 0, FULLY_COVERED)).toBe('bad')
+    expect(downtimeTint({ seconds: 1_000, openCount: 0 }, 0, FULLY_COVERED)).toBe('warn')
+  })
+})
+
+describe('poolTo', () => {
+  test('a series already inside the cap is passed through unchanged', () => {
+    expect(poolTo([1, 2, 3], 8, 'max')).toEqual([1, 2, 3])
+  })
+
+  /** The load-bearing case. A max-pooled loss series must keep the spike, because the card above it
+   * reports a maximum and a sparkline that averaged the spike away would contradict its own number. */
+  test('max pooling keeps the worst member of every bucket', () => {
+    expect(poolTo([0, 0, 100, 0, 0, 0], 2, 'max')).toEqual([100, 0])
+  })
+
+  test('median pooling reports the typical member, not the worst', () => {
+    expect(poolTo([1, 2, 30, 4, 5, 6], 2, 'median')).toEqual([2, 5])
+  })
+
+  test('the last bucket takes the remainder rather than dropping it', () => {
+    expect(poolTo([1, 2, 3, 4, 5], 2, 'max')).toEqual([3, 5])
+  })
+
+  test('a non-positive cap yields nothing rather than dividing by zero', () => {
+    expect(poolTo([1, 2, 3], 0, 'max')).toEqual([])
   })
 })
 

@@ -1,4 +1,4 @@
-import { Badge, Card, Group, SimpleGrid, Stack, Text, Title } from '@mantine/core'
+import { Badge, Card, Group, Skeleton, SimpleGrid, Stack, Text, Title } from '@mantine/core'
 import { StatCard } from 'basalt-ui'
 import { Callout } from 'basalt-ui/content'
 import type { Vantage } from '../lib/types'
@@ -17,17 +17,36 @@ function value(v: string | number | null, suffix = ''): string {
  * What the newest cycle measured *through* — the answer to "is this even my line", which every
  * other number on this dashboard silently assumes.
  *
- * Two renderings are load-bearing. `vantage === null` says no cycle ever reported one, rather than
- * showing a grid of dashes that reads like a cycle reporting nothing. And `onHomeLine: null` gets
- * its own grey "unknown" chip: it is not a weaker `true`, and a check mark there would claim a
- * home-line measurement nobody made.
+ * Three renderings, not two. `vantage === undefined` is `GET /api/status` not having answered yet
+ * — a skeleton, nothing asserted. `vantage === null` is the answer having come back with no cycle
+ * ever reporting one, which is a different fact and used to be indistinguishable from the pending
+ * case (both collapsed through `status?.vantage ?? null` in `routes/index.tsx`), so this card could
+ * assert "no cycle has reported a vantage" — a claim about the collector — before the query behind
+ * it had returned. And `onHomeLine: null` gets its own grey "unknown" chip: it is not a weaker
+ * `true`, and a check mark there would claim a home-line measurement nobody made.
+ *
+ * Titled "This machine → router" rather than "Current vantage", because the section holds two cards
+ * and a reader could not tell which half each answered. The two titles now name the two hops: this
+ * card is the wire out of this machine, `LinkComparison` is the line past the router. "Vantage" is
+ * the word the schema uses; it is not a word the reader has.
  */
-export function VantageCard({ vantage, now }: { vantage: Vantage | null; now: number }) {
+export function VantageCard({ vantage, now }: { vantage: Vantage | null | undefined; now: number }) {
+  if (vantage === undefined) {
+    return (
+      <Card py="xs" px="sm">
+        <Stack gap="sm">
+          <Title order={4}>This machine → router</Title>
+          <Skeleton h={90} />
+        </Stack>
+      </Card>
+    )
+  }
+
   if (vantage === null) {
     return (
       <Card py="xs" px="sm">
         <Stack gap="sm">
-          <Title order={4}>Current vantage</Title>
+          <Title order={4}>This machine → router</Title>
           <Callout kind="info" title="No cycle has reported a vantage">
             `probe_cycle` is empty, so what these measurements went out over is unrecorded — not
             Ethernet, not the home line, unrecorded. Every reading elsewhere on this dashboard is
@@ -45,7 +64,7 @@ export function VantageCard({ vantage, now }: { vantage: Vantage | null; now: nu
       <Stack gap="md">
         <Group justify="space-between" wrap="wrap">
           <Stack gap={0}>
-            <Title order={4}>Current vantage</Title>
+            <Title order={4}>This machine → router</Title>
             <Text size="sm" c="dimmed">
               Cycle of {fmtDateTime(vantage.ts)} · {fmtRelative(vantage.ts, now)}
             </Text>
@@ -59,7 +78,12 @@ export function VantageCard({ vantage, now }: { vantage: Vantage | null; now: nu
           {chip.description}
         </Text>
 
-        <SimpleGrid cols={{ base: 2, sm: 3, lg: 4 }} spacing="md">
+        {/* One column below sm, not two. At two-up each card holds ~147px of content against a
+            24px mono hero, and `overflow: hidden` on the card silently cut the gateway address (13
+            chars, 187px, and browsers do not break at dots), the DHCP bind time, and the duplex.
+            Eight cards in a column is tall; a truncated gateway on the card that answers "is this
+            even my line" is wrong. */}
+        <SimpleGrid cols={{ base: 1, sm: 3, lg: 4 }} spacing="md">
           <StatCard label="Interface" value={value(vantage.pathIf)} />
           <StatCard label="Path class" value={value(vantage.pathClass)} />
           <StatCard label="Media" value={value(vantage.linkMedia)} />

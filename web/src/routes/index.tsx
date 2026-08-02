@@ -8,6 +8,7 @@ import {
   eventsQuery,
   outagesQuery,
   probeBucketsQuery,
+  quantiseWindow,
   routerQuery,
   speedTestsQuery,
   statusQuery,
@@ -39,7 +40,7 @@ import { WAN_TARGETS, comparePointsFrom, foldInternetBuckets, median } from '../
 import type { InternetBucket } from '../lib/aggregate'
 import { throughputPoints, throughputTotals } from '../lib/throughput'
 import { windowDowntime } from '../lib/downtime'
-import { downtimeTint, worstBucketLoss, worstLossTint } from '../lib/kpi'
+import { downtimeTint, measuredFraction, type ThresholdTint, worstBucketLoss, worstLossTint } from '../lib/kpi'
 import { coverageKind, fmtCoveragePct } from '../lib/coverage'
 import { speedWindowStats } from '../lib/speed-stats'
 import { unmappedVerdictIds } from '../lib/verdict-section'
@@ -53,7 +54,8 @@ import {
   type Vantage,
 } from '../lib/types'
 import { fmtBytes, fmtMbps, fmtMinutes, fmtMs, fmtPct, fmtRelative } from '../lib/format'
-import { isStale } from '../lib/freshness'
+import { isStale, latestSampleTs } from '../lib/freshness'
+import { liveInternet } from '../lib/live'
 import { homeLineChip } from '../lib/vantage'
 import {
   AVAILABILITY_COPY,
@@ -122,8 +124,11 @@ export const Route = createFileRoute('/')({
     minDuration: search.minDuration,
   }),
   loader: ({ context, deps }) => {
-    const { from, to } = rangeToWindow(deps.range)
     const bucket = rangeToBucket(deps.range)
+    // The same quantisation the component applies, so the loader warms the keys the component asks
+    // for. At a 30 s quantum this agreed on a coin flip; at the bucket-sized one a disagreement
+    // costs one refetch every few minutes instead of a fully-empty first paint on every range change.
+    const { from, to } = quantiseWindow(rangeToWindow(deps.range), bucket)
     return Promise.all([
       context.queryClient.ensureQueryData(statusQuery()),
       context.queryClient.ensureQueryData(verdictsQuery({ from, to })),
@@ -140,15 +145,43 @@ export const Route = createFileRoute('/')({
 function DashboardPage() {
   const search = Route.useSearch()
   const navigate = useNavigate()
-  // Via `rangeToWindow`, never a raw clock read: `from`/`to` go straight into the query keys, and
-  // an unquantised now mints a new key every render and refetches forever (see `lib/range.ts`).
-  // `to` doubles as "now" for every age and staleness verdict on this page.
-  const { from, to } = rangeToWindow(search.range)
+
+  /**
+   * Two clocks, and conflating them is what made this page jump every thirty seconds.
+   *
+   * `nowTick` is the 30 s probe-cycle clock. It is what every AGE and every staleness verdict on
+   * this page is measured against, because `isStale` (lib/freshness.ts) draws its line at two probe
+   * cycles and a clock coarser than that would compute a negative age — presenting a dead
+   * collector's last reading as current, which is the one failure this dashboard exists to notice.
+   *
+   * `from`/`to` are the WINDOW, floored to the server's own bucket size (capped at five minutes) by
+   * `quantiseWindow`. They go verbatim into eleven query keys, and at the 30 s quantum they advanced
+   * on essentially every status refetch — so the whole windowed half of the page emptied and
+   * refilled over eleven staggered re-renders, under a sticky header. See `quantiseWindow`.
+   *
+   * The consequence to hold on to: **`to` is no longer "now"**. It is the end of the window being
+   * drawn, and it can be up to five minutes behind wall-clock. Anything answering "how old is this"
+   * takes `nowTick`. Anything answering "over what stretch" takes `from`/`to`.
+   */
   const bucket = rangeToBucket(search.range)
+  const nowTick = rangeToWindow(search.range).to
+  const { from, to } = quantiseWindow(rangeToWindow(search.range), bucket)
+  // The span `downtimeTint` and `KpiRow` band their thresholds against — computed once here so the
+  // KPI card's tint and the Uptime section's own downtime tint can never disagree about the window.
+  const windowSeconds = (to - from) / 1000
 
   const { data: status } = useQuery(statusQuery())
   const { data: verdicts } = useQuery(verdictsQuery({ from, to }))
   const { data: outageData } = useQuery(outagesQuery({ from, to, minDuration: search.minDuration }))
+  // Both the latency band's outage overlay AND the headline `downtime` figure below read this
+  // UNFILTERED list. `search.minDuration` is a filter on the outage TABLE and the Outages COUNT
+  // only — a reader who sets "≥10m" is narrowing a list, not asserting that shorter outages did
+  // not happen. `downtime` used to be computed from the FILTERED `outageData` query: on a window
+  // with eight 2-minute drops, setting "Ignore under 10m" zeroed the Downtime card, cleared its
+  // tint, AND compared that filtered zero against `prevOutageData` below (always unfiltered) on
+  // the window-over-window badge — reporting a fabricated improvement off a table filter. When
+  // the filter is at its default this is the identical query key as `outageData` and costs nothing.
+  const { data: allOutageData } = useQuery(outagesQuery({ from, to }))
   const { data: tests } = useQuery(speedTestsQuery({ from, to }))
   const { data: router } = useQuery(routerQuery())
   const { data: events } = useQuery(eventsQuery({ from, to }))
@@ -199,9 +232,31 @@ function DashboardPage() {
   const volume = throughputTotals(
     throughputPoints(throughput?.buckets ?? [], { from, to, bucketSeconds: bucket }),
   )
-  const downtime = windowDowntime(outageData?.outages ?? [], { from, to }, to)
+  const downtime = windowDowntime(allOutageData?.outages ?? [], { from, to }, nowTick)
   const speed = speedWindowStats(tests ?? [])
   const unmapped = unmappedVerdictIds(verdicts ?? [])
+
+  // The pieces each section needs before it can state a figure, so a rotated key renders a reserved
+  // "—" rather than a computed one. `throughput?.buckets ?? []` densifies to all-null, which
+  // `throughputTotals` reports as `measuredBuckets: 0` — so for a couple hundred milliseconds this
+  // page asserted the window was entirely unmeasured, tinted warn, with a hint explaining why. That
+  // is the exact fabrication class the rest of this repo is built to refuse; it must not be
+  // reachable from a loading state either.
+  const outagesPending = outageData === undefined
+  // The FILTERED query's own pending state — gates the Outages count/table only. `downtime` and
+  // both its tints now read the UNFILTERED `allOutageData` (see that query's own comment), so they
+  // gate on this instead, not `outagesPending`.
+  const allOutagesPending = allOutageData === undefined
+  const throughputPending = throughput === undefined
+  const heatmapPending = heatmapData === undefined
+  const testsPending = tests === undefined
+  const eventsPending = events === undefined
+  const seriesPending = targetResults.some((r) => r.data === undefined)
+  // The share of the window `points` actually measured — the same signal `downtimeTint` needs to
+  // decide whether a defined zero earns `'good'` or is just an unwatched window. Computed once here
+  // so the KPI card and the Uptime section's own Downtime stat can never disagree about it.
+  const coverage = measuredFraction(points)
+  const downtimeTone = allOutageData === undefined ? undefined : downtimeTint(downtime, windowSeconds, coverage)
 
   /**
    * The preceding window, or `null` until every part of it has arrived.
@@ -213,7 +268,7 @@ function DashboardPage() {
   const previous: KpiWindow | null =
     prevOutageData !== undefined && prevTests !== undefined && prevTargetResults.every((r) => r.data !== undefined)
       ? {
-          downtime: windowDowntime(prevOutageData.outages, { from: prevFrom, to: from }, to),
+          downtime: windowDowntime(prevOutageData.outages, { from: prevFrom, to: from }, nowTick),
           points: comparePointsFrom(
             new Map<TargetName, readonly ProbeBucket[]>(
               TARGETS.map((target, i) => [target, prevTargetResults[i]?.data?.buckets ?? []]),
@@ -239,21 +294,31 @@ function DashboardPage() {
         range={search.range}
         onRangeChange={(range) => setSearch({ range })}
         version={__APP_VERSION__}
+        live={
+          status === undefined
+            ? null
+            : {
+                internetMs: liveInternet(status.lastSamples).medMs,
+                latestTs: latestSampleTs(status.lastSamples),
+                openOutages: status.ongoingOutages.length,
+                now: nowTick,
+              }
+        }
       />
 
-      <NowStrip
-        ongoingOutages={status?.ongoingOutages ?? []}
-        lastSamples={status?.lastSamples ?? []}
-        now={to}
-      />
+      <NowStrip status={status === undefined ? null : status} now={nowTick} />
 
-      {/* Rendered only once the query resolves — `undefined` is "not fetched yet", and passing it
-          as an empty array would draw the "no verdicts" state over a window nobody has evaluated. */}
-      {verdicts !== undefined && <VerdictPanel verdicts={verdicts} />}
+      {/* Renders unconditionally now — see `VerdictPanel`'s own docblock for the third,
+          "not asked yet" state. Unmounting it while `verdicts` was `undefined` dragged every
+          section under it up and back down on each query-key rotation and reset every open
+          `VerdictRow`/`RoutineGroups` disclosure along the way. */}
+      <VerdictPanel verdicts={verdicts} />
 
       {/* A rule that points the reader at no section is a defect in this page, not a finding about
-          the line, so it is reported here rather than inside the band. */}
-      {unmapped.length > 0 && (
+          the line, so it is reported here rather than inside the band. Gated on `verdicts !==
+          undefined` for the same reason the band above is not: a rotated key must never flicker
+          this Callout on and off. */}
+      {verdicts !== undefined && unmapped.length > 0 && (
         <Callout kind="warn" title="A verdict fired that no section claims">
           {unmapped.join(', ')} — the conclusion is above, but nothing below is marked as holding its
           evidence. Add it to <code>VERDICT_SECTION</code> in <code>web/src/lib/verdict-section.ts</code>.
@@ -267,7 +332,9 @@ function DashboardPage() {
         // duration. Without it that card silently compares a 5-minute worst against a 4-hour one
         // across ranges and reads as a bug.
         bucketSeconds={bucket}
-        rangeLabel={rangeLabel}
+        range={search.range}
+        windowSeconds={windowSeconds}
+        pending={{ downtime: allOutagesPending, series: seriesPending, tests: testsPending }}
       />
 
       {/* One hover provider around the whole chart region, not one per section. Every chart kind in
@@ -278,44 +345,57 @@ function DashboardPage() {
         <Stack gap="xl">
           <Section
             id="uptime"
-            subtitle="When the line was reachable, and for how long it was not."
+            subtitle="Reachability, and how long it was down."
             meta={
-              <StatStrip
-                stats={[
-                  {
-                    label: 'Downtime',
-                    value: fmtMinutes(downtime.seconds),
-                    tone: downtimeTint(downtime),
-                    hint:
-                      downtime.openCount > 0
-                        ? `${downtime.openCount} outage${downtime.openCount === 1 ? ' is' : 's are'} still open, so this is a floor — it is already out of date as you read it. Outages straddling the window count only their time inside it.`
-                        : 'Minutes, not a percentage — on a home line the percentage flatters. Outages straddling the window count only their time inside it.',
-                  },
-                  {
-                    label: 'Outages',
-                    value: String(outageData?.outages.length ?? 0),
-                    hint:
-                      search.minDuration > 0
-                        ? `Only outages of at least ${fmtMinutes(search.minDuration)}. Shorter ones are recorded and are excluded from this count by the filter in the Outages view.`
-                        : 'Every recorded outage in the window, single-cycle blips included.',
-                  },
-                  {
-                    label: 'Coverage',
-                    value: fmtCoveragePct(outageData?.summary?.coveragePct ?? null),
-                    // `bad` is the coverage envelope's own third state; the strip has only two
-                    // tints, and its `warn` is the one a reader must not read past.
-                    tone:
-                      outageData?.summary === undefined || outageData.summary === null
-                        ? undefined
-                        : coverageKind(outageData.summary) === 'info'
+              <Group justify="space-between" align="flex-end" wrap="wrap" gap="sm">
+                <StatStrip
+                  stats={[
+                    {
+                      label: 'Downtime',
+                      // Gated on `allOutageData`, not `outageData` — this figure reads the
+                      // UNFILTERED outage list (see that query's own comment above); the FILTERED
+                      // query's arrival says nothing about whether this value is ready.
+                      value: allOutageData === undefined ? null : fmtMinutes(downtime.seconds),
+                      tone: stripTone(downtimeTone),
+                      hint:
+                        allOutageData === undefined
                           ? undefined
-                          : coverageKind(outageData.summary) === 'bad'
-                            ? 'bad'
-                            : 'warn',
-                    hint: 'The share of the window the collector actually measured. Every figure in this section is only as true as this number — a window measured for a tenth of itself reports almost no downtime.',
-                  },
-                ]}
-              />
+                          : downtime.openCount > 0
+                            ? `${downtime.openCount} outage${downtime.openCount === 1 ? ' is' : 's are'} still open — this is a floor, already out of date. Outages straddling the window count only their time inside it.`
+                            : 'Minutes, not a percentage — a home line’s percentage flatters. Outages straddling the window count only their time inside it.',
+                    },
+                    {
+                      label: 'Outages',
+                      value: outageData === undefined ? null : String(outageData.outages.length),
+                      hint:
+                        outageData === undefined
+                          ? undefined
+                          : search.minDuration > 0
+                            ? `Only outages of at least ${fmtMinutes(search.minDuration)}. Shorter ones are recorded, just excluded here by the filter beside this strip.`
+                            : 'Every recorded outage in the window, single-cycle blips included.',
+                    },
+                    {
+                      label: 'Coverage',
+                      value: outageData === undefined ? null : fmtCoveragePct(outageData.summary?.coveragePct ?? null),
+                      // `bad` is the coverage envelope's own third state; the strip has only two
+                      // tints, and its `warn` is the one a reader must not read past.
+                      tone:
+                        outageData?.summary === undefined || outageData.summary === null
+                          ? undefined
+                          : coverageKind(outageData.summary) === 'info'
+                            ? undefined
+                            : coverageKind(outageData.summary) === 'bad'
+                              ? 'bad'
+                              : 'warn',
+                      hint: 'The share of the window the collector actually measured. Every figure here is only as true as this number — a window measured a tenth of itself reports almost no downtime.',
+                    },
+                  ]}
+                />
+                <MinDurationFilter
+                  value={search.minDuration}
+                  onChange={(minDuration) => setSearch({ minDuration })}
+                />
+              </Group>
             }
             views={[
               {
@@ -335,29 +415,24 @@ function DashboardPage() {
                         bucketSeconds={bucket}
                       />
                     </GuidedChart>
-                    <CoverageCallout summary={outageData?.summary ?? null} />
+                    <CoverageCallout summary={outageData === undefined ? 'pending' : (outageData.summary ?? null)} />
                   </Stack>
                 ),
               },
               {
                 key: 'outages',
-                label: `Outages (${outageData?.outages.length ?? 0})`,
+                // Static label. The count is on the strip above; interpolated into the tab it
+                // changed the control's intrinsic width on every data arrival, and Mantine animates
+                // the active indicator's transform — so the switch resized and slid on its own,
+                // several times a minute.
+                label: 'Outages',
                 render: () => (
                   <Card py="xs" px="sm">
-                    <Group justify="space-between" mb="md" wrap="wrap">
-                      <Text size="sm" c="dimmed">
-                        Every recorded outage in the window. Single-cycle blips are recorded honestly
-                        and filtered here, not discarded on write.
-                      </Text>
-                      <SegmentedControl
-                        size="xs"
-                        value={String(search.minDuration)}
-                        onChange={(value) => setSearch({ minDuration: Number(value) })}
-                        data={MIN_DURATION_OPTIONS}
-                        aria-label="Minimum outage duration"
-                      />
-                    </Group>
-                    <OutageTable outages={outageData?.outages ?? []} />
+                    <Text size="sm" c="dimmed" mb="md">
+                      Every recorded outage in the window. Single-cycle blips are recorded, not
+                      discarded — only filtered here.
+                    </Text>
+                    <OutageTable outages={outageData?.outages ?? []} isPending={outagesPending} />
                   </Card>
                 ),
               },
@@ -365,15 +440,22 @@ function DashboardPage() {
                 key: 'pattern',
                 label: '30-day pattern',
                 render: () => (
+                  // No hover provider — this used to be wrapped on the theory that `AvailabilityHeatmap`
+                  // could broadcast a key the latency band's shared cursor would collide with (see the
+                  // 'Every run' view under the Speed section for that actual collision). It draws
+                  // `CategoryGrid` on bare `useChartTooltip`, columns are fixed `HOUR_LABELS`
+                  // ('00'..'23'), never `runAxisLabels` — there is no shared key here to protect, and
+                  // the wrapper was a no-op.
                   <Stack gap={4}>
                     <Text size="xs" c="dimmed">
-                      Always the last 30 days by UTC hour — the one block on this page the range
-                      selector does not scope, because its shape is a fixed hour × day grid.
+                      Always the last 30 days by UTC hour. The range selector doesn’t scope this
+                      block — its shape is a fixed hour × day grid.
                     </Text>
                     <AvailabilityHeatmap
                       buckets={heatmapData?.buckets ?? []}
                       from={to - HEATMAP_SPAN_MS}
                       to={to}
+                      isPending={heatmapPending}
                     />
                   </Stack>
                 ),
@@ -383,17 +465,25 @@ function DashboardPage() {
 
           <Section
             id="latency"
-            subtitle="How far the internet is, and whether slowness is on your side of the router or past it."
+            subtitle="How far the internet is, and whether slowness is yours or past the router."
             meta={
               <StatStrip
                 stats={[
-                  { label: 'Internet', value: fmtMs(median(points.map((p) => p.wanMs)).value) },
-                  { label: 'Router', value: fmtMs(median(points.map((p) => p.gatewayMs)).value) },
+                  {
+                    label: 'Internet',
+                    value: seriesPending ? null : fmtMs(median(points.map((p) => p.wanMs)).value),
+                  },
+                  {
+                    label: 'Router',
+                    value: seriesPending ? null : fmtMs(median(points.map((p) => p.gatewayMs)).value),
+                  },
                   {
                     label: 'Worst loss',
-                    value: fmtPct(worstBucketLoss(points)),
-                    tone: worstLossTint(worstBucketLoss(points)),
-                    hint: 'The worst single bucket in the window, across the gateway and all three anchors — not the window average, which a short total outage barely moves.',
+                    value: seriesPending ? null : fmtPct(worstBucketLoss(points)),
+                    tone: seriesPending ? undefined : stripTone(worstLossTint(worstBucketLoss(points))),
+                    hint: seriesPending
+                      ? undefined
+                      : 'The worst single bucket in the window, across the gateway and all three anchors — not the average, which a short outage barely moves.',
                   },
                 ]}
               />
@@ -422,6 +512,10 @@ function DashboardPage() {
                         const fold = internetByBucket.get(b.bucket)
                         return fold === undefined ? null : <InternetFoldRows fold={fold} />
                       }}
+                      // Scoped here, not in the chart: an Outage row with scope 'gateway' drawn
+                      // across the internet band would assert something the row does not say, and
+                      // the chart cannot tell which band it is drawing.
+                      outages={allOutageData?.outages.filter((o) => o.scope === 'wan')}
                     />
                   </GuidedChart>
                 ),
@@ -445,6 +539,9 @@ function DashboardPage() {
                           from={from}
                           to={to}
                           bucketSeconds={bucket}
+                          outages={allOutageData?.outages.filter((o) =>
+                            name === 'gateway' ? o.scope === 'gateway' : o.scope === 'wan',
+                          )}
                         />
                       </GuidedChart>
                     ))}
@@ -456,16 +553,22 @@ function DashboardPage() {
 
           <Section
             id="speed"
-            subtitle="What the line carried when it was asked to carry as much as it could."
+            subtitle="What the line delivers when pushed to its limit."
             meta={
               <StatStrip
                 stats={[
-                  ...speedStats('Download', speed.download),
-                  ...speedStats('Upload', speed.upload),
+                  ...speedStats('Download', speed.download, testsPending),
+                  ...speedStats('Upload', speed.upload, testsPending),
                   {
                     label: 'Runs',
-                    value: speed.failed > 0 ? `${speed.runs} + ${speed.failed} failed` : String(speed.runs),
-                    hint: `Successful runs in the last ${rangeLabel}, which is what the percentiles are taken over. A typical taken over 3 runs and one taken over 300 are different claims.`,
+                    value: testsPending
+                      ? null
+                      : speed.failed > 0
+                        ? `${speed.runs} + ${speed.failed} failed`
+                        : String(speed.runs),
+                    hint: testsPending
+                      ? undefined
+                      : `Successful runs in the last ${rangeLabel} — what the percentiles are taken over. A typical over 3 runs and one over 300 are different claims.`,
                   },
                 ]}
               />
@@ -475,10 +578,26 @@ function DashboardPage() {
                 key: 'runs',
                 label: 'Every run',
                 render: () => (
-                  <Stack gap="md">
-                    <SpeedChart tests={tests ?? []} refLines={throughputRefLines(status?.vantage, router, to)} />
-                    <ServerChangeNote tests={tests ?? []} />
-                  </Stack>
+                  // Its own provider, and this is not defensive tidiness. This chart's own x-axis is
+                  // runs, not clock time (`SpeedChart`'s own subtitle says so), but `runAxisLabels`
+                  // still emits the `DD.MM HH:MM` string space `bucketAxisLabel` produces for every
+                  // sub-day bucket — so on the 24 h range a run whose minute is a bucket start (14:05,
+                  // 14:10) would broadcast a key the latency band owns and cast a cursor on it, while
+                  // a run at 14:07 would cast nothing. A cursor that appears for some runs and not
+                  // others, with no rule the reader can infer, is worse than no cursor. The label
+                  // cannot be prefixed out of the collision: in `MultiLine` it is the scale domain,
+                  // the hover key AND the visible tooltip header, all three at once. Applies to the
+                  // two chart bodies whose axis can produce that string — this one and
+                  // `BufferbloatChart` below (`grep -rn runAxisLabels src/charts/`). The 30-day
+                  // pattern view and the by-hour heatmap draw fixed `HOUR_LABELS` on bare
+                  // `useChartTooltip` instead — that collision can't reach them, so they stay
+                  // outside any provider.
+                  <ChartHoverSync>
+                    <Stack gap="md">
+                      <SpeedChart tests={tests ?? []} refLines={throughputRefLines(status?.vantage, router, nowTick)} />
+                      <ServerChangeNote tests={tests ?? []} isPending={testsPending} />
+                    </Stack>
+                  </ChartHoverSync>
                 ),
               },
               {
@@ -489,27 +608,44 @@ function DashboardPage() {
               {
                 key: 'under-load',
                 label: 'Latency under load',
-                render: () => <BufferbloatChart tests={tests ?? []} />,
+                render: () => (
+                  // Same isolation as the 'Every run' view above — see that comment.
+                  <ChartHoverSync>
+                    <BufferbloatChart tests={tests ?? []} />
+                  </ChartHoverSync>
+                ),
               },
             ]}
           />
 
           <Section
             id="throughput"
-            subtitle="How much the line actually carried — a different question from how much it could."
+            subtitle="How much data actually moved, not how much the line could carry."
             meta={
               <StatStrip
                 stats={[
-                  { label: 'Downloaded', value: fmtBytes(volume.downBytes), ...volumeCaveat(volume) },
-                  { label: 'Uploaded', value: fmtBytes(volume.upBytes), ...volumeCaveat(volume) },
+                  {
+                    label: 'Downloaded',
+                    value: throughputPending ? null : fmtBytes(volume.downBytes),
+                    ...(throughputPending ? {} : volumeCaveat(volume)),
+                  },
+                  {
+                    label: 'Uploaded',
+                    value: throughputPending ? null : fmtBytes(volume.upBytes),
+                    ...(throughputPending ? {} : volumeCaveat(volume)),
+                  },
                   {
                     // Coverage, not a third volume. These totals sum only the intervals the server
                     // could place in time, so a window with refusals or gaps reports a floor — and a
                     // floor presented as a total is the failure this dashboard is built around.
                     label: 'Buckets measured',
-                    value: `${volume.measuredBuckets} / ${volume.measuredBuckets + volume.unmeasuredBuckets}`,
-                    tone: volume.unmeasuredBuckets > 0 ? 'warn' : undefined,
-                    hint: 'Intervals whose bytes the server could place in time, out of the window’s buckets. Anything unmeasured is traffic that moved and was not counted.',
+                    value: throughputPending
+                      ? null
+                      : `${volume.measuredBuckets} / ${volume.measuredBuckets + volume.unmeasuredBuckets}`,
+                    tone: throughputPending ? undefined : volume.unmeasuredBuckets > 0 ? 'warn' : undefined,
+                    hint: throughputPending
+                      ? undefined
+                      : 'Intervals whose bytes the server could place in time, out of the window’s buckets. Unmeasured traffic moved but wasn’t counted.',
                   },
                 ]}
               />
@@ -525,6 +661,7 @@ function DashboardPage() {
                       from={from}
                       to={to}
                       bucketSeconds={bucket}
+                      isPending={throughputPending}
                     />
                   </GuidedChart>
                 ),
@@ -534,31 +671,35 @@ function DashboardPage() {
 
           <Section
             id="path"
-            subtitle="What the measurements went out over — the interface, the link, the carrier."
-            meta={<StatStrip stats={pathStats(status?.vantage ?? null, to)} />}
+            subtitle="Which wire this machine used, and whether it’s at full speed."
+            meta={<StatStrip stats={pathStats(status?.vantage, nowTick)} />}
             views={[
               {
-                key: 'link',
-                label: 'Link speed',
+                key: 'vantage',
+                label: 'This machine',
                 render: () => (
-                  <GuidedChart title={`Link speed over time · ${rangeLabel}`} copy={LINK_SPEED_COPY}>
-                    <LinkSpeedStrip vantage={vantageSeries} from={from} to={to} bucketSeconds={bucket} />
-                  </GuidedChart>
+                  <Stack gap="md">
+                    <VantageCard vantage={status?.vantage} now={nowTick} />
+                    <LinkComparison
+                      router={router}
+                      vantage={status?.vantage}
+                      speedTest={status?.lastSpeedTest}
+                      now={nowTick}
+                    />
+                  </Stack>
                 ),
               },
               {
-                key: 'vantage',
-                label: 'Vantage & carrier',
+                key: 'link',
+                label: 'Link speed over time',
                 render: () => (
-                  <Stack gap="md">
-                    <VantageCard vantage={status?.vantage ?? null} now={to} />
-                    <LinkComparison
-                      router={router ?? null}
-                      vantage={status?.vantage ?? null}
-                      speedTest={status?.lastSpeedTest ?? null}
-                      now={to}
-                    />
-                  </Stack>
+                  // No range suffix — the sticky header's range control is the single statement of
+                  // the window (see `PageHeader`'s tooltip). This was the last chart title that
+                  // still interpolated it in, reading "Link speed over time · 24h" directly under a
+                  // view tab that already says "Link speed over time".
+                  <GuidedChart title="Link speed over time" copy={LINK_SPEED_COPY}>
+                    <LinkSpeedStrip vantage={vantageSeries} from={from} to={to} bucketSeconds={bucket} />
+                  </GuidedChart>
                 ),
               },
               {
@@ -571,6 +712,7 @@ function DashboardPage() {
                     <TransitionTimeline
                       events={events?.events ?? []}
                       linkSamplingSince={events?.linkSamplingSince ?? null}
+                      isPending={eventsPending}
                     />
                   </Card>
                 ),
@@ -580,6 +722,52 @@ function DashboardPage() {
         </Stack>
       </ChartHoverSync>
     </Stack>
+  )
+}
+
+/**
+ * Clamp a `ThresholdTint` to what `Stat.tone` (`stat-strip.tsx`) can actually carry.
+ *
+ * `Stat.tone` ships `'warn' | 'bad'` only — `'good'` is spent on `StatCard.tone`
+ * (`kpi-row.tsx`'s Downtime card) and nowhere else; a green rail on the KPI card is a positive
+ * assertion this repo can defend (see `downtimeTint`'s docblock), and inventing a second, untested
+ * place for that same judgment to render would be how the two drift apart. `worstLossTint` and
+ * `downtimeTint` both return the wider `ThresholdTint` now that basalt-ui 1.8.0 added `'good'` to
+ * the union — `worstLossTint` never actually returns it (loss has no measured "clean" floor to
+ * assert), but the type is shared, so every `StatStrip` call site needs the same clamp regardless.
+ */
+function stripTone(tint: ThresholdTint): 'warn' | 'bad' | undefined {
+  return tint === 'good' ? undefined : tint
+}
+
+/**
+ * The outage-duration filter, out of the view body and onto the section's own header row.
+ *
+ * It lived inside the Outages view — behind a view switch, next to a paragraph, with an `aria-label`
+ * and no visible one — so it was a URL parameter with no discoverable control. Here it is visible
+ * whichever Uptime view is drawn, and it sits beside the "Outages" count it scopes, which is the
+ * only place its effect is legible. It stays in the URL and still navigates with `resetScroll:
+ * false`, so filtering from halfway down the page does not throw the reader back to the header.
+ *
+ * The label is visible text, not an `aria-label`. "Ignore under" is what makes it a control a
+ * reader can find rather than a row of unexplained durations.
+ */
+function MinDurationFilter({ value, onChange }: { value: number; onChange: (value: number) => void }) {
+  return (
+    <Group gap={6} wrap="nowrap" w={{ base: '100%', sm: 'auto' }}>
+      <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
+        Ignore under
+      </Text>
+      <SegmentedControl
+        size="xs"
+        fullWidth
+        value={String(value)}
+        onChange={(next) => onChange(Number(next))}
+        data={MIN_DURATION_OPTIONS}
+        aria-label="Minimum outage duration"
+        style={{ flex: 1 }}
+      />
+    </Group>
   )
 }
 
@@ -632,8 +820,23 @@ function InternetFoldRows({ fold }: { fold: InternetBucket }) {
  * is meaningless, and against `linkMbit` it is the one thing that separates a cable fault from a
  * 100 Mbit adapter. Never defaulted to 1000 — that default fabricates a cable fault out of a NIC
  * that never had one.
+ *
+ * **Pending is a third state, not a name for "no cycle ever reported one".** `status === undefined`
+ * used to coalesce into `vantage === null` at the call site (`status?.vantage ?? null`), so this
+ * strip rendered "No cycle has reported what it measured through" — a negative claim about the
+ * collector — over a query nobody had answered yet. `vantage === undefined` now renders `value:
+ * null` on all three entries instead: the same reserved-dash idiom every other pending figure on
+ * this page uses, which drops the hint rather than asserting one (`StatValue` in `stat-strip.tsx`).
  */
-function pathStats(vantage: Vantage | null, now: number): Stat[] {
+function pathStats(vantage: Vantage | null | undefined, now: number): Stat[] {
+  if (vantage === undefined) {
+    return [
+      { label: 'Interface', value: null },
+      { label: 'Link', value: null },
+      { label: 'Path', value: null },
+    ]
+  }
+
   if (vantage === null || isStale(vantage.ts, now)) {
     const hint =
       vantage === null
@@ -676,23 +879,40 @@ function pathStats(vantage: Vantage | null, now: number): Stat[] {
  *
  * `p50` and `p95` travel together because either alone misleads in a direction the other corrects:
  * a p50 on its own hides that the line is capable of much more when it is not contended, and a p95
- * on its own is the best few minutes of the window presented as what you get.
+ * on its own is the best few minutes of the window presented as what you get. `group: direction` is
+ * what actually keeps them together on screen: `p95`'s label is deliberately bare, read against the
+ * `Download p50`/`Upload p50` beside it, and on a narrow viewport `StatStrip`'s wrapping `Group`
+ * was free to put the two on different lines — a `p95` on the page belonging to nothing. Both
+ * entries share one `group` value so `groupRuns` (`stat-strip.tsx`) keeps them one wrapping unit.
+ *
+ * `pending`, when true, reserves both entries at `null` — a rotated query key must render "—",
+ * never a stale figure left over from the previous window.
  */
-function speedStats(direction: string, stat: { p50: number | null; p95: number | null }): Stat[] {
+function speedStats(
+  direction: string,
+  stat: { p50: number | null; p95: number | null },
+  pending: boolean,
+): Stat[] {
   return [
     {
       id: `${direction}-p50`,
+      group: direction,
       label: `${direction} p50`,
-      value: fmtMbps(stat.p50),
-      hint: `The typical run. Half of this window’s successful ${direction.toLowerCase()} runs were slower than this and half faster.`,
+      value: pending ? null : fmtMbps(stat.p50),
+      hint: pending
+        ? undefined
+        : `The typical run — half of this window’s successful ${direction.toLowerCase()} runs were slower, half faster.`,
     },
     {
       // Bare `p95`, read against the `p50` beside it — but its own `id`, because the Upload pair
       // draws the identical label and two children sharing a React key means one is dropped.
       id: `${direction}-p95`,
+      group: direction,
       label: 'p95',
-      value: fmtMbps(stat.p95),
-      hint: `Near the ceiling: only 5% of this window’s ${direction.toLowerCase()} runs beat it. Read it as what the line can do, not as what it does.`,
+      value: pending ? null : fmtMbps(stat.p95),
+      hint: pending
+        ? undefined
+        : `Near the ceiling: only 5% of this window’s ${direction.toLowerCase()} runs beat it — what the line can do, not what it does.`,
     },
   ]
 }
@@ -725,7 +945,7 @@ function volumeCaveat(volume: {
 
   return {
     tone: 'warn',
-    hint: `This is a floor, not a total: ${reasons.join('; ')}. Bytes moved that are not counted here, and there is no way to recover where they went.`,
+    hint: `This is a floor, not a total: ${reasons.join('; ')}. Bytes moved but not counted here can’t be recovered.`,
   }
 }
 

@@ -170,8 +170,19 @@ export function compareWindows(opts: {
   }
 }
 
-/** The two tints a KPI card can carry — anything else stays the neutral default weight. */
-export type ThresholdTint = 'bad' | 'warn' | undefined
+/**
+ * The tints a KPI card can carry — anything else stays the neutral default weight.
+ *
+ * `'good'` is a POSITIVE ASSERTION, not the absence of a problem: basalt-ui 1.8.0's
+ * `StatCardTone` draws a rail for it exactly as it does for `'warn'`/`'bad'`, so returning it
+ * claims "this was measured and it earned a clean verdict" — never "nothing to report" (that stays
+ * `undefined`; see `StatCardTone`'s own docblock). Most tint functions in this module never return
+ * it: `worstLossTint` and `worstBucketLoss`'s `null` already mean "nothing measured" rather than
+ * "measured and clean", so there is nothing for `worstLossTint` to assert. Only `downtimeTint`
+ * earns it, and only behind a coverage gate — see its docblock for why a defined zero is not, on
+ * its own, enough evidence.
+ */
+export type ThresholdTint = 'good' | 'bad' | 'warn' | undefined
 
 /**
  * Packet-loss severity bands for the worst-bucket-loss card's tint. This repo has no measured
@@ -193,12 +204,151 @@ export function worstLossTint(worstLossPct: number | null): ThresholdTint {
 }
 
 /**
- * Tint for the downtime card. Any downtime at all is a bad reading for this KPI — the value
- * already renders in minutes, so a further "how many minutes counts" threshold on top would hide a
- * real outage behind a number small enough to look calm. An outage that is still open tints bad
- * even if it has accrued under a second: "still open" is itself the bad fact, not the seconds so
- * far.
+ * How much recorded downtime makes a window a bad reading rather than a marked one.
+ *
+ * Two thresholds, either of which is sufficient — but `DOWNTIME_BAD_SECONDS` used to be 300 (five
+ * minutes), and that number is the bug this pair now exists to not repeat: **unscaled**, it was the
+ * binding (smaller, so first-to-fire) constraint on every range this dashboard offers except the
+ * shortest one, because `windowSeconds × DOWNTIME_BAD_FRACTION` only exceeds 300 s once the window
+ * itself exceeds `300 / 0.005` = 60 000 s — under 17 hours. `24h`, `7d`, `30d` and `all` are all
+ * longer than that, so on every one of them the "relative" half of this pair never got to do its
+ * job: five minutes of cumulative downtime — one missed cycle a week, every week, for a year, the
+ * exact "everything is good" line a reader reported — read as 99.988% on `30d` and 99.999% on
+ * `all`, and both painted the card `bad`, the same verdict as a `24h` window that dropped for five
+ * straight minutes. A five-minute absolute floor is not a floor at all once the window is longer
+ * than about a day; it is the whole rule, and the fraction rule existed on paper only.
+ *
+ * `DOWNTIME_BAD_SECONDS` is now **3 600** (one hour) and reads as a different claim: not "longer
+ * than a single blip" but "a substantial outage, full stop, regardless of how long the window is."
+ * The crossover with the fraction rule sits at `3 600 / 0.005` = 720 000 s ≈ 8.3 days — below that,
+ * `DOWNTIME_BAD_FRACTION` is the tighter (and therefore binding) test, exactly as the relative
+ * threshold's own rationale below describes; above it, on `30d` and `all`, the absolute hour is
+ * binding instead, but it now only fires for an outage that is itself substantial:
+ *
+ * | range | fraction crosses at | absolute crosses at | binding rule |
+ * |-|-|-|-|
+ * | 1h (3 600 s) | 18 s | 3 600 s | fraction |
+ * | 24h (86 400 s) | 7.2 min | 1 h | fraction |
+ * | 7d (604 800 s) | 50.4 min | 1 h | fraction |
+ * | 30d (2 592 000 s) | 3.6 h | 1 h | **absolute** |
+ * | all (31 536 000 s, 365d) | 43.8 h | 1 h | **absolute** |
+ *
+ * So the one-cycle-a-week line — a few minutes a year — stays `warn` on every range now, and the
+ * case the old absolute number was originally written to catch (four hours of outage inside a
+ * 365-day window, 0.05% and invisible to the fraction rule) still reads `bad`: 14 400 s clears the
+ * 3 600 s floor even though it is nowhere near the 0.5% fraction bar. Neither number is measured
+ * from this line's own history — this repo has no such figure yet. They are the same kind of
+ * ordinary consumer-line reference point `WORST_LOSS_WARN_PCT` is, chosen so a genuinely dropped
+ * call (an hour, not a cycle) is bad on any range and a rounding-error blip never is, and they stay
+ * named constants so replacing either with a measured value later is one edit.
+ *
+ * `DOWNTIME_BAD_FRACTION` is relative: 0.5% of the window is availability worse than 99.5%
+ * sustained across it. On a 24-hour window a single 60-second blip is 0.07% and lands on `warn` —
+ * marked, because a drop is worth knowing about, but not the same reading as an hour offline. On a
+ * 1-hour window that same blip is 1.7% and crosses, which is right: at the 1h range the question
+ * being asked is "is it working right now", and it went away inside the hour.
  */
-export function downtimeTint(downtime: WindowDowntime): ThresholdTint {
-  return downtime.seconds > 0 || downtime.openCount > 0 ? 'bad' : undefined
+export const DOWNTIME_BAD_SECONDS = 3_600
+export const DOWNTIME_BAD_FRACTION = 0.005
+
+/**
+ * Tint for the downtime card.
+ *
+ * Four states, where there used to be three. basalt-ui 1.8.0 added `'good'` to `StatCardTone`, and
+ * a downtime figure of exactly zero looked at first like the obvious place to spend it — until a
+ * second look at where `WindowDowntime` comes from: `windowDowntime` sums `outage` rows, and an
+ * `outage` row only ever exists because `services/outage-detector.ts` opened one off an INGESTED
+ * probe cycle (see the repo `CLAUDE.md`'s "Outages are materialised on write" note). A collector that
+ * ingested nothing for the whole window opens no outage either, and `windowDowntime` returns the
+ * identical `{ seconds: 0, openCount: 0 }` a genuinely clean window does. Coalescing that to
+ * `'good'` would be this project's founding failure mode wearing a badge instead of a banner — the
+ * same reason `GET /api/status`'s own `up` field cannot drive the Uptime Kuma heartbeat (see
+ * `linewatch/CLAUDE.md`'s "Alerting is a missed heartbeat" section) is why a defined zero cannot
+ * drive a green rail on its own.
+ *
+ * So `'good'` is gated on `coverage` — the share of the window, 0–1, that was actually measured —
+ * and NOT on whether `seconds` is merely defined. Callers already compute this for
+ * `compareWindows`'s own gate (`measuredFraction` in this file, or the ingestion-cycle-based
+ * `RangeSummary.coveragePct / 100` if the caller has it — the latter is the tighter signal, since
+ * it counts probe CYCLES rather than display buckets, one hop closer to the same ingestion event
+ * that has to happen before an outage row can open at all). This function reuses
+ * `COMPARABLE_COVERAGE` as the bar rather than inventing a second number: both ask the identical
+ * question — "was this window watched enough to trust a positive claim drawn from it" — for a
+ * different positive claim (a delta there, "nothing happened" here), and a second, independently
+ * tuned threshold for the same question would drift from this one on the next pass with no data to
+ * justify the difference.
+ *
+ * The gate applies ONLY to the zero-and-clean path, deliberately. `openCount > 0` and any nonzero
+ * `downtime.seconds` are both derived from an outage row that DID open — real, ingested evidence,
+ * true at any coverage level. Suppressing a `'bad'`/`'warn'` reading because the rest of the window
+ * beyond the detected outage went unmeasured would hide a fact this dashboard actually has; only
+ * the read of "nothing was detected" needs to ask whether anyone was looking.
+ *
+ * An open outage is `bad` regardless of seconds accrued or coverage: "still open" is itself the bad
+ * fact, and the figure beside it is a floor that is out of date as it renders.
+ */
+export function downtimeTint(downtime: WindowDowntime, windowSeconds: number, coverage: number): ThresholdTint {
+  if (downtime.openCount > 0) return 'bad'
+  if (downtime.seconds > 0) {
+    if (downtime.seconds >= DOWNTIME_BAD_SECONDS) return 'bad'
+    // Guarded rather than divided blindly: a zero or negative span would make every fraction Infinity
+    // or NaN, and NaN >= x is false — so a malformed window would silently downgrade a real outage to
+    // `warn`. It falls through to `warn` explicitly instead, which is the reading the seconds alone
+    // support.
+    if (windowSeconds > 0 && downtime.seconds / windowSeconds >= DOWNTIME_BAD_FRACTION) return 'bad'
+    return 'warn'
+  }
+  // Nothing detected. Earned green only if enough of the window was actually watched to trust that
+  // "nothing detected" means "nothing happened" rather than "nobody looked" — see the docblock above.
+  return coverage >= COMPARABLE_COVERAGE ? 'good' : undefined
+}
+
+/** How a pooled bucket combines its members. There is no default: pooling a worst-case series by
+ * median and a typical-case series by maximum are both wrong, in opposite directions, and neither
+ * has a caller who would notice. */
+export type PoolMode = 'max' | 'median'
+
+/**
+ * Fold a dense series down to at most `cap` points, so a sparkline is drawn at the resolution it is
+ * displayed at rather than under it.
+ *
+ * `BarSparkline` takes `number[]` with no width awareness: at 288 points in 173px it computes a
+ * 0.60px step, floors every bar to 1px, and the bars overlap by 40% — the loss series renders as a
+ * uniform grey block in which a single 100%-loss bucket is invisible. `LineSparkline` at the same
+ * pitch is a curve through sub-pixel-spaced points, which is noise wearing the shape of a trend.
+ *
+ * **`mode` is not a formatting choice.** The loss series pools by MAXIMUM, because a worst-bucket
+ * figure averaged away is exactly the fabrication `worstBucketLoss` was written to refuse — the
+ * headline number on that card is a max over buckets, and a sparkline under it that smoothed the
+ * spike out would contradict the number it sits below. The rtt and download series pool by MEDIAN,
+ * because they are typical-case readings and a max would draw an envelope, not a trend.
+ *
+ * Pooling runs AFTER `denseSparkline`'s all-or-nothing hole gate and never as a way to fill a hole:
+ * the input is already known to have no nulls. A pooled series must not change the card's headline
+ * number, which comes from a different code path over the unpooled points.
+ *
+ * Buckets are contiguous and near-equal in size (`ceil(n / cap)` with the remainder in the last
+ * bucket) rather than exactly equal, so the x-axis stays monotone in time and no member is dropped.
+ */
+export function poolTo(values: readonly number[], cap: number, mode: PoolMode): number[] {
+  if (cap <= 0) return []
+  if (values.length <= cap) return [...values]
+
+  const size = Math.ceil(values.length / cap)
+  const pooled: number[] = []
+  for (let i = 0; i < values.length; i += size) {
+    const chunk = values.slice(i, i + size)
+    if (chunk.length === 0) continue
+    pooled.push(mode === 'max' ? Math.max(...chunk) : medianOf(chunk))
+  }
+  return pooled
+}
+
+/** The plain median of a non-empty numeric chunk. `lib/aggregate.ts`'s `median` takes nullables and
+ * returns a `{ value }` envelope, which is the right shape for a measurement that may be absent and
+ * the wrong shape here — every member of a pooled chunk exists by construction. */
+function medianOf(chunk: readonly number[]): number {
+  const sorted = [...chunk].toSorted((a, b) => a - b)
+  const mid = sorted.length >> 1
+  return sorted.length % 2 === 1 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2
 }

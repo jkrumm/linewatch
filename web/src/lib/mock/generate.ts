@@ -260,7 +260,7 @@ function mapOngoingOutageDef(def: OutageDef): OngoingOutage {
 function dailyFactor(ts: number): number {
   const d = new Date(ts)
   const hour = d.getHours() + d.getMinutes() / 60
-  // gentle evening-usage bump, ~15% above baseline around 20:00
+  // gentle evening-usage bump, ~15% above baseline near 20:00
   return 1 + 0.15 * Math.sin(((hour - 20) / 24) * 2 * Math.PI)
 }
 

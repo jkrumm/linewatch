@@ -531,7 +531,11 @@ function LatencyBandPlot({
             defined={(p) => p.bucket !== null && p.bucket.medianMs !== null}
             curve={curveMonotoneX}
             stroke={primaryColor}
-            strokeWidth={VX.line2Width}
+            // `lineWidth` (2.5), not `line2Width` (2). Both lines were drawn at the SECONDARY
+            // weight, so the primary was ranked above the overlay by colour alone — and colour
+            // alone is what the router overlay had already proved insufficient. Weight is the
+            // second half of the same ranking, and the token pair is named for it.
+            strokeWidth={VX.lineWidth}
           />
           {overlayLabel !== undefined && (
             // Plain reference line: no band, no p5/p95, no loss markers of its own — `defined` stops

@@ -214,17 +214,31 @@ export interface AnchorState {
   received: number
 }
 
-/** What `GET /api/status` says. Null when it could not be read at all. */
+/**
+ * What `GET /api/status` says. Null when it could not be read at all.
+ *
+ * **Every field here must be read by a decision.** Three were not: the WAN
+ * outage's `evidence` array, and `pathClass`, and `ongoingGatewayOutage` — all
+ * three fetched, declared, and consulted by nothing, which is the same defect
+ * class as a policy field nothing reads. `ongoingGatewayOutage` now dates the
+ * ladder; the other two are gone.
+ *
+ * `pathClass` is deliberately absent rather than turned into a blocker, and the
+ * reason is worth keeping: `vantage.ts` derives `onHomeLine` *from* it — a
+ * non-ethernet path yields 0 and an unknown one yields null — so a
+ * `not_ethernet_record` precondition could never be the sole reason for a
+ * stand-down. `off_home_line_record` has already fired by then. A precondition
+ * that cannot fire alone is the mirror of one that cannot fire at all.
+ */
 export interface RecordEvidence {
   /** Newest probe sample timestamp — freshness of the whole record. */
   newestSampleTs: number
-  ongoingWanOutage: { startedAt: number; cycles: number; evidence: string[] } | null
+  ongoingWanOutage: { startedAt: number; cycles: number } | null
   ongoingGatewayOutage: { startedAt: number } | null
   gateway: AnchorState | null
   wanAnchors: AnchorState[]
   /** Three-state, never coalesced: null means the collector did not report. */
   onHomeLine: boolean | null
-  pathClass: string | null
   gatewayAddr: string | null
   /** Seconds of the newest cycle covered by the 1 Hz link sampler. */
   linkWatchS: number | null
@@ -445,6 +459,25 @@ const ESCALATABLE: ReadonlySet<OutageClass> = new Set<OutageClass>([
   'carrier_down',
 ])
 
+/**
+ * When the outage the record is describing actually began — the earliest scope
+ * still open, not the WAN one.
+ *
+ * Both rows usually open together: 2026-08-01 19:09:07 opened a `gateway` and a
+ * `wan` outage in the same second. But only the gateway row can open *first*,
+ * because an unreachable gateway takes the anchors with it and the WAN row is
+ * the consequence. Dating the ladder from the consequence would have every
+ * gateway-side fault escalate a cycle or more late, and the 900 s exhaust window
+ * is the one clock a human is waiting on.
+ */
+function recordedOutageStart(record: RecordEvidence | null): number | null {
+  if (record === null) return null
+  const starts: number[] = []
+  if (record.ongoingWanOutage !== null) starts.push(record.ongoingWanOutage.startedAt)
+  if (record.ongoingGatewayOutage !== null) starts.push(record.ongoingGatewayOutage.startedAt)
+  return starts.length === 0 ? null : Math.min(...starts)
+}
+
 function actionsWithin(ledger: Ledger, now: number, windowMs: number, kind: 'reconnect' | 'reboot'): number {
   return ledger.actions.filter((action) => action.kind === kind && now - action.ts <= windowMs).length
 }
@@ -482,6 +515,12 @@ function sharedBlockers(input: LadderInput, outageClass: OutageClass): string[] 
   // on the same 192.168.1.0/24 answers its gateway happily while every anchor
   // fails, and a ladder gated only on "gateway up, WAN down" would reboot a
   // perfectly healthy home router in an empty house.
+  //
+  // This cannot fire without `off_home_line` also firing — `vantage.ts` derives
+  // `onHomeLine` from `pathClass` — and it is kept anyway, because it names
+  // *which* half of that derivation failed. Redundant on the self side is
+  // diagnostic; redundant on the record side would be noise, which is why
+  // `RecordEvidence` carries no `pathClass`.
   if (self !== null && self.pathClass !== 'ethernet') blocked.push('not_ethernet')
   if (self !== null && record !== null && self.gatewayAddr !== record.gatewayAddr) blocked.push('gateway_addr_mismatch')
 
@@ -694,7 +733,7 @@ function evaluate(input: LadderInput, outageClass: OutageClass): LadderDecision 
   // T0 is the outage's own start, not the moment this process noticed it, so a
   // restart mid-outage does not restart the clock. Falls back to now only when
   // the record has no outage row to read it from.
-  const t0 = ledger.ladder.t0 ?? input.record?.ongoingWanOutage?.startedAt ?? now
+  const t0 = ledger.ladder.t0 ?? recordedOutageStart(input.record) ?? now
   const outageKey = ledger.ladder.outageKey ?? `wan:${t0}`
   const downForS = Math.floor((now - t0) / 1000)
 

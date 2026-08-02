@@ -122,6 +122,7 @@ const config = {
   disarmPath: process.env['LINEWATCH_WATCHDOG_DISARM_PATH'] ?? DEFAULT_DISARM_PATH,
   eventSpoolPath: process.env['LINEWATCH_WATCHDOG_EVENT_SPOOL'] ?? join(moduleDir, 'watchdog-events.jsonl'),
   notifySpoolPath: process.env['LINEWATCH_WATCHDOG_NOTIFY_SPOOL'] ?? join(moduleDir, 'watchdog-notify.jsonl'),
+  /** Roughly a week of 60 s notifications. Enforced in `appendSpool`, and by `canRecord` on the event spool. */
   spoolMaxLines: 10_000,
   pushUrlFile: process.env['LINEWATCH_WATCHDOG_PUSH_URL_FILE'] ?? join(homedir(), '.config', 'uptime-kuma', 'linewatch-watchdog-push-url'),
   /** Well inside the monitor's own interval, the same margin the line heartbeat keeps. */
@@ -174,9 +175,9 @@ interface StatusPayload {
   up: boolean
   newestSampleTs: number | null
   speedtestRunning: boolean
-  ongoingOutages: Array<{ scope: 'gateway' | 'wan'; startedAt: number; cycles: number; evidence: string[] }>
+  ongoingOutages: Array<{ scope: 'gateway' | 'wan'; startedAt: number; cycles: number }>
   lastSamples: Array<{ target: string; scope: 'gateway' | 'wan'; received: number }>
-  vantage: { onHomeLine: boolean | null; pathClass: string | null; gatewayAddr: string | null; linkWatchS: number | null } | null
+  vantage: { onHomeLine: boolean | null; gatewayAddr: string | null; linkWatchS: number | null } | null
 }
 
 /**
@@ -195,12 +196,14 @@ async function fetchRecord(): Promise<RecordEvidence | null> {
 
   return {
     newestSampleTs: status.newestSampleTs,
-    ongoingWanOutage: wanOutage === null ? null : { startedAt: wanOutage.startedAt, cycles: wanOutage.cycles, evidence: wanOutage.evidence },
+    // Only what a decision reads. `evidence` and `pathClass` were carried here
+    // for a while and consulted by nothing — see `RecordEvidence` for why the
+    // second could never have become a blocker even if someone had tried.
+    ongoingWanOutage: wanOutage === null ? null : { startedAt: wanOutage.startedAt, cycles: wanOutage.cycles },
     ongoingGatewayOutage: gatewayOutage === null ? null : { startedAt: gatewayOutage.startedAt },
     gateway: gateway === null ? null : { target: gateway.target, received: gateway.received },
     wanAnchors: status.lastSamples.filter((sample) => sample.scope === 'wan').map((sample) => ({ target: sample.target, received: sample.received })),
     onHomeLine: status.vantage?.onHomeLine ?? null,
-    pathClass: status.vantage?.pathClass ?? null,
     gatewayAddr: status.vantage?.gatewayAddr ?? null,
     linkWatchS: status.vantage?.linkWatchS ?? null,
     speedtestRunning: status.speedtestRunning,
@@ -316,9 +319,35 @@ interface SpooledEvent {
   detail: Record<string, unknown>
 }
 
-function appendSpool(path: string, line: unknown): boolean {
+function countSpoolLines(path: string): number {
+  if (!existsSync(path)) return 0
+  const contents = readFileSync(path, 'utf-8')
+  return contents === '' ? 0 : contents.split('\n').filter((line) => line.trim() !== '').length
+}
+
+/**
+ * Bounded, and the bound is the same shape `probe.ts` uses: refuse at the cap
+ * and say so, rather than drop the oldest.
+ *
+ * `spoolMaxLines` sat here for a while as a number nothing read, which made both
+ * spools unbounded — the notify one grows 1440 entries a day against a wrong
+ * push URL, and every tick re-parsed the whole file and re-pushed from its head.
+ * Refusing the newest is the right end to refuse from: the drain stops at the
+ * first failure, so while the far side is down nothing leaves either way, and on
+ * recovery the *history* in order is what has value. Each entry carries its own
+ * `delayedMs`, so none of it can arrive looking live.
+ *
+ * The counting is done on write rather than tracked in-process because these
+ * files are empty in the steady state — an event is spooled only when localhost
+ * refuses, a notification only when Uptime Kuma does.
+ */
+function appendSpool(path: string, line: unknown, maxLines: number): boolean {
   try {
     mkdirSync(dirname(path), { recursive: true })
+    if (countSpoolLines(path) >= maxLines) {
+      log('spool.full', { path, maxLines })
+      return false
+    }
     appendFileSync(path, `${JSON.stringify(line)}\n`)
     return true
   } catch {
@@ -357,7 +386,11 @@ function canRecord(): boolean {
     // proves the directory, the permissions and a writable filesystem, without
     // putting 5760 probe lines a day into the spool it is testing.
     appendFileSync(config.eventSpoolPath, '')
-    return true
+    // A full spool is a filesystem that would accept the write and a file that
+    // will not take the line — indistinguishable from a read-only disk as far
+    // as attribution is concerned, and the rule is the same either way: no
+    // attribution possible means no action.
+    return countSpoolLines(config.eventSpoolPath) < config.spoolMaxLines
   } catch {
     return false
   }
@@ -408,7 +441,7 @@ async function drainEvents(): Promise<void> {
 }
 
 function record(entry: SpooledEvent): void {
-  if (!appendSpool(config.eventSpoolPath, entry)) log('event.spool_failed', { action: entry.action })
+  if (!appendSpool(config.eventSpoolPath, entry, config.spoolMaxLines)) log('event.spool_failed', { action: entry.action })
 }
 
 // ---------------------------------------------------------------------------
@@ -483,13 +516,13 @@ async function notify(outcome: LadderOutcome, ledger: Ledger, now: number, force
   for (const [index, pending] of backlog.entries()) {
     if (await push(pushUrl, pending, now)) continue
     rewriteSpool(config.notifySpoolPath, backlog.slice(index))
-    appendSpool(config.notifySpoolPath, notification)
+    appendSpool(config.notifySpoolPath, notification, config.spoolMaxLines)
     return
   }
   if (backlog.length > 0) rewriteSpool(config.notifySpoolPath, [])
 
   if (!(await push(pushUrl, notification, now))) {
-    if (!appendSpool(config.notifySpoolPath, notification)) log('notify.spool_failed', {})
+    if (!appendSpool(config.notifySpoolPath, notification, config.spoolMaxLines)) log('notify.spool_failed', {})
   }
 }
 
@@ -690,7 +723,48 @@ function reportIfChanged(outcome: LadderOutcome, now: number): void {
   })
 }
 
+/**
+ * Why this process stopped, which until now nothing recorded.
+ *
+ * The tick loop catches its own errors, so a restart means the process died
+ * *outside* it or was signalled — and `KeepAlive` brings it straight back, so
+ * the only trace was a second `watchdog.start` with a matching gap in nothing.
+ * Three such restarts happened in sixteen hours and none of them is explicable
+ * from the log.
+ *
+ * It is not a cosmetic gap. Every restart resets `processStartedAt`, which is
+ * `minProcessAgeS` — two minutes in which the watchdog cannot act on anything —
+ * and resets `heldTicks`, which is the confirmation counter. A drip of restarts
+ * is a drip of blind windows, and it reads as a healthy `runs` count.
+ */
+function reportExits(): void {
+  let reason = 'unknown — died outside the tick loop'
+
+  process.on('exit', (code) => {
+    log('watchdog.exit', { reason, code, uptimeS: Math.floor((Date.now() - processStartedAt) / 1000) })
+  })
+
+  for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) {
+    // launchd's own stop path, and the one `make watchdog-teardown` takes.
+    process.on(signal, () => {
+      reason = signal
+      process.exit(0)
+    })
+  }
+
+  const die = (kind: string) => (error: unknown) => {
+    reason = `${kind}: ${error instanceof Error ? error.message : String(error)}`
+    process.exit(1)
+  }
+  process.on('uncaughtException', die('uncaughtException'))
+  process.on('unhandledRejection', die('unhandledRejection'))
+}
+
 async function main(): Promise<void> {
+  // Not in `once` mode: `make watchdog-status` prints one decision, and a
+  // trailing exit line in that output is noise in something a human reads.
+  if (!config.once) reportExits()
+
   if (!config.once) rotateLogIfNeeded({ logPath: config.logPath, maxBytes: config.logMaxBytes, report: log })
 
   log('watchdog.start', {

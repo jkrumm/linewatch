@@ -49,7 +49,6 @@ function record(over: Partial<RecordEvidence> = {}): RecordEvidence {
       { target: 'quad9', received: 20 },
     ],
     onHomeLine: true,
-    pathClass: 'ethernet',
     gatewayAddr: '192.168.1.1',
     linkWatchS: 30,
     speedtestRunning: false,
@@ -90,7 +89,7 @@ function armedInput(over: Partial<LadderInput> = {}): LadderInput {
     record: record({
       newestSampleTs: now - 10_000,
       wanAnchors: ALL_WAN_DOWN,
-      ongoingWanOutage: { startedAt: T0, cycles: 8, evidence: ['cloudflare', 'google', 'quad9'] },
+      ongoingWanOutage: { startedAt: T0, cycles: 8 },
     }),
     self: self({ probeTs: now, wanAnchors: ALL_WAN_DOWN, v6: { target: 'v6', received: 0 } }),
     carrier: null,
@@ -261,7 +260,7 @@ describe('decide', () => {
     const decision = decide({
       ...input,
       heldTicks: 2,
-      record: { ...input.record!, ongoingWanOutage: { startedAt: T0, cycles: 3, evidence: [] } },
+      record: { ...input.record!, ongoingWanOutage: { startedAt: T0, cycles: 3 } },
     })
     expect(decision.blockedBy).toContain('insufficient_cycles')
   })
@@ -429,7 +428,7 @@ describe('replaying the record', () => {
       record: {
         ...input.record!,
         newestSampleTs: now - 10_000,
-        ongoingWanOutage: { startedAt, cycles, evidence: ['cloudflare', 'google', 'quad9'] },
+        ongoingWanOutage: { startedAt, cycles },
       },
       self: { ...input.self!, probeTs: now },
       ledger: ledger({ v6: { lastUpTs: now - 60_000, lastCheckedTs: now } }),
@@ -507,6 +506,89 @@ describe('replaying the record', () => {
     })
     expect(decision.outageClass).toBe('healthy')
     expect(decision.action).toBe('none')
+  })
+
+  /**
+   * 2026-08-01 19:09:07. A `gateway` outage (90 s) and a `wan` outage (180 s)
+   * opened in the same second — the signature of the router going away, and the
+   * fourth distinct shape in the record. The watchdog logged
+   * `suspect/local_link_down` and `confirmed/off_home_line` through it.
+   *
+   * Nothing here may act. `local_link_down` outranks every WAN class precisely
+   * because an unreachable gateway takes the anchors with it, and a reconnect
+   * or a reboot is a command sent *through* the device that is not answering.
+   */
+  test('does not act on the 08-01 19:09 event, where the gateway went with the WAN', () => {
+    const startedAt = Date.UTC(2026, 7, 1, 19, 9, 7)
+    for (const elapsed of [30, 90, 180, 300]) {
+      const input = atOutage(startedAt, elapsed)
+      const down = {
+        ...input,
+        self: { ...input.self!, gateway: { target: 'gateway', received: 0 } },
+        record: {
+          ...input.record!,
+          gateway: { target: 'gateway', received: 0 },
+          ongoingGatewayOutage: { startedAt },
+        },
+      }
+      const decision = decide(down)
+      expect(decision.outageClass).toBe('local_link_down')
+      expect(decision.action).toBe('none')
+      // Blockers are computed when a rung comes due, not before — inside the
+      // observe window the honest answer is that nothing has been asked yet.
+      // Past it, the class itself is the first thing that refuses.
+      if (elapsed >= DEFAULT_POLICY.observeS) {
+        expect(decision.blockedBy).toContain('class_local_link_down')
+        expect(decision.blockedBy).toContain('gateway_down')
+        expect(decision.blockedBy).toContain('gateway_down_record')
+      } else {
+        expect(decision.blockedBy).toEqual([])
+      }
+    }
+  })
+
+  /**
+   * The same event past the exhaust window. A dead gateway is not something this
+   * can fix, which is exactly when a person is wanted — `ESCALATABLE` is wider
+   * than `ACTIONABLE` for this case — and the note must not claim a ladder ran.
+   */
+  test('escalates the 19:09 shape once exhausted, without claiming it tried anything', () => {
+    const startedAt = Date.UTC(2026, 7, 1, 19, 9, 7)
+    const input = atOutage(startedAt, 950)
+    const decision = decide({
+      ...input,
+      self: { ...input.self!, gateway: { target: 'gateway', received: 0 } },
+      record: { ...input.record!, gateway: { target: 'gateway', received: 0 }, ongoingGatewayOutage: { startedAt } },
+    })
+    expect(decision.action).toBe('escalate')
+    expect(decision.rung).toBe('exhausted')
+    expect(decision.note).toContain('nothing here can address it')
+  })
+
+  /**
+   * T0 comes from the earliest scope still open, not from the WAN row. The
+   * gateway row is the only one that can open first — the WAN row is its
+   * consequence — and dating the ladder from the consequence delays the one
+   * clock a human is waiting on.
+   */
+  test('dates the ladder from the gateway row when it opened first', () => {
+    const gatewayStart = Date.UTC(2026, 7, 1, 19, 9, 7)
+    const wanStart = gatewayStart + 30_000
+    const now = wanStart + 900_000
+    const input = atOutage(wanStart, 900)
+    const decision = decide({
+      ...input,
+      now,
+      record: {
+        ...input.record!,
+        newestSampleTs: now - 10_000,
+        gateway: { target: 'gateway', received: 0 },
+        ongoingWanOutage: { startedAt: wanStart, cycles: 30 },
+        ongoingGatewayOutage: { startedAt: gatewayStart },
+      },
+      self: { ...input.self!, probeTs: now, gateway: { target: 'gateway', received: 0 } },
+    })
+    expect(decision.t0).toBe(gatewayStart)
   })
 
   /** One anchor at zero is `partial` — three networks is the existing defence against one provider. */
@@ -701,11 +783,11 @@ describe('the ledger the decision writes', () => {
 
   test('an escalation records when it happened, so the quiet period can hold', () => {
     const now = T0 + 950_000
-    const out = decide(armedInput({ now, record: record({ newestSampleTs: now, wanAnchors: ALL_WAN_DOWN, ongoingWanOutage: { startedAt: T0, cycles: 30, evidence: ['cloudflare'] } }) }))
+    const out = decide(armedInput({ now, record: record({ newestSampleTs: now, wanAnchors: ALL_WAN_DOWN, ongoingWanOutage: { startedAt: T0, cycles: 30 } }) }))
     expect(out.action).toBe('escalate')
     expect(out.ledger.lastEscalationTs).toBe(now)
 
-    const again = decide(armedInput({ now: now + 30_000, ledger: out.ledger, record: record({ newestSampleTs: now + 30_000, wanAnchors: ALL_WAN_DOWN, ongoingWanOutage: { startedAt: T0, cycles: 31, evidence: ['cloudflare'] } }) }))
+    const again = decide(armedInput({ now: now + 30_000, ledger: out.ledger, record: record({ newestSampleTs: now + 30_000, wanAnchors: ALL_WAN_DOWN, ongoingWanOutage: { startedAt: T0, cycles: 31 } }) }))
     expect(again.action).toBe('none')
   })
 })
@@ -913,7 +995,7 @@ describe('preconditions that had no test', () => {
    * zero-second outage still inside the observe window, and every assertion
    * about a blocker passes vacuously against `blockedBy: []`.
    */
-  const downSince = { startedAt: T0, cycles: 8, evidence: ['cloudflare', 'google', 'quad9'] }
+  const downSince = { startedAt: T0, cycles: 8 }
 
   test('a Wi-Fi path is refused even when the collector claims the home line', () => {
     // Deliberately inconsistent input: `onHomeLine: 1` over `pathClass: 'wifi'`
@@ -959,6 +1041,67 @@ describe('preconditions that had no test', () => {
     // new outage would otherwise be a fresh ladder with a full budget.
     const out = decide(armedInput({ ledger: ledger({ postActionCooldownUntil: armedNow + 60_000, v6: { lastUpTs: armedNow, lastCheckedTs: armedNow } }) }))
     expect(out.blockedBy).toContain('post_action_cooldown')
+    expect(out.action).toBe('none')
+  })
+
+  /**
+   * The confirmation gate on the way in, which had no test at all — the
+   * counterpart of `recoverAfterS` on the way out, and the reason a single tick
+   * of anything cannot start a clock.
+   */
+  test('a class that has not held confirmTicks is suspect and blocked', () => {
+    const out = decide(armedInput({ heldTicks: DEFAULT_POLICY.confirmTicks - 1 }))
+    expect(out.state).toBe('suspect')
+    expect(out.blockedBy).toEqual(['confirming'])
+    expect(out.action).toBe('none')
+  })
+
+  /**
+   * `class_${outageClass}` is the blocker that refuses everything outside
+   * `ACTIONABLE`, and it was reachable by four classes with a test for one. It
+   * is the last line between the ladder and a class it was never built for.
+   */
+  test('every non-actionable class refuses by its own name', () => {
+    const offLine = decide(
+      armedInput({
+        self: self({ probeTs: armedNow, wanAnchors: ALL_WAN_DOWN, onHomeLine: 0, pathClass: 'wifi', v6: { target: 'v6', received: 0 } }),
+        record: record({ newestSampleTs: armedNow - 10_000, wanAnchors: ALL_WAN_DOWN, onHomeLine: false, ongoingWanOutage: downSince }),
+      }),
+    )
+    expect(offLine.outageClass).toBe('off_home_line')
+    expect(offLine.blockedBy).toContain('class_off_home_line')
+
+    // A line out of showtime cannot complete a re-dial and will not gain
+    // showtime from a reboot — the one thing carrier evidence may veto.
+    const carrierDown = decide(
+      armedInput({ carrier: { stale: false, lineStatus: 'Down', showtimeStartS: null, freshPollAgeS: 30 } }),
+    )
+    expect(carrierDown.outageClass).toBe('carrier_down')
+    expect(carrierDown.blockedBy).toContain('class_carrier_down')
+    expect(carrierDown.action).toBe('none')
+  })
+
+  /**
+   * Both halves of the `no_evidence` decision, which existed only as prose. It
+   * refuses to act because it cannot see, and it refuses to *page* because
+   * `heartbeat-verdict.ts` already says exactly this — precisely, and over a WAN
+   * that is up. A second page for one fact trains the reader to ignore both.
+   */
+  test('knowing nothing blocks the ladder and does not wake anyone', () => {
+    // The ladder must already be running, or T0 falls back to `now` and the
+    // decision sits inside the observe window asserting nothing — the trap
+    // `downSince` exists for, in the one case where there is no record to read
+    // a start from at all.
+    const blind = armedInput({
+      record: null,
+      self: null,
+      now: T0 + 950_000,
+      ledger: ledger({ ladder: { outageKey: `wan:${T0}`, t0: T0, rung: 'reconnect', enteredAt: T0, settleUntil: null, announcedAt: null } }),
+    })
+    const out = decide(blind)
+    expect(out.outageClass).toBe('no_evidence')
+    expect(out.blockedBy).toContain('class_no_evidence')
+    expect(out.blockedBy).toContain('no_escalation_for_no_evidence')
     expect(out.action).toBe('none')
   })
 })
@@ -1028,7 +1171,7 @@ describe('the windows that hold a rung shut', () => {
     const out = decide(
       armedInput({
         now,
-        record: record({ newestSampleTs: now - 10_000, wanAnchors: ALL_WAN_DOWN, ongoingWanOutage: { startedAt: T0, cycles: 3, evidence: ['cloudflare'] } }),
+        record: record({ newestSampleTs: now - 10_000, wanAnchors: ALL_WAN_DOWN, ongoingWanOutage: { startedAt: T0, cycles: 3 } }),
         self: self({ probeTs: now, wanAnchors: ALL_WAN_DOWN, v6: { target: 'v6', received: 0 } }),
         ledger: ledger({ ladder: { outageKey: `wan:${T0}`, t0: T0, rung: 'reconnect', enteredAt: T0, settleUntil: null, announcedAt: null }, v6: { lastUpTs: now - 60_000, lastCheckedTs: now } }),
       }),
@@ -1048,7 +1191,7 @@ describe('the windows that hold a rung shut', () => {
       armedInput({
         now,
         policy: { ...DEFAULT_POLICY, armed: true, rebootEnabled: true },
-        record: record({ newestSampleTs: now - 10_000, wanAnchors: ALL_WAN_DOWN, ongoingWanOutage: { startedAt: T0, cycles: 9, evidence: ['cloudflare'] } }),
+        record: record({ newestSampleTs: now - 10_000, wanAnchors: ALL_WAN_DOWN, ongoingWanOutage: { startedAt: T0, cycles: 9 } }),
         self: self({ probeTs: now, wanAnchors: ALL_WAN_DOWN, v6: { target: 'v6', received: 0 } }),
         ledger: ledger({
           ladder: { outageKey: `wan:${T0}`, t0: T0, rung: 'reboot', enteredAt: T0, settleUntil: null, announcedAt: null },

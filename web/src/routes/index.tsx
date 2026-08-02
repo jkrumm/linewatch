@@ -407,10 +407,15 @@ function DashboardPage() {
                 label: 'Timeline',
                 render: () => (
                   <Stack gap="md">
-                    {/* The title names the anchor. Titled bare "WAN availability" it claimed the
-                        whole WAN while the chart's own accessible label said "Cloudflare
-                        availability" — one anchor, described two ways on one card. */}
-                    <GuidedChart title="Reachability · Cloudflare" copy={AVAILABILITY_COPY}>
+                    {/* This section's own word, like every other chart title on the page — see
+                        `speed-chart.tsx`'s docblock for the rule and why it is not redundancy with
+                        the heading (in compact there is no heading, and this is the card's only
+                        label). The anchor it used to name ("· Cloudflare") moved into the tooltip
+                        rather than being dropped: this strip is ONE anchor, not the connection, and
+                        a bare "WAN availability" once claimed the whole WAN while the chart's own
+                        accessible label said "Cloudflare availability" — one anchor, described two
+                        ways on one card. */}
+                    <GuidedChart title="Uptime" copy={AVAILABILITY_COPY}>
                       <AvailabilityStrip
                         target="cloudflare"
                         buckets={[...(bucketsByTarget.get('cloudflare') ?? [])]}
@@ -502,7 +507,7 @@ function DashboardPage() {
                   // answer a question none of them asks alone; the fold answers it, and the
                   // per-anchor view below still holds every anchor in full. See
                   // `foldInternetBuckets` for what each statistic folds by and why.
-                  <GuidedChart title="Internet latency · median of 3 anchors" copy={INTERNET_LATENCY_COPY}>
+                  <GuidedChart title="Ping" copy={INTERNET_LATENCY_COPY}>
                     <LatencyBandChart
                       label="Internet"
                       chartKey="internet"
@@ -671,7 +676,7 @@ function DashboardPage() {
                 key: 'volume',
                 label: 'Volume',
                 render: () => (
-                  <GuidedChart title="Data carried" copy={THROUGHPUT_COPY}>
+                  <GuidedChart title="Throughput" copy={THROUGHPUT_COPY}>
                     <ThroughputChart
                       buckets={throughput?.buckets ?? []}
                       from={from}

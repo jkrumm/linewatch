@@ -42,7 +42,7 @@ export interface ChartCopy {
 }
 
 export const AVAILABILITY_COPY: ChartCopy = {
-  tooltip: 'Packet loss per bucket. Hatched means never measured — not the same as no loss.',
+  tooltip: 'Packet loss to Cloudflare per bucket — one anchor, not the whole connection. Hatched means never measured, which is not the same as no loss.',
   guide: [
     {
       body: 'One column per bucket — the axis comes from the range, not from the rows that came back.',

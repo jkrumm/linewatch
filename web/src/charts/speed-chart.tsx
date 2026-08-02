@@ -6,13 +6,13 @@ import { PendingChart } from './pending'
 import { useCompactMode } from '../lib/compact'
 
 /**
- * 190, matching `latency-band-chart`'s — the chart directly above this one on the page, and the
- * other member of the same "lines over a window" idiom. It was 260, which bought nothing: two
- * download/upload traces on a household line sit near-flat for most windows, so the extra 70px was
- * headroom above the download line rather than resolution in it. Two line charts one section apart
- * at two different heights read as a layout accident, and the taller one is the one carrying less.
+ * It was 260, which was headroom above the download trace rather than resolution in it; 190 —
+ * matching `latency-band-chart`, the other member of the same "lines over a window" idiom — turned
+ * out to be one step too far. Two traces plus two horizontal references need room to sit apart from
+ * each other, and at 190 the download line and the carrier-sync reference nearly touch on this
+ * line. 220 keeps the cut without collapsing the gap the chart exists to show.
  */
-const SPEED_HEIGHT = 190
+const SPEED_HEIGHT = 220
 
 /**
  * Compact draws this one chart shorter, and only this one.
@@ -23,7 +23,7 @@ const SPEED_HEIGHT = 190
  * would flatten them into a smear. So the height reduction is per-chart rather than a global
  * scale factor.
  */
-const SPEED_HEIGHT_COMPACT = 130
+const SPEED_HEIGHT_COMPACT = 160
 
 /**
  * A horizontal reference at a rate the line is measured against — the host's negotiated link speed,
@@ -44,11 +44,17 @@ export type SpeedRefLine = {
 /**
  * Every speed-test run in the window, download against upload.
  *
- * Titled for the runs rather than for the quantity. It was "Throughput", which is the title of a
- * different section on the same page measuring a different thing — what the line actually carried,
- * from the interface counters, rather than what it managed when asked to saturate. Two blocks a
- * screen apart carrying the same word for two different measurements is exactly the confusion the
- * Speed/Throughput split exists to prevent.
+ * **Titled for its own section, which is the rule now: a chart's title is its section's word.**
+ * "Speed" here, "Throughput" a screen down, "Ping" and "Connection health" above. That is not
+ * redundancy with the heading — in compact the heading is gone and this title is the only label the
+ * card has, so it has to carry the section's meaning on its own.
+ *
+ * The hazard the old title ("Speed test runs") was avoiding is still avoided, and it is worth
+ * restating because the fix looks superficially like the bug: this chart was once called
+ * "Throughput", the name of a DIFFERENT section measuring a different thing — what the line
+ * actually carried, from the interface counters, rather than what it managed when asked to
+ * saturate. One word for two measurements a screen apart is the confusion the Speed/Throughput
+ * split exists to prevent. Each chart now takes its OWN section's word, so no word is used twice.
  */
 export function SpeedChart({
   tests,
@@ -93,7 +99,7 @@ export function SpeedChart({
 
   return (
     <ChartCard
-      title="Speed test runs"
+      title="Speed"
       // The unit lives here, not on the y ticks. Formatting each tick as `600 Mbps` was the
       // obvious fix for a unitless axis and it made things worse: `MultiLine` draws its axis inside
       // basalt's shared 44 px gutter, sized for bare numbers, so every tick rendered as the bare

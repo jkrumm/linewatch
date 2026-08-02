@@ -50,6 +50,13 @@
       "when": 1785586115078,
       "tag": "0006_kind_selene",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1785654194369,
+      "tag": "0007_silky_wild_child",
+      "breakpoints": true
     }
   ]
 }

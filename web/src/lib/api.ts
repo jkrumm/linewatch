@@ -6,6 +6,7 @@ import {
   generateSpeedSummary,
   generateSpeedTests,
   generateStatus,
+  generateThroughput,
   generateVerdicts,
 } from './mock/generate'
 import type {
@@ -19,6 +20,7 @@ import type {
   SpeedTest,
   StatusResponse,
   TargetName,
+  ThroughputResponse,
   VantageBucket,
   Verdict,
 } from './types'
@@ -66,6 +68,23 @@ export async function getProbeBuckets(params: {
     bucket: String(params.bucket),
   })
   return fetchJson<{ buckets: ProbeBucket[]; vantage: VantageBucket[] }>(`/probes?${qs.toString()}`)
+}
+
+/** `GET /api/throughput?from&to&bucket` — bytes actually carried, bucketed in SQL. The whole
+ * envelope is returned, not just `buckets`: `maxIntervalMs` is what makes a `skipped` count
+ * readable, and dropping it leaves the caller unable to say why an interval was refused. */
+export async function getThroughput(params: {
+  from: number
+  to: number
+  bucket: ProbeBucketSeconds
+}): Promise<ThroughputResponse> {
+  if (USE_MOCK) return generateThroughput(params.from, params.to, params.bucket)
+  const qs = new URLSearchParams({
+    from: String(params.from),
+    to: String(params.to),
+    bucket: String(params.bucket),
+  })
+  return fetchJson<ThroughputResponse>(`/throughput?${qs.toString()}`)
 }
 
 /** `GET /api/outages?from&to&minDuration`. Response envelope is `{ outages, summary }` and both

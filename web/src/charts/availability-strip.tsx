@@ -1,5 +1,7 @@
 import { useMemo } from 'react'
+import { scaleBand } from '@visx/scale'
 import {
+  AxisBottomDate,
   ChartTooltip,
   ResponsiveChart,
   TooltipBody,
@@ -16,6 +18,7 @@ import { TARGET_LABEL } from '../lib/types'
 import { densifyBuckets } from '../lib/densify'
 import { PROBE_CYCLE_MS } from '../lib/range'
 import { fmtPct } from '../lib/format'
+import { AXIS_LABEL_PX, axisTickValues, bucketAxisLabel } from '../lib/axis'
 import { HatchPattern, hatchFill } from './hatch'
 
 /** Loss share at which a column is painted at full strength — the same absolute scale the
@@ -28,9 +31,21 @@ const MEASURED_FLOOR_ALPHA = 0.14
 
 const STRIP_HEIGHT = 44
 
+/**
+ * Room under the columns for the time axis.
+ *
+ * The strip shipped without one, which made it the only chart on the page a reader could not
+ * locate an event on: an outage was visible as a dark column and answerable only as "somewhere in
+ * the last 24 hours". A column you cannot put a clock time to cannot be correlated with anything —
+ * not a router reboot, not a speed test, not a memory of the call that dropped.
+ */
+const AXIS_HEIGHT = 22
+
 type Column = {
   key: string
   bucketStart: number
+  /** The axis label for this column, and the band scale's key — see `bucketAxisLabel`. */
+  label: string
   bucket: ProbeBucket | null
 }
 
@@ -68,6 +83,7 @@ export function AvailabilityStrip({
       densifyBuckets(buckets, { from, to, bucketSeconds }).map((slot) => ({
         key: slot.key,
         bucketStart: slot.bucketStart,
+        label: bucketAxisLabel(slot.bucketStart, bucketSeconds),
         bucket: slot.value,
       })),
     [buckets, from, to, bucketSeconds],
@@ -77,15 +93,14 @@ export function AvailabilityStrip({
   const expectedCycles = Math.max(1, Math.round((bucketSeconds * 1000) / PROBE_CYCLE_MS))
 
   return (
-    <ResponsiveChart height={STRIP_HEIGHT}>
-      {({ width, height }) => (
+    <ResponsiveChart height={STRIP_HEIGHT + AXIS_HEIGHT}>
+      {({ width }) => (
         <StripPlot
           target={target}
           columns={columns}
           expectedCycles={expectedCycles}
           bucketSeconds={bucketSeconds}
           width={width}
-          height={height}
         />
       )}
     </ResponsiveChart>
@@ -98,18 +113,21 @@ function StripPlot({
   expectedCycles,
   bucketSeconds,
   width,
-  height,
 }: {
   target: TargetName
   columns: Column[]
   expectedCycles: number
   bucketSeconds: ProbeBucketSeconds
   width: number
-  height: number
 }) {
   const tooltipStyles = useTooltipStyles()
   const { tip, show, hide, tooltipRef } = useChartTooltip<Column>()
   const absentHatchId = 'availability-strip-absent'
+
+  // The band scale is built before the width guard's early return so the hook order above it stays
+  // fixed; `scaleBand` is a plain call, not a hook, so this is only ordering hygiene for readers.
+  const labels = columns.map((c) => c.label)
+  const scale = scaleBand<string>({ domain: labels, range: [0, width] })
 
   if (width < 20 || columns.length === 0) return null
 
@@ -120,7 +138,7 @@ function StripPlot({
     <div style={{ position: 'relative' }}>
       <svg
         width={width}
-        height={height}
+        height={STRIP_HEIGHT + AXIS_HEIGHT}
         role="img"
         aria-label={`${TARGET_LABEL[target]} availability in ${Math.round(bucketSeconds / 60)}-minute buckets, with unmeasured buckets marked`}
       >
@@ -133,7 +151,7 @@ function StripPlot({
             x={i * step}
             y={0}
             width={barWidth}
-            height={height}
+            height={STRIP_HEIGHT}
             rx={1}
             fill={columnFill(column.bucket, absentHatchId)}
             style={{ cursor: 'pointer' }}
@@ -141,6 +159,15 @@ function StripPlot({
             onMouseLeave={hide}
           />
         ))}
+        {/* `axisTickValues` rather than basalt's own `smartTicks`, for the reason its docblock
+            gives: `smartTicks` appends the final value unconditionally and the last two labels
+            land on top of each other. The labels are pre-formatted by `bucketAxisLabel` and pass
+            through `fmtAxisDate` untouched — see `lib/axis.ts`. */}
+        <AxisBottomDate
+          scale={scale}
+          top={STRIP_HEIGHT}
+          tickValues={axisTickValues(labels, width, AXIS_LABEL_PX)}
+        />
       </svg>
       <ChartTooltip tip={tip} tooltipRef={tooltipRef} styles={tooltipStyles}>
         {tip && (

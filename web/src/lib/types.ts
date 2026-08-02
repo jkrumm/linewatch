@@ -62,6 +62,36 @@ export type ProbeBucket = {
   count: number
 }
 
+/** One bucket of `GET /api/throughput` — how much the line actually carried, differenced from
+ * `probe_cycle`'s cumulative interface counters.
+ *
+ * `spanMs` is the measured time behind the bytes and is the **only** correct denominator for a
+ * rate. The bucket's own width is not: a bucket may have measured a fraction of itself, and
+ * dividing by the slot understates the rate most severely exactly when the collector was
+ * struggling — turning a measurement problem into an apparent traffic collapse.
+ *
+ * `skipped > 0` means the bucket UNDERSTATES what moved (a reboot reset the counters, the
+ * interface changed, or the gap between cycles was too long to place the bytes in time). It never
+ * means the line was idle. */
+export type ThroughputBucket = {
+  bucket: number
+  inBytes: number
+  outBytes: number
+  spanMs: number
+  intervals: number
+  skipped: number
+}
+
+/** `GET /api/throughput`'s envelope. `maxIntervalMs` is the longest cycle-to-cycle gap whose bytes
+ * are still attributed to a point in time; anything longer counts toward `skipped`. */
+export type ThroughputResponse = {
+  from: number
+  to: number
+  bucketSeconds: number
+  maxIntervalMs: number
+  buckets: ThroughputBucket[]
+}
+
 /** One entry of `GET /api/probes`'s parallel `vantage[]` array (`VantageBucketSchema` in
  * `src/routes/probes.ts`) — what the cycles in a bucket measured *through*, not what they
  * measured. It is its own series rather than a member of `ProbeBucket` because the vantage is a

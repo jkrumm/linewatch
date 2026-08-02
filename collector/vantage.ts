@@ -46,6 +46,11 @@ export interface Vantage {
   ifIerrs: number | null
   ifOerrs: number | null
   ifColl: number | null
+  /** Cumulative byte counters, same row and same contract as the error counters
+   * above: the difference between consecutive cycles is the throughput history.
+   * A negative difference is a reboot resetting them, never negative traffic. */
+  ifIbytes: number | null
+  ifObytes: number | null
   /**
    * 1 = Ethernet *and* the expected home gateway; 0 = measured through
    * something else; null = could not be determined. Never coalesce null to 1.
@@ -270,9 +275,28 @@ export interface IfCounters {
   ifIerrs: number | null
   ifOerrs: number | null
   ifColl: number | null
+  /**
+   * Cumulative bytes in and out on this interface since boot — the same `<Link#N>`
+   * row the error counters come from, two columns over.
+   *
+   * These are the only byte counters this host offers without a second always-on
+   * sampler, and they are **cumulative, not a rate**: the rate is the difference
+   * between consecutive cycles divided by the time between them, and computing it
+   * is the reader's job, not this parser's. They reset on reboot and start from
+   * zero on a new interface, so a negative difference is a counter reset and must
+   * read as *unknown*, never as an idle line.
+   */
+  ifIbytes: number | null
+  ifObytes: number | null
 }
 
-const NO_COUNTERS: IfCounters = { ifIerrs: null, ifOerrs: null, ifColl: null }
+const NO_COUNTERS: IfCounters = {
+  ifIerrs: null,
+  ifOerrs: null,
+  ifColl: null,
+  ifIbytes: null,
+  ifObytes: null,
+}
 
 /**
  * `netstat -I en0 -b` prints one row per address family — measured: five rows
@@ -295,6 +319,8 @@ export function parseIfCounters(output: string): IfCounters {
   const ierrsAt = offsetFromEnd(headerFields, 'Ierrs')
   const oerrsAt = offsetFromEnd(headerFields, 'Oerrs')
   const collAt = offsetFromEnd(headerFields, 'Coll')
+  const ibytesAt = offsetFromEnd(headerFields, 'Ibytes')
+  const obytesAt = offsetFromEnd(headerFields, 'Obytes')
   if (ierrsAt === null) return NO_COUNTERS
 
   for (const line of lines) {
@@ -302,7 +328,15 @@ export function parseIfCounters(output: string): IfCounters {
     const fields = line.trim().split(/\s+/)
     const ifIerrs = integerAt(fields, ierrsAt)
     if (ifIerrs === null) continue
-    return { ifIerrs, ifOerrs: integerAt(fields, oerrsAt), ifColl: integerAt(fields, collAt) }
+    return {
+      ifIerrs,
+      ifOerrs: integerAt(fields, oerrsAt),
+      ifColl: integerAt(fields, collAt),
+      // Located by header name like every other column, so a firmware or macOS
+      // release that reorders the row cannot silently return Opkts as Obytes.
+      ifIbytes: integerAt(fields, ibytesAt),
+      ifObytes: integerAt(fields, obytesAt),
+    }
   }
 
   return NO_COUNTERS
@@ -481,6 +515,8 @@ const NO_PATH: Vantage = {
   ifIerrs: null,
   ifOerrs: null,
   ifColl: null,
+  ifIbytes: null,
+  ifObytes: null,
   onHomeLine: null,
   linkMaxMbit: null,
   dhcpBoundAt: null,
@@ -541,6 +577,8 @@ export async function captureVantage(options: CaptureVantageOptions): Promise<Va
     ifIerrs: counters.ifIerrs,
     ifOerrs: counters.ifOerrs,
     ifColl: counters.ifColl,
+    ifIbytes: counters.ifIbytes,
+    ifObytes: counters.ifObytes,
     onHomeLine: deriveOnHomeLine({ pathClass, gatewayAddr: route.gateway, expectedGateway: options.expectedGateway }),
     linkMaxMbit: parseSupportedMedia(ifconfigOut),
     dhcpBoundAt: parseDhcpLeaseStart(dhcpOut),

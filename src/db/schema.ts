@@ -74,6 +74,20 @@ export const probeCycle = sqliteTable(
     ifIerrs: integer('if_ierrs'),
     ifOerrs: integer('if_oerrs'),
     ifColl: integer('if_coll'),
+    // Cumulative bytes in/out on path_if, same netstat row as the error counters
+    // and stored for the same reason: a counter survives a missed cycle, a
+    // per-cycle delta does not. This is the whole basis of the throughput
+    // history — `GET /api/throughput` differences consecutive cycles.
+    //
+    // Two facts a read path must not forget. The counters are **per interface**,
+    // so a delta across a path_if change is a comparison between two different
+    // counters and is meaningless; and they **reset to zero on reboot**, so a
+    // negative delta is a reset, not negative traffic. Both cases are unknown,
+    // never zero — a fabricated 0 B/s reads as an idle line, which is exactly
+    // the "absent measurement rendered as a good one" this schema exists to
+    // refuse.
+    ifIbytes: integer('if_ibytes'),
+    ifObytes: integer('if_obytes'),
     // The refuse-to-lie column. 1 = Ethernet *and* the configured home gateway;
     // 0 = anything else (Wi-Fi, cellular, an unexpected gateway) i.e. this cycle
     // did not measure the home line; null = not reported, i.e. unknown.

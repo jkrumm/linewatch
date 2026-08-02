@@ -451,24 +451,44 @@ describe('parseIfCounters', () => {
   test('takes the counters from the only row that has them', () => {
     // Four of the five rows print `-` for Ierrs/Oerrs/Coll. Picking the first or
     // last row would yield nulls forever and look like "no data".
-    expect(parseIfCounters(NETSTAT_EN0)).toEqual({ ifIerrs: 0, ifOerrs: 0, ifColl: 0 })
+    expect(parseIfCounters(NETSTAT_EN0)).toEqual({
+      ifIerrs: 0,
+      ifOerrs: 0,
+      ifColl: 0,
+      ifIbytes: 34_938_024_026,
+      ifObytes: 12_509_590_061,
+    })
   })
 
   test('reads non-zero cumulative counters', () => {
-    expect(parseIfCounters(NETSTAT_EN0_WITH_ERRORS)).toEqual({ ifIerrs: 417, ifOerrs: 23, ifColl: 9 })
+    expect(parseIfCounters(NETSTAT_EN0_WITH_ERRORS)).toEqual({
+      ifIerrs: 417,
+      ifOerrs: 23,
+      ifColl: 9,
+      // Well past 2^32 — the counters are 64-bit on macOS and a reader that
+      // truncates them would report a plausible-looking wrong volume.
+      ifIbytes: 34_938_024_026,
+      ifObytes: 12_509_590_061,
+    })
   })
 
   test('survives a row with the Address column missing', () => {
     // Ten fields instead of eleven. Left-indexed, this row yields Oerrs 80 (the
     // Obytes value) and a null Coll — a permanent, entirely fictional error rate
     // on every tunnel interface. Oerrs and ifColl are what this case proves.
-    expect(parseIfCounters(NETSTAT_UTUN0)).toEqual({ ifIerrs: 0, ifOerrs: 0, ifColl: 0 })
+    expect(parseIfCounters(NETSTAT_UTUN0)).toEqual({
+      ifIerrs: 0,
+      ifOerrs: 0,
+      ifColl: 0,
+      ifIbytes: 0,
+      ifObytes: 80,
+    })
   })
 
   test('yields nulls for a header-only or empty output', () => {
     const headerOnly = NETSTAT_EN0.split('\n')[0] ?? ''
-    expect(parseIfCounters(`${headerOnly}\n`)).toEqual({ ifIerrs: null, ifOerrs: null, ifColl: null })
-    expect(parseIfCounters('')).toEqual({ ifIerrs: null, ifOerrs: null, ifColl: null })
+    expect(parseIfCounters(`${headerOnly}\n`)).toEqual({ ifIerrs: null, ifOerrs: null, ifColl: null, ifIbytes: null, ifObytes: null })
+    expect(parseIfCounters('')).toEqual({ ifIerrs: null, ifOerrs: null, ifColl: null, ifIbytes: null, ifObytes: null })
   })
 })
 
@@ -669,6 +689,12 @@ describe('captureVantage', () => {
       ifIerrs: null,
       ifOerrs: null,
       ifColl: null,
+      // Null, not 0, for the same reason as everything else here — and it matters
+      // most for these two: 0 bytes is a perfectly ordinary reading on a quiet
+      // link, so a fabricated zero on a link-down cycle would be diffed against
+      // the next real counter and report the whole boot's traffic as one spike.
+      ifIbytes: null,
+      ifObytes: null,
       // Never 0. A hard home-line outage takes the default route with it, and
       // calling that "not the home line" would let a read path filter away the
       // very outage the collector exists to record.

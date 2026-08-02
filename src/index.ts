@@ -18,6 +18,7 @@ import { routerRoutes } from './routes/router.js'
 import { routerActionRoutes } from './routes/router-actions.js'
 import { verdictRoutes } from './routes/verdict.js'
 import { wifiRoutes } from './routes/wifi.js'
+import { throughputRoutes } from './routes/throughput.js'
 import { startSpeedtestScheduler } from './services/speedtest-runner.js'
 import { startRouterPoller } from './services/router/scheduler.js'
 import { recordServiceStart } from './services/service-start.js'
@@ -93,6 +94,7 @@ export const app = new Elysia()
   .use(routerActionRoutes)
   .use(verdictRoutes)
   .use(wifiRoutes)
+  .use(throughputRoutes)
   // Serves the built dashboard: a real file when the path maps to one, and
   // index.html only for paths shaped like a client-side route. Registered last,
   // so every API route above still wins.

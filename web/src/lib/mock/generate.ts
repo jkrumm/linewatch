@@ -25,6 +25,8 @@ import type {
   StatusSample,
   StatusSpeedTest,
   TargetName,
+  ThroughputBucket,
+  ThroughputResponse,
   Vantage,
   VantageBucket,
   Verdict,
@@ -488,6 +490,65 @@ export function generateProbeBuckets(
   }
 
   return { buckets, vantage }
+}
+
+/** Mirrors `MAX_INTERVAL_MS` in `src/db/bucket-throughput.ts` — four probe cycles. */
+const MOCK_MAX_INTERVAL_MS = 4 * PROBE_CYCLE_MS
+
+/** Household diurnal shape: quiet overnight, a modest daytime floor, the evening streaming peak. */
+function diurnalFactor(bucketStart: number): number {
+  const hour = new Date(bucketStart).getHours()
+  if (hour >= 20 && hour < 24) return 1
+  if (hour >= 8 && hour < 20) return 0.35
+  return 0.05
+}
+
+/**
+ * Synthetic volume for `GET /api/throughput`.
+ *
+ * Reuses `bucketRecorded` so unmeasured buckets are **omitted**, not emitted as zero — the chart's
+ * hatching is the thing most worth developing against, and a mock that fills every slot would let
+ * the "idle hour looks like an unmeasured hour" bug ship. A minority of buckets also carry a
+ * `skipped` count with a shortened `spanMs`, so the partial-bucket path (a real rate that
+ * understates) gets exercised too.
+ */
+export function generateThroughput(
+  from: number,
+  to: number,
+  bucketSeconds: ProbeBucketSeconds,
+): ThroughputResponse {
+  const stepMs = bucketSeconds * 1000
+  const buckets: ThroughputBucket[] = []
+
+  for (let bucketStart = Math.floor(from / stepMs) * stepMs; bucketStart < to; bucketStart += stepMs) {
+    if (!bucketRecorded(bucketStart)) continue
+
+    const cadenceIntervals = Math.max(1, Math.round(stepMs / PROBE_CYCLE_MS))
+    // A fifth of the recorded buckets lose some intervals — a counter reset, an interface change,
+    // or a gap longer than MOCK_MAX_INTERVAL_MS.
+    const skipped =
+      noiseAt('throughput-skip', bucketStart) < 0.2
+        ? Math.max(1, Math.round(cadenceIntervals * 0.3 * noiseAt('throughput-skip-share', bucketStart)))
+        : 0
+    const intervals = Math.max(0, cadenceIntervals - skipped)
+    if (intervals === 0) continue
+
+    const spanMs = intervals * PROBE_CYCLE_MS
+    const seconds = spanMs / 1000
+    const downRate = 120_000 + 3_400_000 * diurnalFactor(bucketStart) * noiseAt('throughput-down', bucketStart)
+    const upRate = downRate * (0.08 + 0.12 * noiseAt('throughput-up', bucketStart))
+
+    buckets.push({
+      bucket: bucketStart,
+      inBytes: Math.round(downRate * seconds),
+      outBytes: Math.round(upRate * seconds),
+      spanMs,
+      intervals,
+      skipped,
+    })
+  }
+
+  return { from, to, bucketSeconds, maxIntervalMs: MOCK_MAX_INTERVAL_MS, buckets }
 }
 
 /**

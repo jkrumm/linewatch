@@ -7,6 +7,7 @@ import {
   getSpeedSummary,
   getSpeedTests,
   getStatus,
+  getThroughput,
   getVerdicts,
 } from './api'
 import type { ProbeBucketSeconds, TargetName } from './types'
@@ -30,6 +31,13 @@ export const probeBucketsQuery = (params: {
   queryOptions({
     queryKey: ['probes', params.target, params.bucket, params.from, params.to],
     queryFn: () => getProbeBuckets(params),
+    staleTime: 60_000,
+  })
+
+export const throughputQuery = (params: { from: number; to: number; bucket: ProbeBucketSeconds }) =>
+  queryOptions({
+    queryKey: ['throughput', params.bucket, params.from, params.to],
+    queryFn: () => getThroughput(params),
     staleTime: 60_000,
   })
 

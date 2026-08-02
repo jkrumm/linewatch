@@ -22,6 +22,8 @@ export interface CycleVantage {
   ifIerrs?: number | null | undefined
   ifOerrs?: number | null | undefined
   ifColl?: number | null | undefined
+  ifIbytes?: number | null | undefined
+  ifObytes?: number | null | undefined
   /**
    * The collector's own verdict, if it computed one. `0`/`1` is what
    * collector/vantage.ts sends (it mirrors the SQLite column); a boolean is
@@ -198,6 +200,8 @@ export function recordCycleVantage(
     ifIerrs: vantage.ifIerrs ?? null,
     ifOerrs: vantage.ifOerrs ?? null,
     ifColl: vantage.ifColl ?? null,
+    ifIbytes: vantage.ifIbytes ?? null,
+    ifObytes: vantage.ifObytes ?? null,
     onHomeLine: onHomeLine === null ? null : Number(onHomeLine),
     linkMaxMbit: vantage.linkMaxMbit ?? null,
     dhcpBoundAt: vantage.dhcpBoundAt ?? null,

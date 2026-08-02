@@ -49,6 +49,11 @@ const CycleInput = z.object({
   ifIerrs: z.number().int().min(0).nullable().optional(),
   ifOerrs: z.number().int().min(0).nullable().optional(),
   ifColl: z.number().int().min(0).nullable().optional(),
+  // Cumulative, so they exceed 2^32 on a busy link within days — `min(0)` is the
+  // only bound that belongs here. A ceiling would start rejecting real cycles
+  // silently, and the differencing already refuses a counter that went backwards.
+  ifIbytes: z.number().int().min(0).nullable().optional(),
+  ifObytes: z.number().int().min(0).nullable().optional(),
   // The collector's own verdict. Accepted as 0/1 (what collector/vantage.ts
   // sends, mirroring the SQLite column) or as a boolean, because rejecting one
   // spelling of a field that is *optional anyway* would fail the whole batch and

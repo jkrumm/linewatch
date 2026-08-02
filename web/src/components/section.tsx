@@ -68,8 +68,16 @@ export function Section({
   defaultOpen = true,
 }: {
   id: SectionKey
-  /** One line stating the question this section answers — not a description of the charts in it. */
-  subtitle: string
+  /**
+   * One line stating the question this section answers — not a description of the charts in it.
+   *
+   * **Optional, and omitted on every section today.** Each of the five read as a restatement of the
+   * heading plus the `meta` strip directly under it: "Reachability, and how long it was down." sat
+   * above a strip already printing Downtime, Outages and Coverage. A subtitle on every section is a
+   * line the reader learns to skip, which costs the ones that carry a fact. Pass it only where the
+   * heading genuinely does not name the question.
+   */
+  subtitle?: string
   /** The section's headline figures, drawn between the heading and the view. Usually a `StatStrip`. */
   meta?: ReactNode
   views: SectionView[]
@@ -158,16 +166,20 @@ export function Section({
                     }}
                   />
                 </Group>
-                <Text size="sm" c="dimmed">
-                  {subtitle}
-                </Text>
+                {subtitle !== undefined && (
+                  <Text size="sm" c="dimmed">
+                    {subtitle}
+                  </Text>
+                )}
               </UnstyledButton>
             ) : (
               <>
                 <Title order={4}>{SECTION_LABEL[id]}</Title>
-                <Text size="sm" c="dimmed">
-                  {subtitle}
-                </Text>
+                {subtitle !== undefined && (
+                  <Text size="sm" c="dimmed">
+                    {subtitle}
+                  </Text>
+                )}
               </>
             )}
           </Box>

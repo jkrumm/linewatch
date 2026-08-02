@@ -273,10 +273,18 @@ export function StatusBar({
     )
   }
 
+  /**
+   * Per-cell width weights, not six equal sixths.
+   *
+   * The cells hold different amounts: one short verdict line, two reading clusters, and four
+   * value + comparison-badge stacks whose badges are the widest thing in the bar. Download's is
+   * the longest of the four ("+457.3 Mbps vs 24h before"), and at an even sixth it ellipsised to
+   * "…vs 24h befo" — a comparison whose period is cut off states a delta against nothing.
+   */
   const cells: { key: string; flex: number; node: ReactNode }[] = [
     {
       key: 'status',
-      flex: 0.85,
+      flex: 0.75,
       node: (
         <Cell label="Status">
           <Verdict
@@ -291,7 +299,7 @@ export function StatusBar({
     },
     {
       key: 'latest-cycle',
-      flex: 1.35,
+      flex: 1.2,
       node: (
         // Said once for the whole bar rather than once per reading, but still said — drop it and
         // "0.0% loss" here reads as contradicting "40.0% lost" three cells to the right. They are
@@ -377,7 +385,7 @@ export function StatusBar({
     },
     {
       key: 'download',
-      flex: 1,
+      flex: 1.25,
       node: (
         <Cell railGutter label="Download">
           <KpiValue>{pending.tests ? '—' : fmtMbps(downloadMbps)}</KpiValue>
@@ -407,9 +415,9 @@ export function StatusBar({
         ))}
       </SimpleGrid>
 
-      <Group align="stretch" wrap="nowrap" gap="md" visibleFrom="xl">
+      <Group align="stretch" wrap="nowrap" gap="sm" visibleFrom="xl">
         {cells.map((c, i) => (
-          <Group key={c.key} align="stretch" wrap="nowrap" gap="md" flex={c.flex} miw={0}>
+          <Group key={c.key} align="stretch" wrap="nowrap" gap="sm" flex={c.flex} miw={0}>
             {i > 0 && <Divider orientation="vertical" />}
             <Box flex={1} miw={0}>
               {c.node}
@@ -420,8 +428,8 @@ export function StatusBar({
 
       {!plottablePending && allSeries === null && (
         <Text size="xs" c="dimmed" mt="xs">
-          Trend lines withheld — this window has an unmeasured gap, so the shapes would misstate it.
-          The totals are still exact over what was measured.
+          Trend lines withheld — this window has an unmeasured gap. The totals are still exact over
+          what was measured.
         </Text>
       )}
     </Card>
@@ -641,31 +649,33 @@ function Reading({ kind, reading, now }: { kind: 'router' | 'internet'; reading:
         <Text fw={600} size="xs">
           {title}
         </Text>
-        {/* `nowrap` on each figure, not just on the Group. Two readings share one bar cell (~300px
-            at xl), and a `wrap="nowrap"` Group only stops its CHILDREN from being placed on a new
-            line — it does not stop a child's own text from breaking. "0.8 ms" duly wrapped between
-            the number and its unit, which reads as two facts rather than one. */}
-        <Group gap="xs" wrap="nowrap" align="baseline">
-          <Text
-            fw={600}
-            fz="lg"
-            ff="monospace"
-            c={stale ? 'dimmed' : undefined}
-            td={stale ? 'line-through' : undefined}
-            style={{ whiteSpace: 'nowrap' }}
-          >
-            {fmtMs(reading.medMs)}
-          </Text>
-          <Text
-            size="sm"
-            ff="monospace"
-            c={stale ? 'dimmed' : degraded || down ? 'red' : 'dimmed'}
-            td={stale ? 'line-through' : undefined}
-            style={{ whiteSpace: 'nowrap' }}
-          >
-            {fmtPct(reading.worstLossPct)}
-          </Text>
-        </Group>
+        {/* Loss UNDER the reading, not beside it, and `nowrap` on each figure rather than only on
+            a Group. Two readings share one bar cell, and side by side they overflowed it on the
+            ranges where the KPI cells are widest — the `miw={0}` that lets a cell shrink lets its
+            content spill over the hairline rather than clip. Stacked, each reading is as wide as
+            its widest single figure, and the extra line is free: the bar's height is set by the
+            KPI cells' label + value + badge, which is already three rows. `wrap="nowrap"` on a
+            Group would not have helped either way — it stops CHILDREN being placed on a new line,
+            not a child's own text from breaking, which is how "0.8 ms" once split from its unit. */}
+        <Text
+          fw={600}
+          fz="lg"
+          ff="monospace"
+          c={stale ? 'dimmed' : undefined}
+          td={stale ? 'line-through' : undefined}
+          style={{ whiteSpace: 'nowrap' }}
+        >
+          {fmtMs(reading.medMs)}
+        </Text>
+        <Text
+          size="xs"
+          ff="monospace"
+          c={stale ? 'dimmed' : degraded || down ? 'red' : 'dimmed'}
+          td={stale ? 'line-through' : undefined}
+          style={{ whiteSpace: 'nowrap' }}
+        >
+          {fmtPct(reading.worstLossPct)} loss
+        </Text>
         {/* A partial answer is its own state and gets its own mark — folding "1 of 3 answering"
             into the loss figure would put an internet outage and a single dead anchor on the same
             scale. */}

@@ -7,13 +7,22 @@
  * between "this bucket had no loss" and "this bucket was never measured" is not a footnote. It is
  * the distinction the whole dashboard is built to preserve.
  *
- * So each chart gets three registers instead of one:
+ * So each chart gets two registers instead of one:
  *
- * - `subtitle` — always visible under the title. The single fact needed to not misread the chart.
- * - `tooltip` — one line on hover. What the chart plots.
+ * - `tooltip` — one line on the ⓘ. What the chart plots, plus the one fact needed to not misread
+ *   it where a legend does not already carry it.
  * - `guide` — the full explanation, in a drawer, for a reader who wants it.
  *
- * Nothing was deleted in the split: every sentence that was in a tooltip is in a `guide` below.
+ * Nothing was deleted in either split: every sentence that was in a tooltip is in a `guide` below.
+ *
+ * **There was a third register, `subtitle`, and it is gone.** It was a line under every chart title
+ * carrying "the single fact needed to not misread the chart" — but on four of the five charts that
+ * fact was the legend, restated in a sentence directly above the legend that already draws it.
+ * ("Darker means more loss. Hatched means never measured" sits three rows above swatches reading
+ * *Packet loss* and *Not measured*.) A page whose every chart is prefaced by a sentence is a page
+ * a reader stops reading sentences on, which costs the ones that ARE load-bearing. The genuinely
+ * non-obvious halves — that hatching is not zero, that a renegotiated bucket is never averaged —
+ * moved into `tooltip`, one hover away, rather than being dropped.
  *
  * **Structured paragraphs rather than a markdown string.** `GuideDrawer` accepts markdown, but
  * renders it through `react-markdown`/`remark-gfm` as *optional* peers — neither of which this app
@@ -28,14 +37,12 @@ export interface GuideParagraph {
 }
 
 export interface ChartCopy {
-  subtitle: string
   tooltip: string
   guide: GuideParagraph[]
 }
 
 export const AVAILABILITY_COPY: ChartCopy = {
-  subtitle: 'Darker means more loss. Hatched means never measured — not the same as no loss.',
-  tooltip: 'Packet loss per bucket over the selected range, with unmeasured buckets marked.',
+  tooltip: 'Packet loss per bucket. Hatched means never measured — not the same as no loss.',
   guide: [
     {
       body: 'One column per bucket — the axis comes from the range, not from the rows that came back.',
@@ -56,8 +63,7 @@ export const AVAILABILITY_COPY: ChartCopy = {
 }
 
 export const LATENCY_BAND_COPY: ChartCopy = {
-  subtitle: 'Median RTT, with the p5–p95 spread behind it and the worst single ping outside that.',
-  tooltip: 'Per-target round-trip time: median, spread, worst ping, and loss.',
+  tooltip: 'Per-target round-trip time: median, p5–p95 spread, worst ping and loss.',
   guide: [
     {
       body: 'Median round-trip time with the p5–p95 spread shaded behind it, and a faint outer line at the slowest single ping in each bucket.',
@@ -78,7 +84,6 @@ export const LATENCY_BAND_COPY: ChartCopy = {
 }
 
 export const INTERNET_LATENCY_COPY: ChartCopy = {
-  subtitle: 'The three internet anchors as one band, with the router drawn over it.',
   tooltip: 'Internet RTT — median, p5–p95 spread and worst ping, folded across three anchors — against the router.',
   guide: [
     {
@@ -108,8 +113,7 @@ export const INTERNET_LATENCY_COPY: ChartCopy = {
 }
 
 export const LINK_SPEED_COPY: ChartCopy = {
-  subtitle: 'A bucket where the NIC renegotiated is marked, never averaged.',
-  tooltip: 'The negotiated Ethernet link rate per bucket, over the selected range.',
+  tooltip: 'The negotiated Ethernet link rate per bucket. A bucket where the NIC renegotiated is marked, never averaged.',
   guide: [
     { body: 'One column per bucket over the whole window.' },
     {
@@ -128,8 +132,7 @@ export const LINK_SPEED_COPY: ChartCopy = {
 }
 
 export const THROUGHPUT_COPY: ChartCopy = {
-  subtitle: 'Download below the line, upload above it. Hatched means never measured — not idle.',
-  tooltip: 'Bytes actually carried per bucket, as a rate over the time that was measured.',
+  tooltip: 'Bytes carried per bucket — download below the baseline, upload above it. Hatched means never measured, not idle.',
   guide: [
     {
       lead: 'This is not the speed test.',

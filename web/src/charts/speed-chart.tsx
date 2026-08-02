@@ -77,7 +77,9 @@ export function SpeedChart({
       // obvious fix for a unitless axis and it made things worse: `MultiLine` draws its axis inside
       // basalt's shared 44 px gutter, sized for bare numbers, so every tick rendered as the bare
       // word `Mbps` with its number clipped off — a unitless axis replaced by a numberless one.
-      subtitle="Download against upload, in Mbps · one point per run"
+      // Only the unit survives the copy pass: "one point per run" is in the tooltip and
+      // "download against upload" is the legend.
+      subtitle="Mbps"
       // The x-axis is categorical: runs are drawn at equal spacing whatever the real interval
       // between them, so say so rather than let the spacing imply a cadence.
       tooltip="Ookla runs, one point each, drawn at equal spacing regardless of the gap between them. Download and upload share one axis."

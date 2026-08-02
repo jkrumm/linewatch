@@ -345,7 +345,6 @@ function DashboardPage() {
         <Stack gap="xl">
           <Section
             id="uptime"
-            subtitle="Reachability, and how long it was down."
             meta={
               <Group justify="space-between" align="flex-end" wrap="wrap" gap="sm">
                 <StatStrip
@@ -466,7 +465,6 @@ function DashboardPage() {
 
           <Section
             id="latency"
-            subtitle="How far the internet is, and whether slowness is yours or past the router."
             meta={
               <StatStrip
                 stats={[
@@ -556,7 +554,6 @@ function DashboardPage() {
 
           <Section
             id="speed"
-            subtitle="What the line delivers when pushed to its limit."
             meta={
               <StatStrip
                 stats={[
@@ -635,7 +632,6 @@ function DashboardPage() {
 
           <Section
             id="throughput"
-            subtitle="How much data actually moved, not how much the line could carry."
             meta={
               <StatStrip
                 stats={[
@@ -686,7 +682,6 @@ function DashboardPage() {
 
           <Section
             id="path"
-            subtitle="Which wire this machine used, and whether it’s at full speed."
             meta={<StatStrip stats={pathStats(status?.vantage, nowTick)} />}
             // The one folded section on the page, and the only one whose evidence is mostly
             // reference: an interface name, a media type and a gateway that have not changed since

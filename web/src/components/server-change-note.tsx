@@ -67,8 +67,8 @@ export function ServerChangeNote({
   return (
     <Stack gap={4}>
       <Text size="xs" c="dimmed">
-        Server changed {changes.length}× in this window — Ookla picks a server per run, so a change
-        moves the numbers independently of the line.
+        Server changed {changes.length}× — Ookla picks one per run, so the numbers move
+        independently of the line.
       </Text>
       <Box>
         <UnstyledButton onClick={toggle} aria-expanded={opened}>

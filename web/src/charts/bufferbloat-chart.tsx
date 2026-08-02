@@ -33,8 +33,7 @@ export function BufferbloatChart({
   return (
     <ChartCard
       title="Latency under load"
-      subtitle="Idle ping vs. latency during the run · one point per run — the cursor here doesn't carry to the charts above."
-      tooltip="Idle ping is measured at rest; loaded latency is measured while the download or upload saturates the line. One point per run, drawn at equal spacing regardless of the gap between runs."
+      tooltip="Idle ping is measured at rest; loaded latency is measured while the download or upload saturates the line. One point per run, drawn at equal spacing regardless of the gap between runs. The cursor here does not carry to the charts above."
     >
       {/* See `availability-strip.tsx`'s identical wrapper for why this is a floor, not a height. */}
       <div style={{ minHeight: BUFFERBLOAT_HEIGHT }}>

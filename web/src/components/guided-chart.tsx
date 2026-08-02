@@ -5,11 +5,12 @@ import type { ReactNode } from 'react'
 import type { ChartCopy } from '../lib/guides'
 
 /**
- * A chart with its one-line caption visible and its full explanation a click away.
+ * A chart with its explanation one hover (ⓘ) or one click (the guide drawer) away, and no prose
+ * of its own on screen.
  *
- * The three registers come from `lib/guides.ts`, and the split is the point: the sentence a reader
- * needs in order not to misread the chart is on screen, not behind a hover. Every chart on the
- * dashboard goes through here so that split cannot be applied to some charts and not others.
+ * The two registers come from `lib/guides.ts` — see that module for why the third, an always-visible
+ * subtitle under every title, was removed. Every chart on the dashboard goes through here so the
+ * decision cannot be applied to some charts and not others.
  *
  * The guide is passed as `children`, not `markdown` — see the note in `lib/guides.ts` on why this
  * app renders its own paragraphs rather than pulling in the markdown peers the drawer would need.
@@ -26,7 +27,6 @@ export function GuidedChart({
   return (
     <ChartCard
       title={title}
-      subtitle={copy.subtitle}
       tooltip={copy.tooltip}
       extra={
         <GuideLink title={title} iconOnly>

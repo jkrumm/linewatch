@@ -10,6 +10,7 @@ import type { LiveReading } from '../lib/live'
 import { liveGateway, liveInternet } from '../lib/live'
 import type { OngoingOutage, StatusSample } from '../lib/types'
 import { isStale, latestSampleTs } from '../lib/freshness'
+import { VX } from 'basalt-ui/charts'
 import { fmtDateTime, fmtDuration, fmtMinutes, fmtMs, fmtPct, fmtRelative } from '../lib/format'
 
 const SCOPE_LABEL: Record<OngoingOutage['scope'], string> = {
@@ -66,12 +67,12 @@ export function NowStrip({
   const internet = liveInternet(lastSamples)
 
   return (
-    <Card withBorder radius="md" padding="md">
+    <Card py="xs" px="sm">
       <Group justify="space-between" align="center" wrap="wrap" gap="md">
         <Verdict ongoingOutages={ongoingOutages} reporting={reporting} latestTs={latestTs} now={now} />
 
         <Stack gap={2}>
-          <Text size="10px" c="dimmed" tt="uppercase" fw={600} style={{ letterSpacing: '0.06em' }}>
+          <Text fz={VX.text.micro} c="dimmed" tt="uppercase" fw={600} style={{ letterSpacing: '0.06em' }}>
             Latest cycle
           </Text>
           <Group gap="xl" wrap="wrap">
@@ -148,7 +149,10 @@ function NotReportingLine({ latestTs, now }: { latestTs: number | null; now: num
         <ThemeIcon size={28} radius="md" color="yellow" variant="light">
           <IconPlugConnectedX size={16} />
         </ThemeIcon>
-        <Text fw={600} size="sm" c="yellow.7">
+        {/* `VX.status.warn`, not `c="yellow.7"`: a pinned shade index is one fixed swatch in both
+            colour schemes, so a step legible on the dark page is the one that fails contrast on the
+            light one. The status token is emitted per scheme. */}
+        <Text fw={600} size="sm" c={VX.status.warn}>
           {short}
         </Text>
       </Group>
@@ -201,7 +205,7 @@ function Reading({ kind, reading, now }: { kind: 'router' | 'internet'; reading:
           <Text fw={600} size="xs">
             {title}
           </Text>
-          <Text size="10px" c="dimmed" ff="monospace">
+          <Text fz={VX.text.micro} c="dimmed" ff="monospace">
             {basis}
           </Text>
         </Group>
@@ -228,7 +232,7 @@ function Reading({ kind, reading, now }: { kind: 'router' | 'internet'; reading:
             into the loss figure would put an internet outage and a single dead anchor on the same
             scale, which is exactly the over-claim live-tile's fold was written to avoid. */}
         {partial && (
-          <Text size="10px" c="yellow">
+          <Text fz={VX.text.micro} c="yellow">
             {reading.upCount} of {reading.total} answering
           </Text>
         )}
@@ -236,7 +240,7 @@ function Reading({ kind, reading, now }: { kind: 'router' | 'internet'; reading:
             a probe cycle. This reading's own age comes back, promoted, only when it has gone stale
             on its own — a fact the shared age cannot carry. */}
         {(stale || nothing) && (
-          <Text size={stale ? 'xs' : '10px'} c="dimmed" fw={stale ? 600 : undefined}>
+          <Text fz={stale ? undefined : VX.text.micro} size={stale ? 'xs' : undefined} c="dimmed" fw={stale ? 600 : undefined}>
             {nothing ? 'no data' : `Last seen ${fmtRelative(reading.ts as number, now)} — not current`}
           </Text>
         )}

@@ -93,7 +93,7 @@ describe('the mock timeline', () => {
     const sources = new Set(events.map((e) => e.source))
     expect(sources.has('link-sampler')).toBe(true)
     expect(sources.has('router-poller')).toBe(true)
-    expect(events.map((e) => e.ts)).toEqual([...events.map((e) => e.ts)].sort((a, b) => b - a))
+    expect(events.map((e) => e.ts)).toEqual(events.map((e) => e.ts).toSorted((a, b) => b - a))
   })
 })
 

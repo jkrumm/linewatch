@@ -39,9 +39,12 @@ export interface Stat {
  */
 export function StatStrip({ stats }: { stats: Stat[] }) {
   return (
-    <Group gap="md" wrap="wrap" align="baseline" role="list">
+    // A real `ul`/`li`, not a `div` carrying `role="list"`. The roles said the right thing to a
+    // screen reader and nothing to anything else; the elements say it to both, and `listStyle:
+    // none` is the whole cost. `Group` keeps the flex layout either way.
+    <Group component="ul" gap="md" wrap="wrap" align="baseline" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
       {stats.map((stat) => (
-        <Group key={stat.id ?? stat.label} gap={6} wrap="nowrap" align="baseline" role="listitem">
+        <Group component="li" key={stat.id ?? stat.label} gap={6} wrap="nowrap" align="baseline">
           <Text size="xs" c="dimmed">
             {stat.label}
           </Text>

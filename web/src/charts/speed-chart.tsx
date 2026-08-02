@@ -35,7 +35,7 @@ export function SpeedChart({ tests, refLines = [] }: { tests: SpeedTest[]; refLi
   // time axis — and this chart plotted it in that order, so time ran right to left while every
   // other chart on the page ran left to right. A reader comparing a dip here against the latency
   // band above was reading two mirrored axes as though they aligned.
-  const ordered = [...tests].sort((a, b) => a.ts - b.ts)
+  const ordered = tests.toSorted((a, b) => a.ts - b.ts)
   // Pre-formatted, because `MultiLine` forwards no `tickFormat` to its x-axis and basalt's own
   // formatter reduces an ISO string to `DD.MM` — a 24 h window drew `01.08` twenty-four times.
   // See `runAxisLabels` for how collisions are avoided, which matters more here than on a bucketed
@@ -70,6 +70,7 @@ export function SpeedChart({ tests, refLines = [] }: { tests: SpeedTest[]; refLi
             <MultiLine
               data={points}
               chartId="speed-throughput"
+              ariaLabel="Download against upload in Mbps, one point per speed-test run"
               numTicksX={fitTickCount(
                 points.length,
                 Math.max(2, Math.floor(plotWidth / AXIS_LABEL_PX)),

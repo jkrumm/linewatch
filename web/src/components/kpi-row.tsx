@@ -1,5 +1,4 @@
-import { Box, SimpleGrid, Text } from '@mantine/core'
-import type { ReactNode } from 'react'
+import { Center, SimpleGrid, Text } from '@mantine/core'
 import { DeltaBadge, StatCard } from 'basalt-ui'
 import { BarSparkline, LineSparkline, ResponsiveChart, VX } from 'basalt-ui/charts'
 import type { LatencyComparePoint } from '../lib/aggregate'
@@ -15,7 +14,6 @@ import {
   worstBucketLoss,
   worstLossTint,
   type Comparison,
-  type ThresholdTint,
 } from '../lib/kpi'
 import { fmtMbps, fmtMinutes, fmtMs, fmtPct } from '../lib/format'
 import type { ProbeBucketSeconds, SpeedTest } from '../lib/types'
@@ -55,6 +53,19 @@ export interface KpiWindow {
  * the only place that can say how much of the window was measured. The **comparisons** carry it
  * differently: they are withheld outright below `COMPARABLE_COVERAGE`, because a delta against an
  * unmeasured window is not a smaller truth, it is a wrong one.
+ *
+ * **Two cards carry a `tone`, and only two.** Downtime (`downtimeTint`) and worst-bucket loss
+ * (`worstLossTint`) have thresholds this codebase can defend; Ping and Download do not, so they
+ * stay neutral. `undefined` — nothing wrong, or nothing measured — draws no mark at all: absence is
+ * neither a good reading nor a bad one, and the tint functions return `undefined` for a null
+ * reading precisely so this cannot happen by omission.
+ *
+ * That rail used to be a hand-rolled `ThresholdRail` here — a `Box` absolutely positioning a 3px
+ * bar over the card's leading edge, written because `StatCard.value` is typed `string` and the
+ * number itself could not be recoloured from outside. It was a second card idiom in this app,
+ * drawn by this app's code, and it was colour-only: nothing about the threshold reached a screen
+ * reader. basalt-ui 1.7.0 ships `StatCard.tone`, which draws the same rail from inside the card and
+ * adds a `VisuallyHidden` label naming the threshold. The wrapper is gone.
  */
 export function KpiRow({
   current,
@@ -148,34 +159,32 @@ export function KpiRow({
         {/* Downtime never draws a real sparkline — see `NoSeriesSlot` — but still needs a slot of
             the same height whenever its neighbours draw theirs, or the row goes uneven exactly when
             it looks most finished. */}
-        <ThresholdRail tint={downtimeTint(current.downtime)}>
-          <StatCard
-            label={current.downtime.openCount > 0 ? `Downtime · ${current.downtime.openCount} still open` : 'Downtime'}
-            value={fmtMinutes(current.downtime.seconds)}
-            menu={<ComparisonBadge comparison={downtimeDelta} />}
-            sparkline={allSeries === null ? undefined : <NoSeriesSlot />}
-          />
-        </ThresholdRail>
-        <ThresholdRail tint={worstLossTint(worstLoss)}>
-          <StatCard
-            // "Worst 5 minutes", not "worst 5-min bucket loss": the bucket is how the figure is
-            // computed, not what it says. What it says is that there was a five-minute stretch in
-            // which this share of pings never came back — so the share is the value and the stretch
-            // is the label, and neither needs the word "bucket" to land.
-            label={`Worst ${bucketLabel(bucketSeconds)}`}
-            value={worstLoss === null ? '—' : `${fmtPct(worstLoss)} lost`}
-            menu={<ComparisonBadge comparison={lossDelta} />}
-            sparkline={
-              allSeries === null ? undefined : (
-                <ResponsiveChart height={SPARK_H}>
-                  {({ width, height }) => (
-                    <BarSparkline data={allSeries.loss} width={width} height={height} ariaLabel="Worst packet loss per bucket" />
-                  )}
-                </ResponsiveChart>
-              )
-            }
-          />
-        </ThresholdRail>
+        <StatCard
+          tone={downtimeTint(current.downtime)}
+          label={current.downtime.openCount > 0 ? `Downtime · ${current.downtime.openCount} still open` : 'Downtime'}
+          value={fmtMinutes(current.downtime.seconds)}
+          menu={<ComparisonBadge comparison={downtimeDelta} />}
+          sparkline={allSeries === null ? undefined : <NoSeriesSlot />}
+        />
+        <StatCard
+          tone={worstLossTint(worstLoss)}
+          // "Worst 5 minutes", not "worst 5-min bucket loss": the bucket is how the figure is
+          // computed, not what it says. What it says is that there was a five-minute stretch in
+          // which this share of pings never came back — so the share is the value and the stretch
+          // is the label, and neither needs the word "bucket" to land.
+          label={`Worst ${bucketLabel(bucketSeconds)}`}
+          value={worstLoss === null ? '—' : `${fmtPct(worstLoss)} lost`}
+          menu={<ComparisonBadge comparison={lossDelta} />}
+          sparkline={
+            allSeries === null ? undefined : (
+              <ResponsiveChart height={SPARK_H}>
+                {({ width, height }) => (
+                  <BarSparkline data={allSeries.loss} width={width} height={height} ariaLabel="Worst packet loss per bucket" />
+                )}
+              </ResponsiveChart>
+            )
+          }
+        />
         <StatCard
           label="Ping · internet"
           value={fmtMs(wanMedianMs)}
@@ -254,46 +263,10 @@ function ComparisonBadge({ comparison }: { comparison: Comparison | null }) {
  */
 function NoSeriesSlot() {
   return (
-    <Box h={SPARK_H} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+    <Center h={SPARK_H}>
       <Text size="xs" c="dimmed" ta="center">
         No per-bucket series
       </Text>
-    </Box>
-  )
-}
-
-/**
- * The threshold marker, present only on the two cards with a defensible threshold — downtime
- * (`downtimeTint`) and worst-bucket-loss (`worstLossTint`, `WORST_LOSS_WARN_PCT` /
- * `WORST_LOSS_BAD_PCT`). Ping and Download stay neutral because neither has a threshold this
- * codebase can defend.
- *
- * An accent **rail down the card's leading edge**, not the 8 px header dot this started as. The
- * complaint it answers is that `100.0%` reads exactly as calm as `5.4 ms`, and `StatCard.value` is
- * typed `string` — the number itself cannot be recoloured without hand-rolling a card, which would
- * fork the one component every stat on this page is drawn with. A rail is the largest signal
- * available from outside: it runs the full height of the card, echoes the left accent bar the
- * verdict rows above already use for exactly the same purpose, and costs nothing in layout
- * because it overlays the card's own border rather than adding to it.
- *
- * `undefined` — nothing wrong, or nothing measured — renders no rail and no wrapper styling. A
- * `null` reading must never be marked: absence is neither a good reading nor a bad one, and the
- * tint functions return `undefined` for it precisely so this cannot happen by omission.
- */
-function ThresholdRail({ tint, children }: { tint: ThresholdTint; children: ReactNode }) {
-  if (tint === undefined) return <>{children}</>
-  const color = tint === 'bad' ? VX.status.bad : VX.status.warn
-  return (
-    <Box
-      style={{ position: 'relative', borderRadius: VX.radiusCard, overflow: 'hidden' }}
-      role="group"
-      aria-label={tint === 'bad' ? 'Past the severe threshold' : 'Past the warning threshold'}
-    >
-      <Box
-        aria-hidden="true"
-        style={{ position: 'absolute', insetBlock: 0, insetInlineStart: 0, width: 3, background: color, zIndex: 1 }}
-      />
-      {children}
-    </Box>
+    </Center>
   )
 }

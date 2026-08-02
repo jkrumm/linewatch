@@ -25,7 +25,7 @@ function value(v: string | number | null, suffix = ''): string {
 export function VantageCard({ vantage, now }: { vantage: Vantage | null; now: number }) {
   if (vantage === null) {
     return (
-      <Card withBorder radius="md" padding="lg">
+      <Card py="xs" px="sm">
         <Stack gap="sm">
           <Title order={4}>Current vantage</Title>
           <Callout kind="info" title="No cycle has reported a vantage">
@@ -41,7 +41,7 @@ export function VantageCard({ vantage, now }: { vantage: Vantage | null; now: nu
   const chip = homeLineChip(vantage.onHomeLine)
 
   return (
-    <Card withBorder radius="md" padding="lg">
+    <Card py="xs" px="sm">
       <Stack gap="md">
         <Group justify="space-between" wrap="wrap">
           <Stack gap={0}>

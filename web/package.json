@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "npx kill-port 7732 && vite --port 7732 --strictPort",
     "build": "vite build",
+    "lint": "oxlint . && basalt-ui check-theme",
     "preview": "vite preview --port 7732 --strictPort",
     "typecheck": "tsr generate && tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json"
   },
@@ -27,7 +28,7 @@
     "@visx/scale": "4.0.0",
     "@visx/shape": "4.0.0",
     "@visx/threshold": "4.0.0",
-    "basalt-ui": "1.5.0",
+    "basalt-ui": "1.7.0",
     "motion": "12.42.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
@@ -43,6 +44,8 @@
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^6.0.1",
+    "oxfmt": "^0.61.0",
+    "oxlint": "^1.76.0",
     "typescript": "^5",
     "vite": "^8.0.12"
   }

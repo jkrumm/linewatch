@@ -25,7 +25,7 @@ import {
 } from 'basalt-ui/charts'
 import type { HomeLineVerdict, ProbeBucket, ProbeBucketSeconds, VantageBucket } from '../lib/types'
 import { densifyBuckets } from '../lib/densify'
-import { AXIS_LABEL_PX, axisTickValues, bucketAxisLabel } from '../lib/axis'
+import { axisTickValues, bucketAxisLabel } from '../lib/axis'
 import { PROBE_CYCLE_MS } from '../lib/range'
 import { fmtMs, fmtPct } from '../lib/format'
 import { HatchPattern, hatchFill } from './hatch'
@@ -208,7 +208,6 @@ export function LatencyBandChart({
           chartKey={chartKey}
           points={points}
           expectedCycles={expectedCycles}
-          bucketSeconds={bucketSeconds}
           primaryColor={primaryColor}
           overlayLabel={overlay?.label}
           renderExtraTooltipRows={renderExtraTooltipRows}
@@ -225,7 +224,6 @@ function LatencyBandPlot({
   chartKey,
   points,
   expectedCycles,
-  bucketSeconds,
   primaryColor,
   overlayLabel,
   renderExtraTooltipRows,
@@ -236,8 +234,6 @@ function LatencyBandPlot({
   chartKey: string
   points: Point[]
   expectedCycles: number
-  /** The window's bucket size, which decides the x-axis label's resolution — see `formatDateTick`. */
-  bucketSeconds: ProbeBucketSeconds
   primaryColor: string
   overlayLabel?: string
   renderExtraTooltipRows?: (bucket: ProbeBucket) => ReactNode

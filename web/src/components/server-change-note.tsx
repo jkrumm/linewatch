@@ -11,7 +11,7 @@ type ServerChange = { ts: number; from: string | null; to: SpeedTest }
 const SHOWN_CHANGES = 5
 
 function detectServerChanges(tests: SpeedTest[]): ServerChange[] {
-  const sorted = [...tests].sort((a, b) => a.ts - b.ts)
+  const sorted = tests.toSorted((a, b) => a.ts - b.ts)
   const changes: ServerChange[] = []
   let previous: SpeedTest | null = null
   for (const test of sorted) {
@@ -47,7 +47,7 @@ export function ServerChangeNote({ tests }: { tests: SpeedTest[] }) {
 
   if (changes.length === 0) return null
 
-  const shown = changes.slice(-SHOWN_CHANGES).reverse()
+  const shown = changes.slice(-SHOWN_CHANGES).toReversed()
   const capped = shown.length < changes.length
   // A capped list must say so — claiming "all" while showing 5 of 19 implies a complete list that
   // isn't there.
@@ -71,7 +71,7 @@ export function ServerChangeNote({ tests }: { tests: SpeedTest[] }) {
           </Group>
         </UnstyledButton>
         <Collapse expanded={opened}>
-          <Stack gap={4} pl={20} pt={4}>
+          <Stack gap={4} pl="lg" pt={4}>
             {shown.map((change) => (
               <Group key={change.ts} gap="xs" wrap="nowrap">
                 <IconArrowsRightLeft size={14} />

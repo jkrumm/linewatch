@@ -56,7 +56,7 @@ export interface LatencyComparePoint {
  * null-skipping behaviour and neither may have its own copy of it.
  */
 export function median(values: readonly (number | null)[]): { value: number | null; count: number } {
-  const present = values.filter((v): v is number => v !== null).sort((a, b) => a - b)
+  const present = values.filter((v): v is number => v !== null).toSorted((a, b) => a - b)
   if (present.length === 0) return { value: null, count: 0 }
   const mid = Math.floor(present.length / 2)
   const value =
@@ -167,7 +167,7 @@ export function foldInternetBuckets(byTarget: ReadonlyMap<TargetName, readonly P
   }
 
   return [...byBucket.entries()]
-    .sort((a, b) => a[0] - b[0])
+    .toSorted((a, b) => a[0] - b[0])
     .map(([bucket, rows]) => {
       const extreme = (pick: (b: ProbeBucket) => number | null, reduce: (a: number, b: number) => number) => {
         const present = rows.map(pick).filter((v): v is number => v !== null)
@@ -230,7 +230,7 @@ export function comparePointsFrom(
 
   const rows = [...merged.entries()]
     .map(([bucket, targets]) => ({ bucket, targets }))
-    .sort((a, b) => a.bucket - b.bucket)
+    .toSorted((a, b) => a.bucket - b.bucket)
 
   return toComparePoints(
     densifyBuckets(rows, opts).map((slot) => ({

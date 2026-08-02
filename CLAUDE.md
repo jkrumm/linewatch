@@ -77,6 +77,47 @@ database that ordering crashed the process with `no such table: outage`, and the
 test suite did not catch it because tests use a pre-migrated DB. Keep migration
 an invariant of importing the client.
 
+## The dashboard runs on basalt-ui, and the guards are the contract
+
+`web/` is a **basalt-ui** app (Mantine v9 + visx). The design system is not a
+component library this repo borrows from — it ships an enforcement layer, and for
+most of this project's life that layer was inert: the package was installed as a
+plain dependency, `basalt-ui init` had never run, and there was no `.oxlintrc.json`,
+no lint script, no hook and no CI. The result was predictable and visible — the
+dashboard grew **two card idioms**, seven hand-rolled `<Card withBorder radius="md"
+padding="lg">` sitting beside `StatCard` with a different edge, a different depth
+and a different height. Nothing was wrong with any one of them; nothing could tell
+anyone they disagreed.
+
+- **`cd web && bun run lint` is the gate** — `oxlint . && basalt-ui check-theme`.
+  It runs pre-commit (root `lefthook.yml`) and in CI (`.github/workflows/check.yml`).
+  Both configs live at the **repo root**, not in `web/`: `basalt-ui init` seeds them
+  into the package directory, which is a directory neither GitHub nor lefthook reads.
+- **`--vx-*` tokens and `VX.*` refs are the only colour path.** No raw hex, `rgb()`
+  or `hsl()`; opacity via `alpha(token, a)`, never `rgba()`. No shade-pinned Mantine
+  colours (`c="yellow.7"` is one fixed swatch in both schemes, so a step legible on
+  dark is the one that fails contrast on light) — use `VX.status.*` or a bare hue.
+- **One card idiom: `<Card py="xs" px="sm">`.** Never `withBorder` — card depth is
+  `--vx-shadow-card`, which already bakes a 1px ring into the shadow, so `withBorder`
+  draws a second real edge on top of it. Never an explicit `radius` or `padding`; the
+  theme pins both.
+- **Reach for the shipped prop before wrapping a shipped component.** `StatCard.tone`
+  draws the threshold rail this repo used to hand-roll as a 35-line positioned `Box`
+  — and adds the `VisuallyHidden` label the hand-rolled one never had, so the verdict
+  was colour-only. A wrapper around a design-system component is how the second idiom
+  starts.
+- **After a `basalt-ui` upgrade, run `bunx basalt-ui sync`** — `sync --check` gates the
+  drift in CI and pre-commit, and `basalt-ui doctor` diagnoses the install.
+- **The doctrine lives in `web/.claude/rules/basalt-*.md`**, placed by `init` and
+  refreshed by `sync`. They are managed files: don't hand-edit them, and don't
+  restate them here. `web/DESIGN.md` is this app's own thin delta on top (its series
+  dictionary and any deliberate deviation) — it is **not** [`docs/DESIGN.md`](docs/DESIGN.md),
+  which is the collector and data design and has nothing to do with the visual system.
+- **A guard finding is fixed at the source, not silenced.** `theme-allow` is for a
+  genuine documented exception, one line at a time. The three scoped oxlint overrides
+  in `web/.oxlintrc.json` each carry their reason inline; that file is JSONC, so a new
+  one must too.
+
 ## Conventions
 
 - Bearer auth on the five routes that write to the historical record or to the

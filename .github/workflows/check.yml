@@ -1,0 +1,48 @@
+# Seeded by `basalt-ui init` into web/.github/workflows/ and moved here, because that is the only
+# place GitHub reads workflows from — the git root, not the package directory. Left where it was
+# placed, this file would have been an enforcement layer that never ran, which is the exact failure
+# adopting basalt was meant to end.
+#
+# Two packages, two installs: the API + collector at the repo root, the dashboard in web/.
+#   - `bunx basalt-ui check-theme` is the palette guard (raw color literals, off-identity accents,
+#     the card idiom, chart framing).
+#   - `bunx basalt-ui sync --check` fails when the basalt-managed files (rules, skills, the CLAUDE
+#     block) have drifted from the installed basalt-ui version — i.e. when someone upgrades the
+#     package and forgets `basalt-ui sync`.
+#
+# `oxfmt --check` is deliberately NOT wired in yet. oxfmt reflows to a ~100-column print width and
+# would rewrite 40 of the dashboard's 68 files on first run; that is a real change to make, but it
+# is its own commit, not a rider on the one that turned the guards on.
+name: check
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test
+
+  dashboard:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - run: bun install --frozen-lockfile
+      - run: bun run lint
+      - run: bunx basalt-ui sync --check
+      - run: bun run typecheck
+      - run: bun test

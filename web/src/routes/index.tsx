@@ -343,7 +343,7 @@ function DashboardPage() {
                 key: 'outages',
                 label: `Outages (${outageData?.outages.length ?? 0})`,
                 render: () => (
-                  <Card withBorder radius="md" padding="lg">
+                  <Card py="xs" px="sm">
                     <Group justify="space-between" mb="md" wrap="wrap">
                       <Text size="sm" c="dimmed">
                         Every recorded outage in the window. Single-cycle blips are recorded honestly
@@ -565,7 +565,7 @@ function DashboardPage() {
                 key: 'transitions',
                 label: 'Transitions',
                 render: () => (
-                  <Card withBorder radius="md" padding="lg">
+                  <Card py="xs" px="sm">
                     {/* `linkSamplingSince` decides which empty state is true, and the two say
                         opposite things — so it is passed through even while events exist. */}
                     <TransitionTimeline

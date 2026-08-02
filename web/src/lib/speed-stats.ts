@@ -13,7 +13,7 @@ import type { SpeedTest } from './types'
  */
 export function percentile(values: readonly number[], p: number): number | null {
   if (values.length === 0) return null
-  const sorted = [...values].sort((a, b) => a - b)
+  const sorted = values.toSorted((a, b) => a - b)
   if (sorted.length === 1) return sorted[0]!
   const rank = (sorted.length - 1) * p
   const lower = Math.floor(rank)

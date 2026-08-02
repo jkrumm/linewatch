@@ -1,0 +1,31 @@
+# The git root's hook config — the only one lefthook reads, since it resolves its config from the
+# repository root rather than from a package directory. `basalt-ui init` seeded an extends-stub at
+# web/lefthook.yml, which lefthook would never have loaded; that stub is gone and its jobs are
+# reproduced here with `root: "web/"` so they run in the dashboard's own directory.
+#
+# It cannot simply `extends` basalt's shipped preset (web/node_modules/basalt-ui/configs/lefthook.yml):
+# `extends` merges commands without their working directory, so the preset's `bunx oxlint` would run
+# at the repo root, where there is no .oxlintrc.json and no oxlint binary. The `root` key is per
+# command, which is why the commands are spelled out.
+pre-commit:
+  parallel: true
+  commands:
+    dashboard-lint:
+      root: 'web/'
+      glob: '*.{ts,tsx}'
+      run: bunx oxlint {staged_files}
+
+    # NO glob, deliberately — basalt's own preset makes this argument and it is worth keeping. This
+    # command scans the configured `basalt.roots`; it never reads {staged_files}, so a glob here is a
+    # gate on WHETHER the guard runs, decided by which file extensions happen to be in one commit. It
+    # reads CSS too (the surface kinds fire there), so a `*.{ts,tsx}` glob would let a CSS-only commit
+    # skip the guard entirely — and a guard that only runs when someone remembers it is not a guard.
+    theme-guard:
+      root: 'web/'
+      run: bunx basalt-ui check-theme
+
+    # Catches the other drift direction: a basalt-ui upgrade that never ran `basalt-ui sync`, leaving
+    # the placed rules and skills describing a version the app no longer has installed.
+    basalt-sync:
+      root: 'web/'
+      run: bunx basalt-ui sync --check

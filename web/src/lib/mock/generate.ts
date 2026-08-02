@@ -398,12 +398,12 @@ function vantageBucketAt(bucketStart: number, stepMs: number, cycles: number): V
     bucket: bucketStart,
     cycles,
     vantageCycles,
-    pathClasses: pathClasses.sort(),
+    pathClasses: pathClasses.toSorted(),
     // Only the Ethernet cycles contribute a negotiated speed: on Wi-Fi the `ifconfig` media line
     // carries no baseT token, so `link_mbit` is NULL and `group_concat(DISTINCT …)` skips it. An
     // empty array here means "not reported", never "0 Mbit".
     linkMbits: homeLineCycles > 0 ? [1000] : [],
-    pathIfs: pathIfs.sort(),
+    pathIfs: pathIfs.toSorted(),
     onHomeLine: homeLineVerdict(cycles, homeLineCycles, wifiCycles),
     homeLineCycles,
     offHomeLineCycles: wifiCycles,
@@ -602,7 +602,7 @@ export function generateOutages(
   const outages = OUTAGE_DEFS.map(mapOutageDef)
     .filter((outage) => (outage.endedAt ?? NOW) >= from && outage.startedAt <= to)
     .filter((outage) => minDurationS === undefined || (outage.durationS ?? 0) >= minDurationS)
-    .sort((a, b) => b.startedAt - a.startedAt)
+    .toSorted((a, b) => b.startedAt - a.startedAt)
   return { outages, summary: rangeSummary(from, to) }
 }
 
@@ -689,7 +689,7 @@ export function generateEvents(from: number, to: number): EventsResponse {
   ]
 
   return {
-    events: all.filter((e) => e.ts >= from && e.ts <= to).sort((a, b) => b.ts - a.ts),
+    events: all.filter((e) => e.ts >= from && e.ts <= to).toSorted((a, b) => b.ts - a.ts),
     // Same rule the route applies: the earliest watched cycle *inside the window*, or null when
     // the window ends before the sampler ever ran. A window entirely before `LINK_SAMPLING_SINCE`
     // therefore returns an empty array AND null, which is the pair the empty state has to read.
@@ -812,7 +812,7 @@ function percentileValue(sorted: number[], p: number): number {
 
 function summarize(values: number[]): SpeedSummaryStat {
   if (values.length === 0) return { p50: null, p95: null, best: null, worst: null }
-  const sorted = [...values].sort((a, b) => a - b)
+  const sorted = values.toSorted((a, b) => a - b)
   return {
     p50: round1(percentileValue(sorted, 0.5)),
     p95: round1(percentileValue(sorted, 0.95)),

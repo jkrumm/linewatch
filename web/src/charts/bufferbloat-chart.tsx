@@ -16,6 +16,7 @@ export function BufferbloatChart({ tests }: { tests: SpeedTest[] }) {
       <MultiLine
         data={tests}
         chartId="speed-loaded-latency"
+        ariaLabel="Idle ping against latency measured while the line was saturated, one point per speed-test run"
         getX={(t) => new Date(t.ts).toISOString()}
         series={[
           {

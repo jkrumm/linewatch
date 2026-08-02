@@ -1,0 +1,44 @@
+{
+  "extends": ["./node_modules/basalt-ui/configs/oxlint.json"],
+  "rules": {
+    // `__APP_VERSION__` is a Vite `define` global (see vite.config.ts, fed from package.json's
+    // version). The dangling underscores are the convention that marks it as build-injected rather
+    // than imported; renaming it would hide that.
+    "no-underscore-dangle": ["warn", { "allow": ["__APP_VERSION__"] }]
+  },
+  "overrides": [
+    {
+      // `src/charts/**` is the app's Mantine-free zone: charts draw inline <svg>, and `role="img"`
+      // on an inline <svg> is the recommended a11y pattern, not a stand-in for an <img> element.
+      // SVG's implicit role is `graphics-document`, which assistive tech announces by walking the
+      // shape tree; pairing role="img" with aria-label collapses that to one described graphic. An
+      // actual <img> would mean an external raster with no live tooltip. Scoped to charts rather
+      // than disabled globally — the rule is right everywhere else, and it caught two real cases in
+      // src/components that are now real <ul>/<li> elements.
+      "files": ["src/charts/**"],
+      "rules": {
+        "jsx-a11y/prefer-tag-over-role": "off"
+      }
+    },
+    {
+      // Test helpers live inside the `describe` block they belong to, on purpose: a fixture builder
+      // scoped to one block is documentation of what that block varies. The rule's motivation is
+      // avoiding re-allocation per call, which is not a cost worth restructuring a test suite for.
+      "files": ["src/**/*.test.ts", "src/**/*.test.tsx"],
+      "rules": {
+        "unicorn/consistent-function-scoping": "off"
+      }
+    },
+    {
+      // `SectionView.render` is a thunk the section *calls* (`current?.render()`), not a component
+      // it mounts — see components/section.tsx, where the deferral is the point: a section holds up
+      // to four charts and eagerly building all of them to show one is how a five-section page ends
+      // up mounting seventeen SVGs. The rule cannot see the call site and reads any prop-position
+      // arrow returning JSX as a component definition.
+      "files": ["src/routes/**"],
+      "rules": {
+        "react/no-unstable-nested-components": ["warn", { "allowAsProps": true }]
+      }
+    }
+  ]
+}

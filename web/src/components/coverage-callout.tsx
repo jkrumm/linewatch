@@ -84,7 +84,7 @@ function CompactCoverage({ summary }: { summary: RangeSummary }) {
         </Group>
       </UnstyledButton>
       <Collapse expanded={opened}>
-        <Stack gap={4} pl={20} pt={4}>
+        <Stack gap={4} pl="lg" pt={4}>
           {details.map((sentence) => (
             <Text key={sentence} size="xs" c="dimmed">
               {sentence}

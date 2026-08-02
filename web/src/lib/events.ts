@@ -158,5 +158,5 @@ export function timelineEmptyState(linkSamplingSince: number | null): TimelineEm
 
 /** Newest first, matching `GET /api/events`'s own ordering, so a mock and the real API agree. */
 export function sortEventsNewestFirst(events: LinewatchEvent[]): LinewatchEvent[] {
-  return [...events].sort((a, b) => b.ts - a.ts)
+  return events.toSorted((a, b) => b.ts - a.ts)
 }

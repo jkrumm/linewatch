@@ -4,6 +4,7 @@ import {
   AxisBottomDate,
   AxisLeftNumeric,
   ChartLegend,
+  deriveLegend,
   ChartTooltip,
   ResponsiveChart,
   TooltipBody,
@@ -33,6 +34,28 @@ const AXIS_HEIGHT = 22
  * worse than a missing one, because `.0 MB/s` still reads as a number.
  */
 const LEFT_GUTTER = 72
+
+/**
+ * The three marks this chart draws, declared once.
+ *
+ * The legend used to be a hand-written array literal beside a set of `fill=` expressions that
+ * repeated the same three tokens — so a retuned download hue moved the bars and left the legend
+ * swatch behind, and nothing would have caught it. `deriveLegend` builds the legend from this
+ * array, and the drawing code reads its colours from the same place: one edit moves both.
+ *
+ * "Not measured" is a series here in the legend's sense but not in the data's — it has no values,
+ * only an absence, which is why it carries no `getValue`. It has to be named on the legend all the
+ * same: a hatched column is the one mark on this chart a reader cannot decode from the axes.
+ */
+const THROUGHPUT_SERIES = [
+  { key: 'down', label: 'Download', color: VX.accent, mark: 'bar' as const },
+  { key: 'up', label: 'Upload', color: VX.status.bad, mark: 'bar' as const },
+  { key: 'absent', label: 'Not measured', color: VX.neutral, mark: 'bar' as const },
+]
+
+const DOWN_COLOR = THROUGHPUT_SERIES[0]!.color
+const UP_COLOR = THROUGHPUT_SERIES[1]!.color
+const ABSENT_COLOR = THROUGHPUT_SERIES[2]!.color
 
 /**
  * Down and up on one mirrored axis: download below the baseline, upload above it.
@@ -73,15 +96,7 @@ export function ThroughputChart({
       <ResponsiveChart height={CHART_HEIGHT + AXIS_HEIGHT}>
         {({ width }) => <MirroredBars points={points} width={width} />}
       </ResponsiveChart>
-      <ChartLegend
-        chartId="throughput-legend"
-        placement="bottom"
-        items={[
-          { key: 'down', label: 'Download', color: VX.accent, shape: 'bar' as const },
-          { key: 'up', label: 'Upload', color: VX.status.bad, shape: 'bar' as const },
-          { key: 'absent', label: 'Not measured', color: VX.neutral, shape: 'bar' as const },
-        ]}
-      />
+      <ChartLegend chartId="throughput-legend" placement="bottom" items={deriveLegend(THROUGHPUT_SERIES)} />
     </>
   )
 }
@@ -122,7 +137,7 @@ function MirroredBars({ points, width }: { points: ThroughputPoint[]; width: num
         aria-label="Data carried per bucket — download below the baseline, upload above it, with unmeasured buckets marked"
       >
         <defs>
-          <HatchPattern id={absentHatchId} color={VX.neutral} opacity={0.7} size={5} />
+          <HatchPattern id={absentHatchId} color={ABSENT_COLOR} opacity={0.7} size={5} />
         </defs>
         <g transform={`translate(${LEFT_GUTTER}, 0)`}>
           {/* One axis per half, each in its own scale's units, because the halves are scaled
@@ -182,14 +197,14 @@ function MirroredBars({ points, width }: { points: ThroughputPoint[]; width: num
                   y={baseline - upPx}
                   width={barWidth}
                   height={Math.max(upPx, point.upBytesPerS > 0 ? 1 : 0)}
-                  fill={alpha(VX.status.bad, opacity)}
+                  fill={alpha(UP_COLOR, opacity)}
                 />
                 <rect
                   x={x}
                   y={baseline}
                   width={barWidth}
                   height={Math.max(downPx, point.downBytesPerS > 0 ? 1 : 0)}
-                  fill={alpha(VX.accent, opacity)}
+                  fill={alpha(DOWN_COLOR, opacity)}
                 />
               </g>
             )

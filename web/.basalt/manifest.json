@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "files": {
+    ".claude/rules/basalt-mantine.md": "c10319b7f6ff6b489b74c3885fa75d5be11185361b84418b5739f3730718c7bc",
+    ".claude/rules/basalt-charts.md": "113731efc24c4e8131e0c76c8248c443e418f375780c9d472e84fcc23e9b6ab1",
+    ".claude/rules/basalt-tokens.md": "c2864940c39df3b15261a32e8a7f0a02ec6fbe0954e84cf4db68dbe409362120",
+    ".claude/rules/basalt-query.md": "cacd92c4c9c40721e3854abc8e734f557c0447c51c4b619e84e2e42d12fe2cdc",
+    ".claude/rules/basalt-router.md": "2d6d9cb9dd34e683309a380af4fd5434dc0349592a252c4208c1c51b673105d2",
+    ".claude/rules/basalt-forms.md": "9ff2049605cf5e24dca8970700fdf7a1f38a627c987e2c4bf4d160096cace60c",
+    ".claude/rules/basalt-notifications.md": "cd2b74e283e219b2937f06f3e64d4ef119c52cdb909b7e37f0a37c072ff3bb96",
+    ".claude/rules/basalt-commands.md": "d9bbac0a661e3e715acf818fe6e746b1de2794bd07900d86e29c7e8457fba6e0",
+    ".claude/rules/basalt-data.md": "30732f2113087e9f602ba9e18e480f40e76a96c0a0b2d1498710c4ceda9cf51e",
+    ".claude/rules/basalt-agent.md": "5bac2cc553f1d3f663dff2d4f6b629ca34d67b78fd834db387e2ce8fdf92ee7d",
+    ".claude/rules/basalt-content.md": "ea23676b8aa50f5233abeeb1449b93ca5a48a5e15c28372e30cbfc0562dd479d",
+    ".claude/rules/basalt-state.md": "f51b38a79c42c767c5721dfd46ed1123f0e7be3e069effac6353ad0683237613",
+    ".claude/rules/basalt-app.md": "24068ac5dc9a69b955c6b050fb802c7c3cffc33114e7a36f21ca7b3caaf6631e",
+    ".claude/skills/basalt-app/SKILL.md": "52f007c13c20dc75a682765d4446b9e46097d8dab498babc4666b322fffd0422",
+    ".claude/skills/basalt-design/SKILL.md": "14be3c4e8549b11dfccdc6ef414358bbc1c575458a2a961a2afe4694189da508",
+    ".claude/skills/basalt-charts/SKILL.md": "44f8fb358dfd20e97c77f558b86cda005631f7e78739fc85e2bd7597a28f87de",
+    "CLAUDE.md": "9bbe997fe877d18b6c06daf8ea8bf95bf6063b99acb14795facd21664fdcc830",
+    "DESIGN.md": "5bbf20edb4483682e5ff5564c446e3b8335947917545af708b671957286256b1",
+    ".oxfmtrc.json": "45c6ab68a6bc0e5dd6bb8b4106c71fe4af6f3e68309f112c0df382bce57e8cdb",
+    "lefthook.yml": "38174437df9d4f0c1af6fc3ff7b0a96e820f9b88758ffd4dba29c5ed738681c0",
+    ".github/workflows/check.yml": "897aa9276bf0f96fc45f86947346312a4bda67f8bdd5e6cef8d530a3a934605c",
+    ".oxlintrc.json": "e7237e982c1d2528ecc4ab5ae7bc6737591a60a66ad28df8ddf5c0ffadeea803",
+    "src/query-client.ts": "5efb420731453ee1e0279a4501bf6536b066b595f14886ba3d7329336eae09c1",
+    "src/routes/__root.tsx": "439fb91cf26ee51eb56ae6415556970d323dae6049d10415970709b79c0373e0"
+  },
+  "basaltVersion": "1.7.0",
+  "spacingScale": {
+    "xs": 11,
+    "sm": 13,
+    "md": 18,
+    "lg": 20,
+    "xl": 26
+  }
+}

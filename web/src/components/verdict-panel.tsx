@@ -1,4 +1,4 @@
-import { Anchor, Box, Collapse, Group, Stack, Text, UnstyledButton } from '@mantine/core'
+import { Anchor, Box, Collapse, Flex, Group, Stack, Text, UnstyledButton } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { IconChevronDown, IconChevronRight } from '@tabler/icons-react'
 import { Callout } from 'basalt-ui/content'
@@ -271,15 +271,13 @@ function RoutineGroups({ groups }: { groups: VerdictGroup[] }) {
 /** `evidence` is non-empty by construction server-side — a verdict that cannot cite its numbers
  * cannot be built — so this renders unconditionally rather than guarding on length. */
 function EvidenceList({ evidence }: { evidence: Evidence[] }) {
+  // A wrapping `Group`, not an inline `display: grid` with an auto-fit template. The grid gave each
+  // item a 180px column, which on a long evidence set left a ragged half-empty last row and on a
+  // narrow viewport forced a single column of very short strings. Evidence items are `label: value`
+  // pairs of wildly different widths — they read better packed than aligned, and packing is what a
+  // wrapping flex row does natively.
   return (
-    <Box
-      style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
-        columnGap: 'var(--mantine-spacing-xs)',
-        rowGap: 2,
-      }}
-    >
+    <Flex wrap="wrap" columnGap="xs" rowGap={2}>
       {evidence.map((item) => (
         <Text key={item.label} size="xs" c="dimmed">
           {item.label}:{' '}
@@ -288,6 +286,6 @@ function EvidenceList({ evidence }: { evidence: Evidence[] }) {
           </Text>
         </Text>
       ))}
-    </Box>
+    </Flex>
   )
 }

@@ -232,5 +232,5 @@ export function linkBucketState(bucket: VantageBucket | null): LinkBucketState {
   if (mbits.length === 0) return { kind: 'no-vantage', cycles: bucket.cycles }
   const only = mbits[0]
   if (mbits.length === 1 && only !== undefined) return { kind: 'steady', mbit: only }
-  return { kind: 'transition', mbits: [...mbits].sort((a, b) => a - b) }
+  return { kind: 'transition', mbits: mbits.toSorted((a, b) => a - b) }
 }

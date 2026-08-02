@@ -32,7 +32,7 @@ export function LinkComparison({
   const comparison = compareCarrierHost({ router, vantage, speedTest, now })
 
   return (
-    <Card withBorder radius="md" padding="lg">
+    <Card py="xs" px="sm">
       <Stack gap="md">
         <Stack gap={0}>
           <Title order={4}>Carrier vs host</Title>

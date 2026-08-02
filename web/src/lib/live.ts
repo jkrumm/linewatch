@@ -1,5 +1,4 @@
-import { median } from './aggregate'
-import { WAN_TARGETS } from './aggregate'
+import { WAN_TARGETS, median } from './aggregate'
 import type { StatusSample } from './types'
 
 /**

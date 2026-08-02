@@ -109,7 +109,7 @@ describe('axisTickValues', () => {
 
   test('ticks are a subsequence of the input, in order', () => {
     const ticks = axisTickValues(range(200), 800)
-    expect(ticks).toEqual([...ticks].sort((a, b) => a - b))
+    expect(ticks).toEqual(ticks.toSorted((a, b) => a - b))
     expect(new Set(ticks).size).toBe(ticks.length)
   })
 })

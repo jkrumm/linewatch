@@ -30,11 +30,15 @@ below; **silence means "inherits the basalt-ui defaults unchanged."**
 
 - **Accent hue:** blue (default: the saturated sky accent — `var(--vx-line)` neutral is
   still the default for single-series marks)
-- **Where the accent lands, when a chart draws two series:** on the MARK, not the mass. A 1px
-  reference line read against a filled band takes the accent; the band, its p5–p95 fill and its
-  envelope take `--vx-line2`, the mid grey. Same rule gives download the accent and upload the mid
-  grey. `--vx-line` (11.1:1 on dark) is the bright neutral and belongs to a chart's ONLY series —
-  never to a secondary, where it is louder than the series it is drawn against.
+- **Where the accent lands, when a chart draws two series:** on the PRIMARY — the series the chart
+  is about. Internet over router, download over upload. The secondary takes `--vx-line2`, the mid
+  grey. `--vx-line` (`#e4e4e7`, 11.1:1 on dark) is the bright neutral and belongs to a chart's ONLY
+  series; on a secondary it is louder than the series it is drawn against, which is where every
+  colour problem on this page has started.
+- **A legend swatch and the mark it names must read the same binding**, not two literals that
+  happen to agree. `latency-band-chart` builds its legend in one function and its `LinePath` in
+  another, and drifted for two commits with nothing to catch it — both are tokens, so the palette
+  guard was satisfied. `charts/overlay-color.test.ts` pins the structural form.
 - **Tone deltas:** _(none — inherits)_
 
 ## Series dictionary
@@ -45,8 +49,8 @@ wired through `defineSeries()`. This is the one design artifact that legitimatel
 consumer; keep it the single source of truth and never inline a hex elsewhere.
 
 **Empty, and correct — again, and the round trip is the lesson.** Every mark on the dashboard is a
-single-series metric drawn neutral, the one earned accent (`VX.accent`, spent on the router
-overlay line and the download line), a **mid-grey secondary** (`VX.line2`) where a chart draws a second series
+single-series metric drawn neutral, the one earned accent (`VX.accent`, spent on the internet band
+and the download line), a **mid-grey secondary** (`VX.line2`) where a chart draws a second series
 against that accent, or a status verdict (`VX.status.*`).
 
 `throughput-chart` briefly registered a series and it was the wrong answer to a real problem. It

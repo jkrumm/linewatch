@@ -61,6 +61,16 @@ type Point = {
 /** Restatements of the four `HomeLineVerdict` values, not judgements about them. Only `all`
  * claims the whole bucket; the other three each mean the bucket's latency describes something
  * other than (or not provably) this line. */
+/**
+ * The router overlay's colour, at module scope on purpose.
+ *
+ * The legend entry is built in `LatencyBandChart` and the `LinePath` is drawn in the plot component
+ * below it — two functions, and while this was two separate literals the mark kept `VX.line`
+ * through two changes to the legend, so the swatch named a colour the line did not have. One
+ * binding is the only thing that makes them impossible to drift.
+ */
+const OVERLAY_COLOR = VX.line2
+
 const HOME_LINE_LABEL: Record<HomeLineVerdict, string> = {
   all: 'Home line',
   none: 'Not the home line',
@@ -107,12 +117,18 @@ const getPointKey = (p: Point): string => p.key
  * RTT drawn over the folded-internet band, so one picture answers "how bad, and is it past the
  * router".
  *
- * **With an overlay, the accent goes to the OVERLAY and the band goes neutral** — the reverse of
- * what it was. The band is a mass: a median line, a p5–p95 fill and a worst-ping envelope, all
- * derived from `primaryColor`, and a mass wants the neutral. The router is a single 1px reference
- * line whose whole job is to be read against that mass, and a mark wants the accent. Drawn the
- * other way round the accent was spread across a filled area while the line that answers "is it
- * past the router" was the quieter of the two.
+ * **With an overlay the primary takes the accent and the overlay takes the mid grey** — the same
+ * ranking `speed-chart` and `throughput-chart` use, and for the same reason: the series the chart
+ * is ABOUT should be the most visible thing on it.
+ *
+ * It took two wrong turns to land there, both worth recording because the symptom pointed away
+ * from the cause. The internet band read as washed out next to the router line, so the accent was
+ * moved to the router — which made the primary dimmer still. The actual fault was neither
+ * assignment: the overlay's `LinePath` hard-coded `stroke={VX.line}` and never read the colour its
+ * own legend entry declared, so the router was drawn at 11.1:1 against the panel no matter what
+ * this file said, out-shining the accent primary at 7.8:1 the whole time — and once the legend
+ * entry stopped saying `VX.line`, the swatch named a colour the mark did not have. Both colours now
+ * come from one binding each; `overlay-color.test.ts` pins that they cannot drift apart again.
  *
  * With NO overlay the primary keeps `VX.line`, the bright neutral: there it is the only series on
  * the chart, and a lone neutral metric is supposed to be the bright one.
@@ -216,10 +232,10 @@ export function LatencyBandChart({
   // is shown, because it is arithmetic over the configured cadence, not a count of anything.
   const expectedCycles = Math.max(1, Math.round((bucketSeconds * 1000) / PROBE_CYCLE_MS))
 
-  // See the component docblock. Alone, the primary is the bright neutral; against an overlay it
-  // steps down to the mid grey and hands the accent to the overlay, because everything derived from
-  // `primaryColor` below is an AREA (band fill, worst-ping envelope) and the overlay is a line.
-  const primaryColor = overlay ? VX.line2 : VX.line
+  // Alone, the primary is the bright neutral; against an overlay it takes the accent and the
+  // overlay steps down to the mid grey. ONE binding each, read by both the legend entry and the
+  // mark — see the docblock for the bug that made that worth spelling out.
+  const primaryColor = overlay ? VX.accent : VX.line
 
   const hasOutages = outages !== undefined && outages.length > 0
 
@@ -228,7 +244,7 @@ export function LatencyBandChart({
       series={[
         { key: chartKey, label, color: primaryColor, mark: 'line' },
         ...(overlay
-          ? [{ key: `${chartKey}-overlay`, label: overlay.label, color: VX.accent, mark: 'line' as const }]
+          ? [{ key: `${chartKey}-overlay`, label: overlay.label, color: OVERLAY_COLOR, mark: 'line' as const }]
           : []),
         // The loss markers, named. Two entries and not three: `lossColor(0)` returns the good token, but a
         // marker is only DRAWN when maxLossPct > 0, so a "No loss" swatch would name a mark this chart
@@ -527,7 +543,7 @@ function LatencyBandPlot({
               y={(p) => y(p.overlayMs)}
               defined={(p) => p.overlayMs !== null}
               curve={curveMonotoneX}
-              stroke={VX.line}
+              stroke={OVERLAY_COLOR}
               strokeWidth={VX.line2Width}
             />
           )}

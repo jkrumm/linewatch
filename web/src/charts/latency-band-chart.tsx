@@ -219,7 +219,13 @@ export function LatencyBandChart({
       series={[
         { key: chartKey, label, color: primaryColor, mark: 'line' },
         ...(overlay
-          ? [{ key: `${chartKey}-overlay`, label: overlay.label, color: VX.line, mark: 'line' as const }]
+          // `VX.line2`, the mid grey, not `VX.line`. The overlay is the SECOND series against an
+          // accent primary, and at 11.1:1 against the panel `VX.line` is the brightest value
+          // available — a secondary louder than the series it is drawn over. Same pair the speed
+          // and throughput charts use for their own accent-plus-secondary case. The single-series
+          // branch above keeps `VX.line`: there it is the primary, and a lone neutral metric is
+          // supposed to be the bright one.
+          ? [{ key: `${chartKey}-overlay`, label: overlay.label, color: VX.line2, mark: 'line' as const }]
           : []),
         // The loss markers, named. Two entries and not three: `lossColor(0)` returns the good token, but a
         // marker is only DRAWN when maxLossPct > 0, so a "No loss" swatch would name a mark this chart

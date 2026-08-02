@@ -4,7 +4,6 @@ import { fmtMbps } from '../lib/format'
 import { AXIS_LABEL_PX, fitTickCount, runAxisLabels } from '../lib/axis'
 import { PendingChart } from './pending'
 import { useCardTitle, useCompactMode } from '../lib/compact'
-import { series } from '../lib/series'
 
 /**
  * It was 260, which was headroom above the download trace rather than resolution in it; 190 —
@@ -141,11 +140,11 @@ export function SpeedChart({
                   getX={(p) => p.label}
                   series={[
                     {
-                      // Download is the accent by decision (DESIGN.md: "spent on the internet band
-                      // and the download line"); upload is `series.upload`, registered in
-                      // `lib/series.ts`. One pair for the two concepts wherever they are drawn — this
-                      // chart and the throughput bars — rather than each picking its own greys, which
-                      // is how this one previously ended up with two indistinguishable ones.
+                      // Accent blue against `VX.line2`, the MID grey — one pair for these two
+                      // concepts wherever they are drawn, here and in the throughput bars. Not
+                      // `VX.line`: at 11.1:1 against the panel it is the brightest thing available
+                      // and makes the secondary series louder than the accent. Not two greys
+                      // either, which is what this chart's own history warns about.
                       key: 'download',
                       label: 'Download',
                       color: VX.accent,
@@ -155,7 +154,7 @@ export function SpeedChart({
                     {
                       key: 'upload',
                       label: 'Upload',
-                      color: series.upload,
+                      color: VX.line2,
                       mark: 'line',
                       getValue: (p) => p.test.uploadMbps,
                     },

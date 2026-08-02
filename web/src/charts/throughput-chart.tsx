@@ -25,7 +25,6 @@ import { PendingChart } from './pending'
 import { foldSourceIndex } from './fold'
 import { HatchPattern, hatchFill } from './hatch'
 import { SyncedTip } from './synced-tip'
-import { series } from '../lib/series'
 
 // 180, not 240. This is a two-sided bar chart with three y ticks per half and no line to trace,
 // so the extra 60 px bought no resolution — it bought a section that pushed the one below it off
@@ -66,11 +65,14 @@ const PLOT_RIGHT = Math.round(AXIS_LABEL_PX / 2)
  */
 const THROUGHPUT_SERIES = [
   { key: 'down', label: 'Download', color: VX.accent, mark: 'bar' as const },
-  // `series.upload`, and `lib/series.ts` carries the measurements behind that. Two wrong answers
-  // came first: `VX.status.bad` drew every bar of ordinary outbound traffic as a fault, and
-  // `VX.line` sat 6% in luminance from the never-measured grey while out-contrasting the accent
-  // this chart's download half is drawn in.
-  { key: 'up', label: 'Upload', color: series.upload, mark: 'bar' as const },
+  // `VX.line2` (`#a1a1aa`, 5.5:1 against the panel) — the MID grey, not `VX.line` (`#e4e4e7`,
+  // 11.1:1), which is the brightest thing available on a dark panel and as a dense mass of bars
+  // out-shouted the accent this chart's download half is drawn in. Three earlier answers were
+  // worse: `VX.status.bad` drew ordinary outbound traffic as a fault, `VX.line` sat 6% in luminance
+  // from the never-measured grey, and a registered teal series separated cleanly but read as loud
+  // as the red had. Blue against a mid grey is the calm version, and it needs no series row —
+  // never-measured stays the light grey above it AND is hatched, so all three are distinct.
+  { key: 'up', label: 'Upload', color: VX.line2, mark: 'bar' as const },
   { key: 'absent', label: 'Not measured', color: VX.neutral, mark: 'bar' as const },
 ]
 
@@ -444,7 +446,7 @@ function PointRows({ point }: { point: PlotPoint }) {
         ) : (
           <>
             <TooltipRow color={VX.accent} shape="bar" label="Down" value={`${fmtRate(point.downBytesPerS)} · ${fmtBytes(point.downBytes)}`} />
-            <TooltipRow color={series.upload} shape="bar" label="Up" value={`${fmtRate(point.upBytesPerS)} · ${fmtBytes(point.upBytes)}`} />
+            <TooltipRow color={VX.line2} shape="bar" label="Up" value={`${fmtRate(point.upBytesPerS)} · ${fmtBytes(point.upBytes)}`} />
             {/* The basis, always — the rate is bytes over *measured* time, and a bucket that
                 measured 2 of 20 intervals is a different claim from one that measured all 20. */}
             <TooltipRow

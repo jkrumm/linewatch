@@ -39,38 +39,27 @@ table is the app's **data dictionary** — which metric maps to which hue, as `{
 wired through `defineSeries()`. This is the one design artifact that legitimately lives in the
 consumer; keep it the single source of truth and never inline a hex elsewhere.
 
-**One row, and it took a measurement to earn it.** Every other mark on the dashboard is a
-single-series metric drawn neutral (`VX.line`), the one earned accent (`VX.accent`, spent on the
-internet band and the download line), or a status verdict (`VX.status.*`).
+**Empty, and correct — again, and the round trip is the lesson.** Every mark on the dashboard is a
+single-series metric drawn neutral, the one earned accent (`VX.accent`, spent on the internet band
+and the download line), a **mid-grey secondary** (`VX.line2`) where a chart draws a second series
+against that accent, or a status verdict (`VX.status.*`).
 
-`throughput-chart` is the exception: it draws THREE things that must be told apart by colour —
-download, upload, never-measured — and the palette holds only two values that far apart. Spending
-`VX.status.bad` on upload drew ordinary outbound traffic as a fault; moving it to `VX.line` left
-upload 6% in luminance from the never-measured grey (two of three legend swatches, one colour) while
-out-contrasting the accent download is drawn in (11.1:1 against 7.8:1 on the dark panel). That is
-categorical separation going unmet, which is what a series row is for.
+`throughput-chart` briefly registered a series and it was the wrong answer to a real problem. It
+draws three things that must be told apart — download, upload, never-measured — and the first two
+attempts borrowed: `VX.status.bad` drew ordinary outbound traffic as a fault, then `VX.line` sat 6%
+in luminance from the never-measured grey while out-contrasting the accent (11.1:1 against 7.8:1 on
+the dark panel), so the neutral series out-shouted the earned one. A registered teal separated
+cleanly and read as loud as the red had.
 
-**Only `upload` is registered — not the pair.** Download is already the accent by the decision
-above; a second home for it here is one colour in two places for the two to drift apart in. The pair
-is `VX.accent` + `series.upload`, drawn identically by `throughput-chart` and `speed-chart`.
+**The fix was the grey, not a hue.** `VX.line2` (`#a1a1aa`, 5.5:1) is the mid grey; `VX.line`
+(`#e4e4e7`, 11.1:1) is the brightest value on a dark panel and was never the right secondary. Blue
+against a mid grey separates all three (never-measured is the light grey AND hatched) and no series
+is earned. Add a row only when a chart draws two or more series that must be told apart by colour
+**and the neutral ramp genuinely cannot do it** — and never inline a hex to do it.
 
 | Series name | Light hex | Dark hex | `defineSeries` key | Role / earned reason |
 |-|-|-|-|-|
-| Upload | `#007067` | `#13c9ba` | `upload` | Categorical: the second direction in the two charts that draw both. basalt's teal family — a distinct family from the forest green `VX.status.good` uses, so a teal bar is not read as a verdict. One shade deeper on light, one lighter on dark; 6.8:1 against the dark panel, near enough the accent's 7.8:1 that upload does not outweigh download. |
-
-```ts
-// src/lib/series.ts — the app's guard-exempt series file
-import { defineSeries, groupTokens } from 'basalt-ui/tokens'
-
-const SERIES_MAP = defineSeries({
-  upload: { light: '#007067', dark: '#13c9ba' },
-})
-
-export const series = groupTokens('app', SERIES_MAP) // { upload: 'var(--vx-app-upload)' }
-export const paletteGroups = { 'app-': SERIES_MAP }
-// wire into the provider: <BasaltProvider paletteOptions={{ groups: paletteGroups }} .../>
-// (paletteOptions takes the group map directly — not a CSS string; read `series.upload` in charts)
-```
+| _(none)_ | | | | |
 
 Rules for this table (from the `basalt-tokens` / `basalt-charts` rules — do not relax):
 - One hue per series, drawn from the identity families only. Never raw Material/AntD/Tailwind.

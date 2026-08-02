@@ -15,9 +15,8 @@ import {
   throughputQuery,
   verdictsQuery,
 } from '../lib/queries'
-import { NowStrip } from '../components/now-strip'
+import { StatusBar, type KpiWindow } from '../components/status-bar'
 import { VerdictPanel } from '../components/verdict-panel'
-import { KpiRow, type KpiWindow } from '../components/kpi-row'
 import { PageHeader } from '../components/page-header'
 import { Section } from '../components/section'
 import { StatStrip, type Stat } from '../components/stat-strip'
@@ -104,8 +103,8 @@ type SearchParams = z.infer<typeof SearchSchema>
  * 1. **The chrome is gone.** No sidebar for a router with one route (see `__root.tsx`); the theme
  *    toggle moved beside the range control, and the header states once, permanently, that the
  *    range governs the page.
- * 2. **The opening three cards are one strip.** `NowStrip` carries every branch the status banner
- *    and the two live tiles carried, in a third of the height.
+ * 2. **The opening seven cards are one bar.** `StatusBar` carries every branch the status banner,
+ *    the two live tiles and the four KPI cards carried, in one row of cells.
  * 3. **Each section's disclosure became a view switch.** A named `SegmentedControl` per section
  *    instead of a chevron that says "Details" — same evidence, constant height, and the reader can
  *    see what is in each cut without opening it. See `components/section.tsx`.
@@ -166,7 +165,7 @@ function DashboardPage() {
   const bucket = rangeToBucket(search.range)
   const nowTick = rangeToWindow(search.range).to
   const { from, to } = quantiseWindow(rangeToWindow(search.range), bucket)
-  // The span `downtimeTint` and `KpiRow` band their thresholds against — computed once here so the
+  // The span `downtimeTint` and `StatusBar` bands its thresholds against — computed once here so the
   // KPI card's tint and the Uptime section's own downtime tint can never disagree about the window.
   const windowSeconds = (to - from) / 1000
 
@@ -306,7 +305,19 @@ function DashboardPage() {
         }
       />
 
-      <NowStrip status={status === undefined ? null : status} now={nowTick} />
+      <StatusBar
+        status={status === undefined ? null : status}
+        now={nowTick}
+        current={{ downtime, points, tests: tests ?? [] }}
+        previous={previous}
+        // The bucket the range route actually used, so the worst-stretch cell names its own
+        // duration. Without it that cell silently compares a 5-minute worst against a 4-hour one
+        // across ranges and reads as a bug.
+        bucketSeconds={bucket}
+        range={search.range}
+        windowSeconds={windowSeconds}
+        pending={{ downtime: allOutagesPending, series: seriesPending, tests: testsPending }}
+      />
 
       {/* Renders unconditionally now — see `VerdictPanel`'s own docblock for the third,
           "not asked yet" state. Unmounting it while `verdicts` was `undefined` dragged every
@@ -325,17 +336,6 @@ function DashboardPage() {
         </Callout>
       )}
 
-      <KpiRow
-        current={{ downtime, points, tests: tests ?? [] }}
-        previous={previous}
-        // The bucket the range route actually used, so the worst-stretch card names its own
-        // duration. Without it that card silently compares a 5-minute worst against a 4-hour one
-        // across ranges and reads as a bug.
-        bucketSeconds={bucket}
-        range={search.range}
-        windowSeconds={windowSeconds}
-        pending={{ downtime: allOutagesPending, series: seriesPending, tests: testsPending }}
-      />
 
       {/* One hover provider around the whole chart region, not one per section. Every chart kind in
           `basalt-ui/charts` calls `useHoverSync`, and outside a provider each one warns and loses
@@ -756,7 +756,7 @@ function DashboardPage() {
  * Clamp a `ThresholdTint` to what `Stat.tone` (`stat-strip.tsx`) can actually carry.
  *
  * `Stat.tone` ships `'warn' | 'bad'` only — `'good'` is spent on `StatCard.tone`
- * (`kpi-row.tsx`'s Downtime card) and nowhere else; a green rail on the KPI card is a positive
+ * (`status-bar.tsx`'s Downtime cell) and nowhere else; a green rail on the KPI cell is a positive
  * assertion this repo can defend (see `downtimeTint`'s docblock), and inventing a second, untested
  * place for that same judgment to render would be how the two drift apart. `worstLossTint` and
  * `downtimeTint` both return the wider `ThresholdTint` now that basalt-ui 1.8.0 added `'good'` to

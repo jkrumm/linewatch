@@ -106,6 +106,17 @@ anyone they disagreed.
   — and adds the `VisuallyHidden` label the hand-rolled one never had, so the verdict
   was colour-only. A wrapper around a design-system component is how the second idiom
   starts.
+- **`components/status-bar.tsx` is the one standing deviation from that rule, and it
+  carries the accessible half with it.** The page opens on a six-cell bar (verdict,
+  latest cycle, and the four headline numbers), so a KPI gets ~230px; `StatCard` puts
+  its label and its `menu` slot in one `wrap="nowrap"` Group, which already squeezed at
+  328px. The card cannot render its own header at bar density, so the cells are
+  hand-rolled and the comparison sits under the value. What that would have cost is
+  `StatCard.tone` — so `Cell` reproduces the 3px `VX.status[tone]` rail **and** copies
+  `StatCard`'s `VisuallyHidden` threshold sentence verbatim, and
+  `status-bar.render.test.tsx` pins it. A rail nothing announces is the exact defect
+  `StatCard.tone` was adopted to remove; re-introducing it silently is the failure mode
+  here, not the hand-rolling. One card idiom still holds — the bar is one card.
 - **After a `basalt-ui` upgrade, run `bunx basalt-ui sync`** — `sync --check` gates the
   drift in CI and pre-commit, and `basalt-ui doctor` diagnoses the install.
 - **The doctrine lives in `web/.claude/rules/basalt-*.md`**, placed by `init` and
@@ -273,7 +284,7 @@ anyone they disagreed.
   asked. The rule is one; the sentinel varies with the component's shape, which
   is a known wart rather than a discovery: charts and tables take `isPending`,
   `CoverageCallout` takes a `'pending'` string, `Stat.value` takes `null`, and
-  the card-owning components (`NowStrip`, `PageHeader`, `VantageCard`,
+  the card-owning components (`StatusBar`, `PageHeader`, `VantageCard`,
   `LinkComparison`, `pathStats`) treat `null`/`undefined` as *not asked yet*.
   **Guard even where a route loader makes the state unreachable** — the loader
   guarantee is route config that a later edit can silently remove, and the cost

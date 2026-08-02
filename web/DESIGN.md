@@ -56,14 +56,14 @@ is `VX.accent` + `series.upload`, drawn identically by `throughput-chart` and `s
 
 | Series name | Light hex | Dark hex | `defineSeries` key | Role / earned reason |
 |-|-|-|-|-|
-| Upload | `#5642a6` | `#bdadff` | `upload` | Categorical: the second direction in the two charts that draw both. basalt's violet family, one shade deeper on light and one lighter on dark — 7.0:1 / 7.1:1 against their panels, matching the accent's weight rather than exceeding it. |
+| Upload | `#007067` | `#13c9ba` | `upload` | Categorical: the second direction in the two charts that draw both. basalt's teal family — a distinct family from the forest green `VX.status.good` uses, so a teal bar is not read as a verdict. One shade deeper on light, one lighter on dark; 6.8:1 against the dark panel, near enough the accent's 7.8:1 that upload does not outweigh download. |
 
 ```ts
 // src/lib/series.ts — the app's guard-exempt series file
 import { defineSeries, groupTokens } from 'basalt-ui/tokens'
 
 const SERIES_MAP = defineSeries({
-  upload: { light: '#5642a6', dark: '#bdadff' },
+  upload: { light: '#007067', dark: '#13c9ba' },
 })
 
 export const series = groupTokens('app', SERIES_MAP) // { upload: 'var(--vx-app-upload)' }

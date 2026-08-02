@@ -29,15 +29,25 @@ import { defineSeries, groupTokens } from 'basalt-ui/tokens'
  * would put one colour in two places for the two to drift apart in. So the pair is
  * `VX.accent` + `series.upload`, and only the half that had nowhere to live gets a row.
  *
- * The hue is basalt's own violet family, one shade deeper on light and one lighter on dark per the
- * token rule — `#bdadff` measures 7.1:1 against the dark panel and `#5642a6` 7.0:1 against the
- * light one, so upload now carries the same weight as download rather than more. Violet is a
- * legitimate choice here and not an off-identity accent: the guard's `off-identity-accent` kind
- * polices Mantine `color=` props, and the tokens rule says categorical colour goes through
- * `defineSeries` precisely so it does not have to borrow one.
+ * **The hue is basalt's teal family, and the shortlist it won was two long.** Warm hues are out —
+ * amber, orange and rose all mean something on this page, and a series that borrows a status hue is
+ * the bug this row exists to fix. Another blue is out: it would sit in the accent's own family and
+ * fail to separate from it at 1px, which is half the problem. That leaves violet and teal, and teal
+ * is the one that is here. (Violet shipped first and was rejected on taste — recorded because
+ * "why not violet" is otherwise the obvious question this file cannot answer.)
+ *
+ * Teal is a distinct family from the forest green `VX.status.good` is drawn in — basalt's own rule
+ * makes that split explicitly ("positive deltas use `color="green"` (forest green), not `teal`
+ * (vivid turquoise)") — so a teal bar does not read as a verdict. One shade deeper on light and one
+ * lighter on dark per the token rule: `#13c9ba` measures 6.8:1 against the dark panel, near enough
+ * the accent's 7.8:1 that upload carries the same weight as download rather than more.
+ *
+ * Neither teal nor violet is an off-identity accent, despite both appearing in the guard's banned
+ * list: that kind polices Mantine `color=` props, and the tokens rule routes categorical colour
+ * through `defineSeries` precisely so it need not borrow one.
  */
 const SERIES_MAP = defineSeries({
-  upload: { light: '#5642a6', dark: '#bdadff' },
+  upload: { light: '#007067', dark: '#13c9ba' },
 })
 
 /** `var(--vx-app-upload)` — read this in a chart, never the hex above. */

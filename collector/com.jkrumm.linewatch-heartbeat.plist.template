@@ -16,8 +16,7 @@
        run cannot page — the same margin the other MacMini push monitors keep. -->
   <key>ProgramArguments</key>
   <array>
-    <string>__BUN__</string>
-    <string>run</string>
+    <string>__REPO_DIR__/collector/run-agent.sh</string>
     <string>__REPO_DIR__/collector/heartbeat.ts</string>
   </array>
   <key>WorkingDirectory</key><string>__REPO_DIR__</string>
@@ -25,6 +24,7 @@
   <key>StartInterval</key><integer>60</integer>
   <key>EnvironmentVariables</key>
   <dict>
+    <key>LINEWATCH_BUN</key><string>__BUN__</string>
     <!-- launchd starts this with no shell profile at all. Nothing here spawns a
          subprocess today, but the collector's plist documents the same trap and
          a divergence between the two would be the surprising thing. -->

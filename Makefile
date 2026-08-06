@@ -16,7 +16,14 @@ TOKEN_FILE    := $(TOKEN_DIR)/token
 ROUTER_PW_FILE := $(TOKEN_DIR)/router-password
 LOG_DIR       := $(HOME)/Library/Logs
 COLLECTOR_LOG := $(LOG_DIR)/linewatch-collector.log
-PLIST_LABEL   := com.jkrumm.linewatch-collector
+# Renamed from com.jkrumm.linewatch-collector on 2026-08-06. The old identifier
+# is PERMANENTLY BURNED in macOS Background Task Management: once BTM holds an
+# entry as disallowed, nothing clears it but a NEW Label. Never "tidy" this name
+# back — see collector/run-agent.sh for the full mechanism.
+PLIST_LABEL   := com.jkrumm.linewatch-collector-agent
+# Retired label, booted out + removed by `install-collector` so the burned
+# entry cannot keep a second copy of the probe alive alongside the new one.
+OLD_PLIST_LABEL := com.jkrumm.linewatch-collector
 
 # Storage: the database lives in a named Docker volume that the host cannot open
 # (docs/storage.md). Every db-* target below therefore works through a container.
@@ -122,8 +129,16 @@ define install_agent
 	: "collector was the only one of 22 in ~/Library/LaunchAgents that did not"; \
 	: "come back, log show over the boot window had no launchd mention of it at"; \
 	: "all, and its plist, permissions and xattrs were identical to agents that"; \
-	: "did load. enable is the only step that addresses that state, and it is"; \
-	: "idempotent, so it is cheap insurance even if the cause was something else"; \
+	: "did load. enable is idempotent, so it stays as cheap insurance - but it"; \
+	: "was NOT the cause. Root-caused 2026-08-06: macOS Background Task"; \
+	: "Management attributes an agent to the code-signing identity of"; \
+	: "ProgramArguments[0]. These plists pointed straight at /opt/homebrew/bin/bun,"; \
+	: "so BTM recorded Bun's signer and marked the collector [enabled, disallowed]."; \
+	: "BTM is a DIFFERENT database from the launchd enable/disable one, so"; \
+	: "launchctl enable could never clear it - which is why the agent kept"; \
+	: "returning late via KeepAlive rescue (+2m48s) instead of at RunAtLoad."; \
+	: "Fix: argv[0] is now collector/run-agent.sh, an unsigned script, which"; \
+	: "attributes to Unknown Developer and is allowed. See that file."; \
 	UID_N=$$(id -u); \
 	launchctl bootout gui/$$UID_N/$(1) 2>/dev/null || true; \
 	launchctl enable gui/$$UID_N/$(1) 2>/dev/null || true; \
@@ -579,10 +594,19 @@ collector-setup: ## Generate the bearer token (if absent), render + load the nat
 	else \
 		echo "  · token already exists at $(TOKEN_FILE)"; \
 	fi
+	@: "Retire the burned pre-2026-08-06 label first — otherwise its plist stays"; \
+	: "in ~/Library/LaunchAgents and a second probe races this one for the log."; \
+	UID_N=$$(id -u); \
+	if [ -f "$(LAUNCHAGENTS)/$(OLD_PLIST_LABEL).plist" ]; then \
+		launchctl bootout gui/$$UID_N/$(OLD_PLIST_LABEL) 2>/dev/null || true; \
+		rm -f "$(LAUNCHAGENTS)/$(OLD_PLIST_LABEL).plist"; \
+		echo "  ✓ retired burned label $(OLD_PLIST_LABEL)"; \
+	fi
 	$(call install_agent,$(PLIST_LABEL),$(COLLECTOR_LOG))
 
 collector-teardown: ## Unload and remove the collector's LaunchAgent (does not delete the token or spool)
 	$(call teardown_agent,$(PLIST_LABEL))
+	$(call teardown_agent,$(OLD_PLIST_LABEL))
 
 collector-logs: ## Tail the native collector's log (the previous generation is the same path + .1)
 	@touch "$(COLLECTOR_LOG)"

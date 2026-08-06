@@ -19,8 +19,7 @@
        restarting never reaches the age at which it may act. -->
   <key>ProgramArguments</key>
   <array>
-    <string>__BUN__</string>
-    <string>run</string>
+    <string>__REPO_DIR__/collector/run-agent.sh</string>
     <string>__REPO_DIR__/collector/watchdog.ts</string>
   </array>
   <key>WorkingDirectory</key><string>__REPO_DIR__</string>
@@ -32,6 +31,7 @@
   <key>ThrottleInterval</key><integer>10</integer>
   <key>EnvironmentVariables</key>
   <dict>
+    <key>LINEWATCH_BUN</key><string>__BUN__</string>
     <!-- launchd starts this with no shell profile at all, and this one spawns
          `ping`, `ping6`, `route`, `ifconfig` and `netstat`. An incomplete PATH
          here reads as a line that is down. -->

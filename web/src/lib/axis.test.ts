@@ -193,54 +193,61 @@ describe('fitTickCount', () => {
 })
 
 describe('runAxisKey / runTickFormat', () => {
-  /** Local components, for the reason `JUL_31_2026_2305` gives — the label is the host's wall
-   * clock, so a UTC-pinned instant would render differently per machine. */
+  /** Local components for the label, for the reason `JUL_31_2026_2305` gives — the label is the
+   * host's wall clock, so a UTC-pinned instant would render differently per machine. */
   const at = (h: number, m: number, s = 0) => new Date(2026, 7, 1, h, m, s).getTime()
 
   test('renders a run to the minute, on the host clock', () => {
-    expect(runTickFormat(runAxisKey(at(14, 3, 41), 7))).toBe('01.08 14:03')
+    expect(runTickFormat(runAxisKey(at(14, 3, 41)))).toBe('01.08 14:03')
   })
 
   /**
-   * The property the two functions exist to separate.
+   * The property that puts these charts on the page cursor: `useChartCursor` resolves a sibling's
+   * broadcast key by PARSING it, so the key has to be an instant a bucketed chart's domain can
+   * correspond to. It used to be `ts:id`, shaped so `Date.parse` would reject it, precisely to keep
+   * the two axes apart.
+   */
+  test('the key round-trips to the exact instant, so a bucketed sibling can resolve it', () => {
+    const ts = at(14, 3, 41)
+    expect(Date.parse(runAxisKey(ts))).toBe(ts)
+  })
+
+  /**
+   * Two runs in one minute share a LABEL and must not share a key.
    *
-   * A same-minute pair — two runs after a manual trigger — renders as one string and MUST still be
-   * two domain values. When the label was the key this took a seconds tiebreak appended to every
-   * member of the colliding group, and then a UTC-offset suffix on top of it for the autumn
-   * fall-back hour, where two runs 3600 s apart agree on date, hour, minute and second alike. The
-   * row id makes it a fact instead: same minute, same second, same repeated wall-clock hour, still
-   * two keys.
+   * When the label was the key this took a seconds tiebreak on every member of the colliding group,
+   * and then a UTC-offset suffix on top of it for the autumn fall-back hour, where two runs 3600 s
+   * apart agree on date, hour, minute and second alike. Separating display from identity makes it
+   * fall out of the instant itself.
    */
   test('two runs in one minute share a label and never a key', () => {
-    const a = runAxisKey(at(14, 3, 7), 1)
-    const b = runAxisKey(at(14, 3, 41), 2)
+    const a = runAxisKey(at(14, 3, 7))
+    const b = runAxisKey(at(14, 3, 41))
     expect(runTickFormat(a)).toBe(runTickFormat(b))
     expect(a).not.toBe(b)
   })
 
-  test('two runs on the same millisecond are still distinct keys', () => {
-    expect(runAxisKey(at(9, 0), 1)).not.toBe(runAxisKey(at(9, 0), 2))
-  })
-
-  /** The DST fall-back that forced the old offset suffix. Constructed in UTC deliberately: the two
-   * instants have to straddle a real transition, which is a property of the zone the suite runs in.
-   * Skipped where there is none rather than asserted vacuously. */
+  /** The DST fall-back that forced the old offset suffix: same wall clock, different instants. */
   test('a repeated wall-clock hour needs no special case', () => {
     const first = Date.UTC(2026, 9, 25, 0, 30)
     const second = first + 3_600_000
     if (new Date(first).getTimezoneOffset() === new Date(second).getTimezoneOffset()) return
 
-    const keys = [runAxisKey(first, 1), runAxisKey(second, 2)]
-    expect(new Set(keys).size).toBe(2)
-    expect(runTickFormat(keys[0]!)).toBe(runTickFormat(keys[1]!))
+    expect(runAxisKey(first)).not.toBe(runAxisKey(second))
+    expect(runTickFormat(runAxisKey(first))).toBe(runTickFormat(runAxisKey(second)))
   })
 
-  /** The key is not parseable as a date or a number, which is what keeps these two charts' runs
-   * from resolving against a bucketed sibling's clock-time domain — see `ChartCursorScope` in
-   * `routes/index.tsx`. */
-  test('the key is opaque to the cursor: neither a number nor a date', () => {
-    const key = runAxisKey(at(14, 3), 7)
-    expect(Number.isNaN(Date.parse(key))).toBe(true)
-    expect(/^[-+]?\d*\.?\d+$/.test(key)).toBe(false)
+  /**
+   * The cost of keying on the instant, pinned rather than left to be re-derived from a symptom.
+   *
+   * Identity is now the millisecond, where the row id made it a fact. Two runs on the same
+   * millisecond collapse onto one x position and one stops being drawn. `POST /api/speedtests/run`
+   * is rate-limited to one run per `speedtestMinIntervalS` against the newest stored row, so this
+   * is structural rather than lucky — but it is an argument, and this test is where it is written
+   * down.
+   */
+  test('identity is the millisecond — same instant, same key', () => {
+    expect(runAxisKey(at(9, 0))).toBe(runAxisKey(at(9, 0)))
+    expect(runAxisKey(at(9, 0))).not.toBe(runAxisKey(at(9, 0, 1)))
   })
 })

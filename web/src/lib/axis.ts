@@ -160,29 +160,41 @@ export function bucketTickFormat(bucketSeconds: ProbeBucketSeconds): (key: strin
 /**
  * Scale key and axis label for a series drawn one point per event rather than one per bucket.
  *
- * **Two functions, because they are two jobs — which is the whole point.** `runAxisKey` produces
- * the categorical scale's domain value and `runTickFormat` renders it. For most of this file's
- * history they were one string: `MultiLine` forwarded no `formatX`, so the only thing that reached
- * the axis was the value `getX` returned, and the visible label was therefore also the identity.
- * That forced a whole apparatus — a seconds tiebreak appended to every member of a colliding
- * minute, then a UTC-offset suffix for the autumn fall-back hour where two runs 3600 s apart agree
- * on date, hour, minute AND second — to keep a *display* string unique, because two points sharing
- * a domain value collapse onto one x position and one of them stops being drawn. `formatX` on the
- * kinds (basalt-ui 1.17.0) ended that, and the apparatus went with it.
+ * **Two functions, because they are two jobs.** `runAxisKey` produces the categorical scale's
+ * domain value and `runTickFormat` renders it. For most of this file's history they were one
+ * string: the kinds forwarded no `formatX`, so the only thing that reached the axis was the value
+ * `getX` returned, and the visible label was therefore also the identity. That forced a whole
+ * apparatus — a seconds tiebreak appended to every member of a colliding minute, then a UTC-offset
+ * suffix for the autumn fall-back hour where two runs 3600 s apart agree on date, hour, minute AND
+ * second — to keep a *display* string unique, because two points sharing a domain value collapse
+ * onto one x position and one of them stops being drawn. `formatX` (basalt-ui 1.17.0) ended that.
  *
- * The key is `ts:id`, not the timestamp alone. `id` is the row's primary key, so uniqueness is a
- * fact rather than an argument about how unlikely two runs sharing a millisecond are; the `ts`
- * prefix is what lets the label be a pure function of the key, with no `Map` to keep in step with
- * a re-sort. The pair is deliberately NOT parseable as a date or a number: these two charts sit in
- * their own `ChartCursorScope` because their x-axis is runs rather than clock time, and a key that
- * resolves against nothing is the honest shape for that.
+ * **The key is the run's instant, and that is what puts these charts on the page cursor.**
+ * `useChartCursor` resolves a sibling's broadcast key by PARSING it, so an ISO instant is the only
+ * shape that can correspond to a bucketed chart's domain at all. Hovering a latency spike now
+ * marks the speed run nearest it, and hovering a run marks the bucket it landed in. It used to be
+ * `ts:id` — deliberately unparseable, to keep two axes that did not correspond from being lined
+ * up — and `ChartCursorScope` isolated the section on top of that.
+ *
+ * **What that trades, stated once so nobody re-derives it from the symptom:** uniqueness now rests
+ * on two runs never sharing a millisecond, where the row id made it a fact. That is structural
+ * rather than lucky — `POST /api/speedtests/run` is rate-limited to one run per
+ * `speedtestMinIntervalS` (5 min) measured against the newest stored row, and a run takes tens of
+ * seconds — but it is an argument, not a primary key, and it is the reason this comment exists.
+ *
+ * **These charts still do not line up horizontally with the ones above them, and cannot.** Every
+ * cartesian x scale in basalt-ui is a `scalePoint` over the domain's own keys, so 24 runs are 24
+ * evenly spaced positions whatever the real gap between them; the bucketed charts only look
+ * proportional because their domain IS a regular grid. The cursor therefore resolves the right
+ * RUN at the wrong screen x. Proportional time placement needs a linear x scale the framework does
+ * not have.
  */
-export function runAxisKey(ts: number, id: number): string {
-  return `${ts}:${id}`
+export function runAxisKey(ts: number): string {
+  return new Date(ts).toISOString()
 }
 
 /** `MultiLine`'s `formatX` for a run series — the reading half of `runAxisKey`. */
 export function runTickFormat(key: string): string {
-  return bucketAxisLabel(Number(key.slice(0, key.indexOf(':'))), 60)
+  return bucketAxisLabel(Date.parse(key), 60)
 }
 

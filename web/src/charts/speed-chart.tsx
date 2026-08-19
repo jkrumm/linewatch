@@ -86,10 +86,11 @@ export function SpeedChart({
   // other chart on the page ran left to right. A reader comparing a dip here against the latency
   // band above was reading two mirrored axes as though they aligned.
   const ordered = tests.toSorted((a, b) => a.ts - b.ts)
-  // The key is the run's identity, never its label — see `runAxisKey`. For two releases this line
-  // built a pre-formatted, collision-broken label instead, because `MultiLine` forwarded no
-  // formatter and the domain value was the only string that reached the axis.
-  const points = ordered.map((test) => ({ test, key: runAxisKey(test.ts, test.id) }))
+  // The key is the run's INSTANT and the label is drawn from it — see `runAxisKey`, including what
+  // keying on the instant costs and what it buys (this chart on the page's shared cursor). For two
+  // releases this line built a pre-formatted, collision-broken label instead, because `MultiLine`
+  // forwarded no formatter and the domain value was the only string that reached the axis.
+  const points = ordered.map((test) => ({ test, key: runAxisKey(test.ts) }))
   const [compact] = useCompactMode()
   const height = compact ? SPEED_HEIGHT_COMPACT : SPEED_HEIGHT
   // The container's own width, measured here rather than inside a wrapper the kind renders under.
@@ -111,8 +112,11 @@ export function SpeedChart({
       // "download against upload" is the legend.
       subtitle="Mbps"
       // The x-axis is categorical: runs are drawn at equal spacing whatever the real interval
-      // between them, so say so rather than let the spacing imply a cadence.
-      tooltip="Ookla runs, one point each, drawn at equal spacing regardless of the gap between them. Download and upload share one axis."
+      // between them, so say so rather than let the spacing imply a cadence. The sentence also has
+      // to carry what that costs the shared cursor now that this chart is on it — a reader watching
+      // the crosshair land at a different x on this card than on the band above needs the rule,
+      // not a guess.
+      tooltip="Ookla runs, one point each, drawn at equal spacing regardless of the gap between them — so the shared cursor marks the run nearest the moment you are hovering, not the same horizontal position. Download and upload share one axis."
     >
       {/* `MultiLine` measures its own width but exposes only a tick *count*, so the count has to be
           derived from a width measured out here. Left to its default, `smartTicks` spaces ticks by

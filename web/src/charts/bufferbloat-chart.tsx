@@ -24,7 +24,7 @@ export function BufferbloatChart({
   // Oldest first: `GET /api/speedtests` answers newest-first, which is right for a list and
   // backwards for a time axis. Key and label are separate — see `speed-chart.tsx`'s identical pair.
   const ordered = tests.toSorted((a, b) => a.ts - b.ts)
-  const points = ordered.map((test) => ({ test, key: runAxisKey(test.ts, test.id) }))
+  const points = ordered.map((test) => ({ test, key: runAxisKey(test.ts) }))
   // Measured out here for `xTicks` alone — see `speed-chart.tsx`'s identical wrapper.
   const { ref: sizeRef, width } = useChartSize()
   const plotWidth = Math.max(1, width - VX.margin.left - VX.margin.right)
@@ -32,7 +32,7 @@ export function BufferbloatChart({
   return (
     <ChartCard
       title={useCardTitle("Latency under load")}
-      tooltip="Idle ping is measured at rest; loaded latency is measured while the download or upload saturates the line. One point per run, drawn at equal spacing regardless of the gap between runs. The cursor here does not carry to the charts above."
+      tooltip="Idle ping is measured at rest; loaded latency is measured while the download or upload saturates the line. One point per run, drawn at equal spacing regardless of the gap between runs — so the shared cursor marks the run nearest the moment you are hovering, not the same horizontal position."
     >
       {/* See `availability-strip.tsx`'s identical wrapper for why this is a floor, not a height. */}
       <div ref={sizeRef} style={{ minHeight: BUFFERBLOAT_HEIGHT }}>

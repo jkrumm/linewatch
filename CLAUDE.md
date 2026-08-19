@@ -293,19 +293,30 @@ anyone they disagreed.
   as the scale domain (and therefore as the cross-chart cursor key) and draw it
   with `lib/axis.ts`'s `bucketTickFormat`, through `formatX` on the two kinds that
   take one and `AxisBottomDate`'s `tickFormat` on the three that compose their own
-  axis; the two run-series charts key on `runAxisKey` (`ts:id`) and draw it with
-  `runTickFormat`. Before any of those seams existed, `fmtAxisDate` reduced an ISO
+  axis; the two run-series charts key on `runAxisKey` (the run's ISO instant) and
+  draw it with `runTickFormat`. Before any of those seams existed, `fmtAxisDate` reduced an ISO
   string to `DD.MM` — a 24 h window drew `01.08` a dozen times — and a
   *pre-formatted* label was the only thing that reached the axis, forcing one
   string to be display, identity and hover key at once. **What that cost is the
   thing to remember**: identity had to be unique, so a *display* string carried a
   seconds tiebreak and then a UTC-offset suffix for the DST fall-back hour, purely
   so two runs could not collapse onto one x position and silently drop a
-  measurement. The row id says it in four characters. The same rule applies to the
-  tooltip header — see `formatHeader` below. The two run charts stay OUT of the
-  page cursor (`ChartCursorScope` in `routes/index.tsx`): their key resolves
-  against nothing by construction, but the wrapper states the fact that outlives
-  the key shape — this axis is runs, not clock time.
+  measurement. Keying on the instant says it instead, and buys the page cursor with
+  it. The same rule applies to the tooltip header — see `formatHeader` below.
+- **Every chart on the page now shares one cursor, and the last two joined by
+  becoming instants.** The Speed views sat in a `ChartCursorScope` for most of this
+  project's life — their x-axis is speed-test RUNS, and their key was deliberately
+  shaped so `Date.parse` would reject it. Both are gone: a latency spike now marks
+  the run nearest it and a run marks the bucket it landed in. **What that does not
+  buy is horizontal alignment, and the limit is the framework's**: every cartesian x
+  scale in basalt-ui is a `scalePoint` over the domain's keys, so 24 runs are 24
+  evenly spaced positions whatever the real gaps between them — the bucketed charts
+  only look proportional because their domain IS a regular grid. The cursor lands on
+  the right run at a different screen x, and both cards' tooltip copy says so.
+  Identity also moved from a row id to a millisecond, which the 5-minute speedtest
+  rate limit makes structural rather than lucky; `lib/axis.ts` and `lib/axis.test.ts`
+  are where that argument is written down. The heatmaps still join no cursor — they
+  hit-test per cell and never broadcast.
 - **The tooltip header formats from the instant, never from the key.**
   `TooltipHeader` regexed `YYYY-MM-DD` out of the domain value and rebuilt a LOCAL
   `Date`, so a UTC ISO key named the previous calendar day for every bucket after

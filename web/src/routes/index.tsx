@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { z } from 'zod'
 import { Card, Group, SegmentedControl, Stack, Text } from '@mantine/core'
 import { useQueries, useQuery } from '@tanstack/react-query'
-import { ChartCursorScope, TooltipRow, VX } from 'basalt-ui/charts'
+import { TooltipRow, VX } from 'basalt-ui/charts'
 import { Callout } from 'basalt-ui/content'
 import {
   eventsQuery,
@@ -342,10 +342,11 @@ function DashboardPage() {
       )}
 
 
-      {/* No provider. As of basalt-ui 1.15.0 the cursor lives in a module-level store, so every
-          chart on this page shares one out of the box — `ChartHoverSync` is gone and its successor,
-          `ChartCursorScope`, opts a subtree OUT of sharing rather than into it. The two Speed views
-          below are the only subtrees that want out. */}
+      {/* No provider, and now no scope either. As of basalt-ui 1.15.0 the cursor lives in a
+          module-level store, so every chart on this page shares one out of the box —
+          `ChartHoverSync` is gone and its successor, `ChartCursorScope`, opts a subtree OUT rather
+          than into it. Nothing here wants out any more: the two Speed views were the last holdouts
+          and they joined when their domain became an instant (see that section). */}
       <Stack gap="xl">
         <Section
           id="uptime"
@@ -587,46 +588,31 @@ function DashboardPage() {
               key: 'runs',
               label: 'Every run',
               render: () => (
-                // Scoped OUT of the page cursor, and the reason is the design rather than a key
-                // collision. This chart's x-axis is runs, not clock time (`SpeedChart`'s own
-                // subtitle says so), so a cursor shared with the time-series charts above would
-                // line up two axes that do not correspond — `BufferbloatChart`'s subtitle
-                // promises the opposite in as many words.
+                // ON the page cursor, which it was not for most of this chart's life. The
+                // isolation (`ChartCursorScope`, and `ChartHoverSync`'s absence before it) rested
+                // on the axis being runs rather than clock time, and on a key deliberately shaped
+                // so `Date.parse` would reject it. Both are gone: `runAxisKey` is the run's ISO
+                // instant, so hovering a latency spike above marks the run nearest it and hovering
+                // a run marks the bucket it landed in — the correlation the two sections exist to
+                // let a reader make, which was previously a manual eyeball between two cards.
                 //
-                // The direction of the wrapper inverted in basalt-ui 1.15.0 and the code reads
-                // the same because of it: `ChartHoverSync` used to opt a subtree IN (charts
-                // warned and lost their cursor outside one), `ChartCursorScope` opts a subtree
-                // OUT onto a private store. Sharing is the default now, so this is the only kind
-                // of wrapper the page needs and it appears only where isolation is wanted.
+                // **What the removal does NOT buy is horizontal alignment, and that is a framework
+                // limit rather than a choice here.** Every cartesian x scale in basalt-ui is a
+                // `scalePoint` over the domain's keys, so these 24 runs are 24 evenly spaced
+                // positions whatever the real gaps; the charts above only look proportional
+                // because their domain is a regular grid. The cursor lands on the right run at a
+                // different screen x. `runAxisKey`'s docblock carries the full trade.
                 //
-                // It used to be a collision as well, and that half is gone: the run labels were
-                // the same `DD.MM HH:MM` string space `bucketAxisLabel` produced, so a run landing
-                // on a bucket start (14:05, 14:10) broadcast a key the latency band owned while a
-                // run at 14:07 broadcast nothing — a cursor appearing on some runs and not others,
-                // with no rule a reader could infer. Nothing on the page formats through its domain
-                // value now, so the two key spaces cannot intersect by accident.
-                //
-                // **The isolation stays, and is what keeps that guarantee from being an accident.**
-                // These two charts key on `runAxisKey` (`ts:id`), which `Date.parse` and the
-                // numeric test both reject, so the domain-aware cursor could not resolve them
-                // against a bucketed sibling even without the wrapper — but only because the key
-                // is shaped that way. The wrapper says the thing that is actually true regardless:
-                // this axis is runs, not clock time, and nothing here should ever track a chart
-                // measured on a grid.
-                //
-                // Applies to the two chart bodies on `MultiLine` — this one and `BufferbloatChart`
-                // below (`grep -rn runAxisKey src/charts/`). The 30-day pattern view and the
-                // by-hour heatmap hit-test per cell and never join a cursor at all.
-                <ChartCursorScope>
-                  <Stack gap="md">
-                    <SpeedChart
-                      tests={tests ?? []}
-                      refLines={throughputRefLines(status?.vantage, router, nowTick)}
-                      isPending={testsPending}
-                    />
-                    <ServerChangeNote tests={tests ?? []} isPending={testsPending} />
-                  </Stack>
-                </ChartCursorScope>
+                // The 30-day pattern view and the by-hour heatmap still join no cursor at all —
+                // they hit-test per cell and never broadcast.
+                <Stack gap="md">
+                  <SpeedChart
+                    tests={tests ?? []}
+                    refLines={throughputRefLines(status?.vantage, router, nowTick)}
+                    isPending={testsPending}
+                  />
+                  <ServerChangeNote tests={tests ?? []} isPending={testsPending} />
+                </Stack>
               ),
             },
             {
@@ -640,10 +626,8 @@ function DashboardPage() {
               key: 'under-load',
               label: 'Latency under load',
               render: () => (
-                // Same isolation as the 'Every run' view above — see that comment.
-                <ChartCursorScope>
-                  <BufferbloatChart tests={tests ?? []} isPending={testsPending} />
-                </ChartCursorScope>
+                // On the page cursor too — see the 'Every run' view above.
+                <BufferbloatChart tests={tests ?? []} isPending={testsPending} />
               ),
             },
           ]}

@@ -227,7 +227,7 @@ Every chart composes the shipped primitives — never hand-rolled equivalents:
 
 - **`ChartCard`** wrapper (title + info-tooltip + extra slot, consistent margin).
 - **`ChartLegend`** (`line | bar | split | splitLine` shapes) — never hand-rolled legend markup.
-- **`ChartTooltip`** + `TooltipHeader` / `TooltipRow` / `TooltipBody` — never import `@visx/tooltip`
+- **`ChartTooltipFloat`** + `TooltipHeader` / `TooltipRow` / `TooltipBody` — never import `@visx/tooltip`
   directly (oxlint bans it in chart files).
 - **`AxisBottomDate`** / **`AxisLeftNumeric`** / **`AxisRightNumeric`** — never raw
   `<AxisLeft>`/`<AxisBottom>` (they miss theme tokens + smart ticks). Now lint-enforced:
@@ -262,7 +262,7 @@ resolve/render with no `@mantine/*` installed — CI-tested, repo-local only, no
 - Every color comes from a token (`VX.*` / palette) — `basalt-ui check-theme` green, zero raw hex.
 - One hue per metric; categorical multi-color only where the data is genuinely categorical.
 - Neutral line/axis/grid; soft `AreaGradient` on plain metric lines, opaque stacked-area bands.
-- Tooltip = `ChartCard` / `ChartTooltip` primitives, one swatch per row — no hand-rolled markup.
+- Tooltip = `ChartCard` / `ChartTooltipFloat` primitives, one swatch per row — no hand-rolled markup.
 - Looks right in BOTH schemes (toggled and checked: glow on dark, contrast on light).
 - New colors landed as `{ light, dark }` pairs in the palette, not inline.
 - Nothing reads `localStorage.getItem('theme')`.

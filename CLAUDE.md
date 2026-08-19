@@ -158,12 +158,28 @@ anyone they disagreed.
   `basalt/chart-legend-literal` fails the build on a hand-written `ChartLegend`
   items array; the two strips' four-fill legends are `SeriesStyle[]` handed to
   `ChartFrame` for exactly that reason.
-- **Only the chart the pointer is on shows a tooltip.** Followers get the crosshair
-  and their own series dots. This directory used to draw a value chip on every
-  synced sibling (`charts/synced-tip.tsx`, now deleted) because no primitive
-  positioned a tooltip no pointer event produced; `tooltip.follow: false` is the
-  shipped answer and the latency band uses it — anchoring to the crosshair instead
-  of the pointer lines every chart in the column up on the same instant.
+- **Every chart on the cursor shows a tooltip, and exactly one of them announces
+  it.** For three releases only the pointer's own chart did: this directory drew a
+  value chip on every synced sibling (`charts/synced-tip.tsx`) until the 1.15.0
+  rebuild made tooltips source-only, and hovering a spike then moved a bare line
+  across four charts with numbers on one — the position without the reading.
+  `tooltip.onFollow` (1.18.0) is the shipped answer for the three charts on a kind;
+  the three that compose `ChartFrame` reproduce it through `charts/follower-anchor.ts`,
+  which deliberately copies `CartesianChart`'s arithmetic rather than inventing its
+  own. **Two halves are easy to ship broken and both are pinned by
+  `charts/follower-tooltip.test.ts`:**
+  - **`aria-live` belongs to the source alone.** `ChartTooltipFloat` announces by
+    default, so four live regions fired on every cursor move the first time this
+    shipped. `CartesianChart` makes the split itself; a hand-composed chart passes
+    `ariaLive={cursor.isSource}` or silently does not.
+  - **A follower off screen renders nothing** (`charts/use-in-viewport.ts`).
+    `ChartTooltipFloat` keeps a tooltip inside the window, so an unconditional
+    `onFollow: true` does not quietly draw off screen — it draws *clamped into
+    view*, over a tooltip the reader is looking at. Measured: the Throughput chart
+    at y=1501 in an 1100px viewport put its tooltip at y=997, on top of Speed's at
+    y=1015.
+  Source charts still track the pointer; only the latency band anchors as a source
+  (`tooltip.follow: false`), because three charts share its column.
 
 ## Conventions
 

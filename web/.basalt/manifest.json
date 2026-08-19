@@ -2,7 +2,7 @@
   "version": 1,
   "files": {
     ".claude/rules/basalt-mantine.md": "05197e4e5015d4edf57911a396cf1300f577f9be71ac28fa91aa03d59bd99f48",
-    ".claude/rules/basalt-charts.md": "53474b652eb77db8fa1d213bc958220fe2197230c3d6571587fb831f53378cc3",
+    ".claude/rules/basalt-charts.md": "ee93d20962be026f11baeff869baf4cdccd278e7166b19fe29a0347df9506c00",
     ".claude/rules/basalt-tokens.md": "c2864940c39df3b15261a32e8a7f0a02ec6fbe0954e84cf4db68dbe409362120",
     ".claude/rules/basalt-query.md": "cacd92c4c9c40721e3854abc8e734f557c0447c51c4b619e84e2e42d12fe2cdc",
     ".claude/rules/basalt-router.md": "2d6d9cb9dd34e683309a380af4fd5434dc0349592a252c4208c1c51b673105d2",
@@ -15,7 +15,7 @@
     ".claude/rules/basalt-state.md": "f51b38a79c42c767c5721dfd46ed1123f0e7be3e069effac6353ad0683237613",
     ".claude/rules/basalt-app.md": "24068ac5dc9a69b955c6b050fb802c7c3cffc33114e7a36f21ca7b3caaf6631e",
     ".claude/skills/basalt-app/SKILL.md": "52f007c13c20dc75a682765d4446b9e46097d8dab498babc4666b322fffd0422",
-    ".claude/skills/basalt-design/SKILL.md": "e2e36e2e34fb04bf6b8c4d627c8f2a3389029cd98c174bdb5fbc5848b4900af3",
+    ".claude/skills/basalt-design/SKILL.md": "00e058be90d1fa06532c9f15506c34b6ba2cacf045b3173cb86fba3c886dfdfd",
     ".claude/skills/basalt-charts/SKILL.md": "503aa04518e55a65a33d87a6f610580eb6c5af87e2d4346fc935947738a43ff2",
     "CLAUDE.md": "876f1bfca1528df6f3741a1263585f9252d8374641729079a875b75bc8ba8dbe",
     "DESIGN.md": "5bbf20edb4483682e5ff5564c446e3b8335947917545af708b671957286256b1",
@@ -26,7 +26,7 @@
     "src/query-client.ts": "5efb420731453ee1e0279a4501bf6536b066b595f14886ba3d7329336eae09c1",
     "src/routes/__root.tsx": "439fb91cf26ee51eb56ae6415556970d323dae6049d10415970709b79c0373e0"
   },
-  "basaltVersion": "1.17.0",
+  "basaltVersion": "1.18.0",
   "spacingScale": {
     "xs": 11,
     "sm": 13,

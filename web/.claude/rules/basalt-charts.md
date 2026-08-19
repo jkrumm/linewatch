@@ -145,6 +145,18 @@ ships no map kind.
    onto one domain value, silently dropping one from the plot (see #6 below for why that's the
    cursor's problem too). `Heatmap` is deliberately excluded: its existing `colLabel`/`rowLabel`
    already are that seam, and a second prop over one concern would fork them.
+   **The x axis is CATEGORICAL, and this is not inferable from the API.** `CartesianChart` builds
+   its x scale as `scalePoint<string>`, so N points are N evenly spaced positions whatever the
+   values behind the keys — there is no linear or time x scale. Correct and invisible for a domain
+   that is already a regular grid (five-minute buckets ARE evenly spaced); wrong for an event-shaped
+   series (speed-test runs, deploys, sessions). Two silent consequences: on a page sharing one
+   cursor, event points draw at equal spacing, so the crosshair marks the right point at a different
+   screen x than a regularly-sampled sibling — the correlation stays legible in the numbers and not
+   in the geometry; and because the domain value must be unique, two events at the same instant
+   collapse onto one position and one stops being drawn. `getX` returning a date string reads like a
+   time axis and is not one. Tracked as issue #52; a chart whose x is a measured quantity currently
+   needs a `basalt/hand-rolled-plot` exemption.
+
 6. **The cursor is shared by default.** No provider needed — `useChartCursor` reads a module-level
    external store (`useSyncExternalStore`), so every `CartesianChart`/`ChartFrame`-composed chart on
    the page shares one cursor out of the box. `ChartCursorScope` **isolates** a subtree onto a

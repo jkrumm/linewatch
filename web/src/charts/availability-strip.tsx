@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useMemo, useRef } from 'react'
 import { scaleBand } from '@visx/scale'
 import {
   AxisBottomDate,
@@ -14,6 +14,8 @@ import {
   alpha,
   useChartCursor,
 } from 'basalt-ui/charts'
+import { tooltipAnchor } from './follower-anchor'
+import { useInViewport } from './use-in-viewport'
 import type { ProbeBucket, ProbeBucketSeconds, TargetName } from '../lib/types'
 import { TARGET_LABEL } from '../lib/types'
 import { densifyBuckets } from '../lib/densify'
@@ -383,6 +385,10 @@ function StripPlot({
     marginLeft: plotLeft,
   })
   const point = cursor.point
+  // Own `<svg>`, so the follower tooltip's viewport position has to be measured off it —
+  // see `tooltipAnchor`.
+  const svgRef = useRef<SVGSVGElement>(null)
+  const inView = useInViewport(svgRef)
 
   if (width < plotLeft + plotRight + 20 || plotColumns.length === 0) return null
 
@@ -396,7 +402,7 @@ function StripPlot({
 
   return (
     <>
-      <svg width={width} height={height}>
+      <svg ref={svgRef} width={width} height={height}>
         <defs>
           <HatchPattern id={absentHatchId} color={VX.neutral} opacity={0.7} size={hatchSize} />
         </defs>
@@ -488,7 +494,22 @@ function StripPlot({
           to draw (`charts/synced-tip.tsx`) is gone with `ChartTooltip`: `useChartCursor` exposes
           `isSource`, and the shipped policy for a chart following a sibling's cursor is crosshair
           and dots, not a second floating card. */}
-      <ChartTooltipFloat anchor={cursor.isSource ? cursor.anchor : null}>
+      <ChartTooltipFloat
+        anchor={tooltipAnchor({
+          isSource: cursor.isSource,
+          inView,
+          ownAnchor: cursor.anchor,
+          svg: svgRef.current,
+          marginLeft: plotLeft,
+          crosshairX: point ? (scale(point.key) ?? 0) + scale.bandwidth() / 2 : null,
+        })}
+        // Followers stay silent. `ChartTooltipFloat` is `aria-live` by default, which is right for
+        // the one tooltip a pointer produced and wrong for the three that appear beside it — four
+        // live regions announcing on every cursor move makes the page unusable with a screen
+        // reader. Same split `CartesianChart` makes for `onFollow`; a hand-composed chart has to
+        // make it itself.
+        ariaLive={cursor.isSource}
+      >
         {point && (
           <>
             <TooltipHeader

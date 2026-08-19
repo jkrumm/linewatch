@@ -164,15 +164,20 @@ anyone they disagreed.
   rebuild made tooltips source-only, and hovering a spike then moved a bare line
   across four charts with numbers on one — the position without the reading.
   `tooltip.onFollow` (1.18.0) is the shipped answer for the three charts on a kind;
-  the three that compose `ChartFrame` reproduce it through `charts/follower-anchor.ts`,
-  which deliberately copies `CartesianChart`'s arithmetic rather than inventing its
-  own. **Two halves are easy to ship broken and both are pinned by
+  the three that compose `ChartFrame` reproduce it through `useFollowerTooltip`
+  (`charts/follower-anchor.ts`), which deliberately copies `CartesianChart`'s
+  arithmetic rather than inventing its own. **One implementation, not three** — the
+  policy was hand-copied into all three charts first, and both halves below are
+  exactly the kind of default that survives being copied wrong. **Two halves are easy to ship broken and both are pinned by
   `charts/follower-tooltip.test.ts`:**
   - **`aria-live` belongs to the source alone.** `ChartTooltipFloat` announces by
     default, so four live regions fired on every cursor move the first time this
     shipped. `CartesianChart` makes the split itself; a hand-composed chart passes
     `ariaLive={cursor.isSource}` or silently does not.
-  - **A follower off screen renders nothing** (`charts/use-in-viewport.ts`).
+  - **A follower off screen renders nothing** (`charts/use-in-viewport.ts`, which
+    tracks the NODE — a version keyed on a `RefObject` ran its effect once on mount
+    and never observed a chart whose `<svg>` appears later, which all three
+    hand-composed ones do).
     `ChartTooltipFloat` keeps a tooltip inside the window, so an unconditional
     `onFollow: true` does not quietly draw off screen — it draws *clamped into
     view*, over a tooltip the reader is looking at. Measured: the Throughput chart

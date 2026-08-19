@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react'
+import { useMemo } from 'react'
 import type { ReactNode } from 'react'
 import { Area } from '@visx/shape'
 import {
@@ -354,11 +354,10 @@ export function LatencyBandChart({
   // end to end. `VX.margin` is only a floor on the measured gutter now, so `plotWidth` slightly
   // OVER-estimates — absorbed by `AXIS_LABEL_PX`, which is already 96px for a ~72px label.
   const { ref: sizeRef, width } = useChartSize()
-  // Observed on its own wrapper rather than the measuring div: `useChartSize`'s ref is a
-  // CALLBACK ref of unpinned identity, and merging two callback refs inline would detach and
-  // re-observe on every render. One layout-neutral div is the cheaper answer.
-  const viewRef = useRef<HTMLDivElement>(null)
-  const inView = useInViewport(viewRef)
+  // Its own wrapper rather than the measuring div: `useChartSize`'s ref is a CALLBACK ref of
+  // unpinned identity, and merging two callback refs inline would detach and re-observe on
+  // every render. One layout-neutral div is the cheaper answer.
+  const { ref: viewRef, inView } = useInViewport<HTMLDivElement>()
   const plotWidth = Math.max(1, width - VX.margin.left - VX.margin.right)
 
   return (

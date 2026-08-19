@@ -1,4 +1,5 @@
 import type { CursorAnchor } from 'basalt-ui/charts'
+import { useInViewport } from './use-in-viewport'
 
 /**
  * Where a hand-composed chart's tooltip goes, source or follower.
@@ -56,4 +57,40 @@ export function tooltipAnchor({
   // inside one column changes no key, so siblings do not re-render and no rect is read.
   const rect = svg.getBoundingClientRect()
   return { x: rect.left + marginLeft + crosshairX, y: rect.top }
+}
+
+/**
+ * The whole follower-tooltip wiring for a chart that composes `ChartFrame` by hand.
+ *
+ * Three charts here do (`availability-strip`, `link-speed-strip`, `throughput-chart`), and they had
+ * three byte-identical copies of it: the `<svg>` ref, the viewport gate, the `tooltipAnchor` call
+ * and the `aria-live` split. `tooltipAnchor` above had already been extracted "in one place rather
+ * than three" and the React plumbing around it was still tripled — which is the copy that matters,
+ * because the two easy-to-ship-broken halves of this policy both live in the plumbing.
+ *
+ * Returns the ref to put on the `<svg>` and the two props `ChartTooltipFloat` needs. Call it above
+ * the width/emptiness early-return these charts all have: `useInViewport` tracks the NODE, so an
+ * `<svg>` that mounts later is picked up, but the hook itself still has to run every render.
+ */
+export function useFollowerTooltip({
+  isSource,
+  ownAnchor,
+  marginLeft,
+  crosshairX,
+}: {
+  isSource: boolean
+  ownAnchor: CursorAnchor | null
+  marginLeft: number
+  crosshairX: number | null
+}): { svgRef: (node: SVGSVGElement | null) => void; anchor: CursorAnchor | null; ariaLive: boolean } {
+  const { ref, node, inView } = useInViewport<SVGSVGElement>()
+  return {
+    svgRef: ref,
+    anchor: tooltipAnchor({ isSource, inView, ownAnchor, svg: node, marginLeft, crosshairX }),
+    // Followers stay silent. `ChartTooltipFloat` is `aria-live` by default, which is right for the
+    // one tooltip a pointer produced and wrong for the three that appear beside it — four live
+    // regions announcing on every cursor move makes the page unusable with a screen reader. Same
+    // split `CartesianChart` makes for `onFollow`; a hand-composed chart has to make it itself.
+    ariaLive: isSource,
+  }
 }

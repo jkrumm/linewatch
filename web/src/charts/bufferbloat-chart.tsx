@@ -1,4 +1,3 @@
-import { useRef } from 'react'
 import { ChartCard, MultiLine, VX, useChartSize } from 'basalt-ui/charts'
 import { useInViewport } from './use-in-viewport'
 import type { SpeedTest } from '../lib/types'
@@ -29,11 +28,10 @@ export function BufferbloatChart({
   const points = ordered.map((test) => ({ test, key: runAxisKey(test.ts) }))
   // Measured out here for `xTicks` alone — see `speed-chart.tsx`'s identical wrapper.
   const { ref: sizeRef, width } = useChartSize()
-  // Observed on its own wrapper rather than the measuring div: `useChartSize`'s ref is a
-  // CALLBACK ref of unpinned identity, and merging two callback refs inline would detach and
-  // re-observe on every render. One layout-neutral div is the cheaper answer.
-  const viewRef = useRef<HTMLDivElement>(null)
-  const inView = useInViewport(viewRef)
+  // Its own wrapper rather than the measuring div: `useChartSize`'s ref is a CALLBACK ref of
+  // unpinned identity, and merging two callback refs inline would detach and re-observe on
+  // every render. One layout-neutral div is the cheaper answer.
+  const { ref: viewRef, inView } = useInViewport<HTMLDivElement>()
   const plotWidth = Math.max(1, width - VX.margin.left - VX.margin.right)
 
   return (

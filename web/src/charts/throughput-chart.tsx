@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from 'react'
+import { useCallback, useMemo } from 'react'
 import { scaleBand, scaleLinear } from '@visx/scale'
 import {
   AxisBottomDate,
@@ -15,8 +15,7 @@ import {
   alpha,
   useChartCursor,
 } from 'basalt-ui/charts'
-import { tooltipAnchor } from './follower-anchor'
-import { useInViewport } from './use-in-viewport'
+import { useFollowerTooltip } from './follower-anchor'
 import type { ProbeBucketSeconds, ThroughputBucket } from '../lib/types'
 import { throughputPoints, type ThroughputPoint } from '../lib/throughput'
 import { fmtBytes, fmtDateTime, fmtRate } from '../lib/format'
@@ -282,10 +281,14 @@ function MirroredBars({
     marginLeft: LEFT_GUTTER,
   })
   const point = cursor.point
-  // Own `<svg>`, so the follower tooltip's viewport position has to be measured off it —
-  // see `tooltipAnchor`.
-  const svgRef = useRef<SVGSVGElement>(null)
-  const inView = useInViewport(svgRef)
+  // Every follower-tooltip decision lives in `useFollowerTooltip`: where it goes, whether it
+  // appears at all off screen, and which one announces itself.
+  const { svgRef, anchor: tipAnchor, ariaLive } = useFollowerTooltip({
+    isSource: cursor.isSource,
+    ownAnchor: cursor.anchor,
+    marginLeft: LEFT_GUTTER,
+    crosshairX: point ? (xScale(point.key) ?? 0) + xScale.bandwidth() / 2 : null,
+  })
 
   // Each half scaled independently — see the component docblock. `|| 1` keeps a window with no
   // traffic at all from producing a zero-width domain, which renders as NaN geometry.
@@ -450,22 +453,7 @@ function MirroredBars({
       </svg>
       {/* Source-only, like every other chart now — the follower chip this chart used to draw went
           with `ChartTooltip`; see `availability-strip.tsx`. */}
-      <ChartTooltipFloat
-        anchor={tooltipAnchor({
-          isSource: cursor.isSource,
-          inView,
-          ownAnchor: cursor.anchor,
-          svg: svgRef.current,
-          marginLeft: LEFT_GUTTER,
-          crosshairX: point ? (xScale(point.key) ?? 0) + xScale.bandwidth() / 2 : null,
-        })}
-        // Followers stay silent. `ChartTooltipFloat` is `aria-live` by default, which is right for
-        // the one tooltip a pointer produced and wrong for the three that appear beside it — four
-        // live regions announcing on every cursor move makes the page unusable with a screen
-        // reader. Same split `CartesianChart` makes for `onFollow`; a hand-composed chart has to
-        // make it itself.
-        ariaLive={cursor.isSource}
-      >
+      <ChartTooltipFloat anchor={tipAnchor} ariaLive={ariaLive}>
         {point && <PointRows point={point} />}
       </ChartTooltipFloat>
     </>

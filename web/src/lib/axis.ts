@@ -47,13 +47,16 @@ export function axisTickValues<T>(values: readonly T[], widthPx: number, minPxPe
 }
 
 /**
- * A tick count for `MultiLine`'s `numTicksX` whose final label will not crowd its neighbour.
+ * A tick count for `xTicks` whose final label will not crowd its neighbour.
  *
- * `MultiLine` picks ticks with basalt's `smartTicksEvery(values, count)`: every `ceil(n / count)`-th
- * value, **plus the last one unconditionally**. When the step does not land on the final index that
- * appended tick sits a partial step from its neighbour — measured on a 24 h window, `01.08 14:05`
- * and `01.08 15:20` printed on top of each other at the right edge. `numTicksX` is the only lever
- * the kind exposes.
+ * `CartesianChart` (and every kind that composes it) picks ticks with basalt's
+ * `smartTicksEvery(values, count)` when `xTicks` is set: every `ceil(n / count)`-th value, **plus
+ * the last one unconditionally**. When the step does not land on the final index that appended tick
+ * sits a partial step from its neighbour — measured on a 24 h window, `01.08 14:05` and
+ * `01.08 15:20` printed on top of each other at the right edge. A COUNT is the only lever those
+ * charts expose, which is why `speed-chart`, `bufferbloat-chart` and `latency-band-chart` measure
+ * their own container: a count that keeps labels apart can only be derived from a width. The three
+ * charts that compose `AxisBottomDate` themselves pass tick VALUES (`axisTickValues`) instead.
  *
  * The test is in **pixels, not divisibility**. Requiring the step to divide the axis evenly sounds
  * tidier but frequently has no solution at all — at 100 values no count from 2 to 11 divides 99 —
@@ -85,26 +88,26 @@ export function fitTickCount(
 }
 
 /**
- * The time label for one bucket on a chart's x-axis, in UTC.
+ * The time label for one bucket on a chart's x-axis.
  *
  * `basalt-ui`'s `fmtAxisDate` renders every category as `DD.MM` — it matches the date out of an
  * ISO string and drops the time entirely. On a 24 h window at 5-minute buckets that produces an
  * axis reading `31.07 31.07 31.07 …` a dozen times: an axis that costs its full height and tells
  * the reader nothing about where they are in the window.
  *
- * **This is a formatter now, not a key.** basalt-ui 1.9.0 gave `AxisBottomDate` a `tickFormat`, so
- * the four charts that compose the axis directly (both strips, the throughput bars, the latency
- * band) keep the bucket's ISO start as their scale domain and pass this in to render it. Before
- * that there was no supported exit — `fmtAxisDate` returns a non-ISO string unchanged, so a
- * *pre-formatted* label was the only thing that reached the axis, which forced the label to double
- * as the scale's domain value and, through it, as the cross-chart hover key and the fold index's
- * key. Three unrelated jobs on one string. `tickFormat` separates them: identity is the ISO start,
- * rendering is this function, and neither constrains the other.
+ * **This is a formatter now, not a key.** The four bucketed charts keep the bucket's ISO start as
+ * their scale domain and pass this in to render it — the latency band through
+ * `CartesianChart`'s `formatX`, both strips and the throughput bars through `AxisBottomDate`'s
+ * `tickFormat`, which they still compose themselves. Before either existed there was no supported
+ * exit: `fmtAxisDate` returns a non-ISO string unchanged, so a *pre-formatted* label was the only
+ * thing that reached the axis, which forced the label to double as the scale's domain value and,
+ * through it, as the cross-chart hover key. Two unrelated jobs on one string. Separating them also
+ * bought the cursor: `useChartCursor` resolves a sibling's key by PARSING it, so an ISO domain is
+ * what lets a folded strip track the unfolded latency band with no key map in between.
  *
- * `MultiLine` still forwards no `tickFormat` (it calls `AxisBottomDate` with `scale` and
- * `tickValues` only), so the two run-series charts on that kind — `speed-chart`,
- * `bufferbloat-chart` — must still pre-format via `runAxisLabels`, where the label genuinely is
- * the domain value and uniqueness genuinely is load-bearing. See that function.
+ * The two run-series charts reach it the same way: `MultiLine` gained `formatX` in 1.17.0, so
+ * `runTickFormat` renders their axis and `runAxisKey` is their identity. Nothing on this page
+ * formats through its domain value any more.
  *
  * Resolution still varies with the bucket size, but now for legibility rather than collision:
  *
@@ -155,67 +158,31 @@ export function bucketTickFormat(bucketSeconds: ProbeBucketSeconds): (key: strin
 }
 
 /**
- * Axis labels for a series drawn one point per event rather than one per bucket.
+ * Scale key and axis label for a series drawn one point per event rather than one per bucket.
  *
- * **Still pre-formatted, and still a scale key — this is the case `tickFormat` did not reach.**
- * `MultiLine` calls `AxisBottomDate` with `scale` and `tickValues` and forwards no format, so for
- * the two charts built on that kind the string returned from `getX` is the domain value, the hover
- * key and the visible tooltip header at once. Everything below therefore still holds here, exactly
- * as it stopped holding for the bucketed charts.
+ * **Two functions, because they are two jobs — which is the whole point.** `runAxisKey` produces
+ * the categorical scale's domain value and `runTickFormat` renders it. For most of this file's
+ * history they were one string: `MultiLine` forwarded no `formatX`, so the only thing that reached
+ * the axis was the value `getX` returned, and the visible label was therefore also the identity.
+ * That forced a whole apparatus — a seconds tiebreak appended to every member of a colliding
+ * minute, then a UTC-offset suffix for the autumn fall-back hour where two runs 3600 s apart agree
+ * on date, hour, minute AND second — to keep a *display* string unique, because two points sharing
+ * a domain value collapse onto one x position and one of them stops being drawn. `formatX` on the
+ * kinds (basalt-ui 1.17.0) ended that, and the apparatus went with it.
  *
- * The bucketed charts get uniqueness for free: `bucketAxisLabel` is injective over a grid whose
- * step is at least a minute. A speed-test series has no grid — the runs land wherever the cron
- * fired, two can share a minute after a manual run, and the label doubles as the categorical
- * scale's key. Two points sharing a key collapse onto one x position and one of them stops being
- * drawn, which is a measurement silently dropped.
- *
- * So collisions are broken by appending a seconds field to *every* label in a colliding group,
- * rather than only to the later ones. Disambiguating just the duplicate would put `01.08 14:03`
- * and `01.08 14:03:41` side by side on one axis, and a reader comparing them would take the
- * difference in precision for a difference in the measurement.
- *
- * **Seconds are no longer the last resort, because the labels are local now.** On the autumn
- * DST fall-back the local wall clock repeats a whole hour, so two runs 3600 s apart agree on the
- * date, the hour, the minute AND the second — and a seconds-only tiebreak hands them one identical
- * key, which is the silently-dropped measurement this whole function exists to prevent. It just
- * moved from "twice in a minute" to "once a year". A second pass appends the UTC offset to any
- * group still colliding, which is precisely the fact that distinguishes them; it costs one suffix
- * on one hour a year and nothing at all on the other 8759.
- *
- * Order is preserved and the output is index-aligned with the input, because the caller zips it
- * back onto the runs it came from.
+ * The key is `ts:id`, not the timestamp alone. `id` is the row's primary key, so uniqueness is a
+ * fact rather than an argument about how unlikely two runs sharing a millisecond are; the `ts`
+ * prefix is what lets the label be a pure function of the key, with no `Map` to keep in step with
+ * a re-sort. The pair is deliberately NOT parseable as a date or a number: these two charts sit in
+ * their own `ChartCursorScope` because their x-axis is runs rather than clock time, and a key that
+ * resolves against nothing is the honest shape for that.
  */
-export function runAxisLabels(timestamps: readonly number[]): string[] {
-  const minuteLabel = (ts: number) => bucketAxisLabel(ts, 60)
-  const withSeconds = (ts: number) => `${minuteLabel(ts)}:${String(new Date(ts).getSeconds()).padStart(2, '0')}`
-
-  const toMinute = timestamps.map(minuteLabel)
-  const minuteCounts = tally(toMinute)
-  // Every member of a colliding group gets the seconds, not only the later one — see above.
-  const withTiebreak = timestamps.map((ts, i) => ((minuteCounts.get(toMinute[i]!) ?? 0) <= 1 ? toMinute[i]! : withSeconds(ts)))
-
-  const secondCounts = tally(withTiebreak)
-  return withTiebreak.map((label, i) =>
-    (secondCounts.get(label) ?? 0) <= 1 ? label : `${label} ${utcOffsetLabel(timestamps[i]!)}`,
-  )
+export function runAxisKey(ts: number, id: number): string {
+  return `${ts}:${id}`
 }
 
-function tally(labels: readonly string[]): Map<string, number> {
-  const counts = new Map<string, number>()
-  for (const label of labels) counts.set(label, (counts.get(label) ?? 0) + 1)
-  return counts
+/** `MultiLine`'s `formatX` for a run series — the reading half of `runAxisKey`. */
+export function runTickFormat(key: string): string {
+  return bucketAxisLabel(Number(key.slice(0, key.indexOf(':'))), 60)
 }
 
-/** `UTC+02` / `UTC-05` — the offset the instant is being read through, for the one case where two
- * instants share a local wall clock. Whole hours only would be wrong for the zones that run on a
- * :30 or :45 offset, so the minutes are kept when there are any. */
-function utcOffsetLabel(ts: number): string {
-  // `getTimezoneOffset` is minutes to ADD to local to reach UTC, i.e. positive west of Greenwich —
-  // the opposite sign to how an offset is written.
-  const minutes = -new Date(ts).getTimezoneOffset()
-  const sign = minutes < 0 ? '-' : '+'
-  const abs = Math.abs(minutes)
-  const hh = String(Math.floor(abs / 60)).padStart(2, '0')
-  const mm = abs % 60
-  return mm === 0 ? `UTC${sign}${hh}` : `UTC${sign}${hh}:${String(mm).padStart(2, '0')}`
-}

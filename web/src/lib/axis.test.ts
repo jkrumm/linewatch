@@ -5,7 +5,8 @@ import {
   bucketAxisLabel,
   bucketTickFormat,
   fitTickCount,
-  runAxisLabels,
+  runAxisKey,
+  runTickFormat,
 } from './axis'
 
 // Built from LOCAL components, not `Date.UTC`. These labels are the host's wall clock now, so an
@@ -191,58 +192,55 @@ describe('fitTickCount', () => {
   })
 })
 
-describe('runAxisLabels', () => {
-  /** Local components, for the reason `JUL_31_2026_2305` gives — the labels are the host's wall
+describe('runAxisKey / runTickFormat', () => {
+  /** Local components, for the reason `JUL_31_2026_2305` gives — the label is the host's wall
    * clock, so a UTC-pinned instant would render differently per machine. */
   const at = (h: number, m: number, s = 0) => new Date(2026, 7, 1, h, m, s).getTime()
 
-  test('labels a run to the minute, on the host clock', () => {
-    expect(runAxisLabels([at(14, 3, 41)])).toEqual(['01.08 14:03'])
-  })
-
-  test('is index-aligned with its input and preserves order', () => {
-    const labels = runAxisLabels([at(14, 3), at(9, 0)])
-    expect(labels).toEqual(['01.08 14:03', '01.08 09:00'])
-  })
-
-  test('breaks a same-minute collision on every member of the group, not only the later one', () => {
-    // A label doubles as the categorical scale's key: two runs sharing one would collapse onto a
-    // single x position and one of them would stop being drawn.
-    const labels = runAxisLabels([at(14, 3, 7), at(14, 3, 41)])
-    expect(labels).toEqual(['01.08 14:03:07', '01.08 14:03:41'])
-    expect(new Set(labels).size).toBe(2)
+  test('renders a run to the minute, on the host clock', () => {
+    expect(runTickFormat(runAxisKey(at(14, 3, 41), 7))).toBe('01.08 14:03')
   })
 
   /**
-   * The collision local labels introduced, and the reason seconds are no longer the last resort.
+   * The property the two functions exist to separate.
    *
-   * On the autumn fall-back the wall clock repeats an hour, so two runs 3600 s apart agree down to
-   * the second and the seconds tiebreak hands them one identical key — the silently-dropped
-   * measurement this function exists to prevent, moved from "twice in a minute" to "once a year".
-   *
-   * Constructed in UTC deliberately: the two instants have to straddle a real transition, which is
-   * a property of the zone the suite runs in. Skipped where there is none (a UTC host, or one whose
-   * zone does not observe DST) rather than asserted vacuously.
+   * A same-minute pair — two runs after a manual trigger — renders as one string and MUST still be
+   * two domain values. When the label was the key this took a seconds tiebreak appended to every
+   * member of the colliding group, and then a UTC-offset suffix on top of it for the autumn
+   * fall-back hour, where two runs 3600 s apart agree on date, hour, minute and second alike. The
+   * row id makes it a fact instead: same minute, same second, same repeated wall-clock hour, still
+   * two keys.
    */
-  test('breaks a repeated wall-clock hour with the UTC offset', () => {
+  test('two runs in one minute share a label and never a key', () => {
+    const a = runAxisKey(at(14, 3, 7), 1)
+    const b = runAxisKey(at(14, 3, 41), 2)
+    expect(runTickFormat(a)).toBe(runTickFormat(b))
+    expect(a).not.toBe(b)
+  })
+
+  test('two runs on the same millisecond are still distinct keys', () => {
+    expect(runAxisKey(at(9, 0), 1)).not.toBe(runAxisKey(at(9, 0), 2))
+  })
+
+  /** The DST fall-back that forced the old offset suffix. Constructed in UTC deliberately: the two
+   * instants have to straddle a real transition, which is a property of the zone the suite runs in.
+   * Skipped where there is none rather than asserted vacuously. */
+  test('a repeated wall-clock hour needs no special case', () => {
     const first = Date.UTC(2026, 9, 25, 0, 30)
     const second = first + 3_600_000
     if (new Date(first).getTimezoneOffset() === new Date(second).getTimezoneOffset()) return
 
-    const labels = runAxisLabels([first, second])
-    expect(new Set(labels).size).toBe(2)
-    expect(labels.every((l) => l.includes('UTC'))).toBe(true)
+    const keys = [runAxisKey(first, 1), runAxisKey(second, 2)]
+    expect(new Set(keys).size).toBe(2)
+    expect(runTickFormat(keys[0]!)).toBe(runTickFormat(keys[1]!))
   })
 
-  test('leaves uncolliding labels at minute precision while a colliding pair gains seconds', () => {
-    // Mixed precision across the axis is the cost of not dropping a point; mixed precision *within*
-    // a colliding pair would read as a difference in the measurement, which is why the whole group
-    // is disambiguated together.
-    const labels = runAxisLabels([at(9, 0), at(14, 3, 7), at(14, 3, 41)])
-    expect(labels).toEqual(['01.08 09:00', '01.08 14:03:07', '01.08 14:03:41'])
-  })
-
-  test('an empty series has no labels', () => {
-    expect(runAxisLabels([])).toEqual([])
+  /** The key is not parseable as a date or a number, which is what keeps these two charts' runs
+   * from resolving against a bucketed sibling's clock-time domain — see `ChartCursorScope` in
+   * `routes/index.tsx`. */
+  test('the key is opaque to the cursor: neither a number nor a date', () => {
+    const key = runAxisKey(at(14, 3), 7)
+    expect(Number.isNaN(Date.parse(key))).toBe(true)
+    expect(/^[-+]?\d*\.?\d+$/.test(key)).toBe(false)
   })
 })

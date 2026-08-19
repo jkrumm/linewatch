@@ -76,10 +76,23 @@ token, no debouncing needed.
 - The LAST (in-flight) block is repaired via `remend` before rendering — unclosed `**`/`` ` ``/
   `~~`/`$$`, an incomplete `[text](url` link (remend rewrites it to
   `streamdown:incomplete-link` — any `streamdown:` href is dropped by the link hardening below).
+  `remend` is a lazy optional peer (dynamic `import()`); the root `.` entry no longer hard-requires
+  it.
+- **`streaming` is a RENDERING mode only** — it says the text is still arriving, not who wrote it.
+  Trust is a separate prop, `contentTrust: 'trusted' | 'untrusted'`, and it is the sole input to the
+  image allowlist below. Any surface rendering agent/model output must pin
+  `contentTrust="untrusted"` explicitly — a finished agent message is still model-generated, so
+  don't lean on `streaming` as a stand-in for trust.
 - **Hardening is ALWAYS ON**, streaming or not: `allowedLinkPrefixes` (default `['https://',
-'mailto:', '#', '/']`) / `allowedImagePrefixes` (default `['https://', '/']`) / `defaultOrigin`
-  (resolves a relative URL before the allowlist check's result is used). A disallowed `href`/`src`
-  renders as an unlinked `<span>` / a dropped image — never a raw unsafe URL.
+'mailto:', '#', '/']`) / `defaultOrigin` (resolves a relative URL before the allowlist check's
+  result is used) / a `rehype-sanitize` pass (optional peer; `sanitizeSchema` only ADDS to the
+  default schema, never removes from it). `allowedImagePrefixes` defaults off `contentTrust`, NOT
+  `streaming`: `['https://', '/']` when trusted, same-origin-only `['/']` when untrusted — an
+  auto-fetched image is the classic prompt-injection exfiltration channel. `contentTrust` itself
+  defaults to `'untrusted'` when `streaming` is set, `'trusted'` otherwise — a backward-compat
+  floor, not the policy (see the bullet above). An explicit `allowedImagePrefixes` always overrides
+  the `contentTrust` default. A disallowed `href`/`src` renders as an unlinked `<span>` / a dropped
+  image — never a raw unsafe URL.
 - Fenced code highlights/upgrades per BLOCK on settle, not per token — the in-flight fence renders
   plain mono (`CodeBlock showCopy={false}`) until its block settles.
 - Heading ids: a document-wide `SlugTracker` in non-streaming mode gives correct cross-heading

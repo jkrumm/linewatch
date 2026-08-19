@@ -128,17 +128,42 @@ anyone they disagreed.
   genuine documented exception, one line at a time. The three scoped oxlint overrides
   in `web/.oxlintrc.json` each carry their reason inline; that file is JSONC, so a new
   one must too.
-- **`ChartTooltip` portals to `document.body` as of 1.9.0, and is safe anywhere.**
-  It used to be a plain `<div>`: rendered inside `<svg>`, React created it in the
-  SVG namespace, so it mounted, took its props, threw nothing — and was never
-  painted. `latency-band-chart.tsx` carried eight authored tooltip rows nobody had
-  ever seen, and nothing caught it (it typechecks, it lints, the chart is correct
-  in every other respect). All four charts still author their tooltip in the
-  wrapper outside the SVG, which now costs nothing and keeps them one shape.
+- **A single-plot cartesian chart composes `CartesianChart` and draws only marks —
+  this is lint-enforced, not a preference.** `basalt/hand-rolled-plot` fails the
+  build on an axis, overlay or crosshair primitive in a file that does not compose
+  it, because that primitive already owns the measured margins, both y scales, the
+  axes, the grid, the page-shared cursor, the crosshair and the tooltip.
+  `latency-band-chart.tsx` is the one chart here that fits: it now declares six
+  series and draws four marks, and everything else went. **Three charts legitimately
+  do not fit, and each carries a `theme-allow` on its first assembly primitive
+  saying why:** both strips have no y dimension at all (a numeric left axis over a
+  one-dimensional band would be drawing an axis for nothing), and `throughput-chart`
+  is two panes — download and upload are scaled *independently* against one
+  baseline, which one linear scale cannot express. Those three compose `ChartFrame`
+  + `useChartCursor` + `ChartTooltipFloat`, the same machinery differently
+  assembled, exactly as basalt's own `DualPanel` does.
+- **`ChartTooltipFloat` portals to `document.body`, and is safe anywhere.** Its
+  predecessor `ChartTooltip` was a plain `<div>`: rendered inside `<svg>`, React
+  created it in the SVG namespace, so it mounted, took its props, threw nothing —
+  and was never painted. `latency-band-chart.tsx` carried eight authored tooltip
+  rows nobody had ever seen, and nothing caught it (it typechecks, it lints, the
+  chart is correct in every other respect).
   **What the fix surfaced is the part worth keeping in mind:** the first time
   those rows were reviewed against the marks they name, one disagreed — the
   vantage row painted an `unknown` verdict amber while the rail draws it neutral.
   A mark that renders and a legend that does not are not independently reviewable.
+  The structural answer is now the framework's: `series` is the single source of
+  truth, the legend and the per-series tooltip rows are DERIVED from it, and marks
+  draw `ctx.visible` — so a swatch cannot name a colour its mark does not have.
+  `basalt/chart-legend-literal` fails the build on a hand-written `ChartLegend`
+  items array; the two strips' four-fill legends are `SeriesStyle[]` handed to
+  `ChartFrame` for exactly that reason.
+- **Only the chart the pointer is on shows a tooltip.** Followers get the crosshair
+  and their own series dots. This directory used to draw a value chip on every
+  synced sibling (`charts/synced-tip.tsx`, now deleted) because no primitive
+  positioned a tooltip no pointer event produced; `tooltip.follow: false` is the
+  shipped answer and the latency band uses it — anchoring to the crosshair instead
+  of the pointer lines every chart in the column up on the same instant.
 
 ## Conventions
 
@@ -262,19 +287,48 @@ anyone they disagreed.
   outright, `EvidenceLink` **leaves compact** rather than merely scrolling, and
   `Section` re-scrolls on mount while the hash still names it. A verdict that
   points somewhere has to land somewhere.
-- **A chart's axis label and its scale key are two different things — keep them
-  that way.** `AxisBottomDate` takes a `tickFormat` as of 1.9.0, so the four
-  bespoke charts keep the bucket's ISO start as their scale domain (and therefore
-  as the cross-chart hover key and `foldSourceIndex`'s key) and render it with
-  `lib/axis.ts`'s `bucketTickFormat`. Before that there was no supported exit —
-  `fmtAxisDate` reduces an ISO string to `DD.MM`, so a 24 h window drew `01.08` a
-  dozen times, and a *pre-formatted* label was the only thing that reached the
-  axis. That forced one string to be display, identity and hover key at once.
-  **`MultiLine` still forwards no `tickFormat`**, so `speed-chart` and
-  `bufferbloat-chart` must keep pre-formatting via `runAxisLabels`, where the
-  label genuinely is the domain value and its uniqueness is load-bearing: two
-  points sharing a domain value collapse onto one x position and one stops being
-  drawn, a measurement silently dropped.
+- **A chart's axis label and its scale key are two different things, and as of
+  basalt-ui 1.17.0 nothing on this page confuses them.** Every chart renders its
+  domain through a formatter: the four bucketed ones keep the bucket's ISO start
+  as the scale domain (and therefore as the cross-chart cursor key) and draw it
+  with `lib/axis.ts`'s `bucketTickFormat`, through `formatX` on the two kinds that
+  take one and `AxisBottomDate`'s `tickFormat` on the three that compose their own
+  axis; the two run-series charts key on `runAxisKey` (`ts:id`) and draw it with
+  `runTickFormat`. Before any of those seams existed, `fmtAxisDate` reduced an ISO
+  string to `DD.MM` — a 24 h window drew `01.08` a dozen times — and a
+  *pre-formatted* label was the only thing that reached the axis, forcing one
+  string to be display, identity and hover key at once. **What that cost is the
+  thing to remember**: identity had to be unique, so a *display* string carried a
+  seconds tiebreak and then a UTC-offset suffix for the DST fall-back hour, purely
+  so two runs could not collapse onto one x position and silently drop a
+  measurement. The row id says it in four characters. The same rule applies to the
+  tooltip header — see `formatHeader` below. The two run charts stay OUT of the
+  page cursor (`ChartCursorScope` in `routes/index.tsx`): their key resolves
+  against nothing by construction, but the wrapper states the fact that outlives
+  the key shape — this axis is runs, not clock time.
+- **The tooltip header formats from the instant, never from the key.**
+  `TooltipHeader` regexed `YYYY-MM-DD` out of the domain value and rebuilt a LOCAL
+  `Date`, so a UTC ISO key named the previous calendar day for every bucket after
+  22:00 local while the axis, the badge and every sibling named the current one
+  (measured, `TZ=Europe/Berlin`: axis `02.08 01:00`, header `Sat Aug 1 2026`). The
+  latency band answered that for one release by keying its domain in local time
+  with the offset written out — correct, and it cost the chart a key its siblings
+  did not share. `tooltip.formatHeader` is the seam; `charts/tooltip-header.test.ts`
+  pins both halves. **Re-keying a domain to make a formatter come out right is the
+  regression here**, not the wrong date.
+- **A tick COUNT still has to be measured, and three charts measure for it.**
+  `smartTicks` spaces x ticks by `VX.minPxPerTick` (55), sized for the bare `DD.MM`
+  basalt's own formatter produces; `bucketAxisLabel` draws `DD.MM HH:MM` at ~72px
+  on the bucketed charts and `runTickFormat` the same on the run ones, so the
+  default overlaps end to end. `speed-chart`,
+  `bufferbloat-chart` and `latency-band-chart` wrap themselves in a `useChartSize`
+  box and derive `xTicks` from `fitTickCount`. `VX.margin` is only a FLOOR on the
+  measured gutter now, so the plot width they compute slightly over-estimates —
+  absorbed by `AXIS_LABEL_PX`, which is already 96 for a ~72px label. The three
+  charts that compose their own `AxisBottomDate` pick tick VALUES instead, via
+  `axisTickValues`, which is still the better tool where it is available:
+  `smartTicks` appends the final value unconditionally and the last two labels land
+  on top of each other.
 - **`densifyBuckets` tolerates an overlapping window and rejects a wrong grid — two
   causes, one symptom.** A row landing on no slot used to throw either way, and one
   of the two causes is routine: `keepAcrossTimeAdvance` serves the previous window's
@@ -303,17 +357,19 @@ anyone they disagreed.
   guarantee is route config that a later edit can silently remove, and the cost
   of being wrong is this dashboard announcing that the collector is dead. Every
   chart on the page carries the guard now; `charts/pending.render.test.tsx` pins
-  all of them. The pending box itself is basalt-ui's `ChartPending`, reached two
-  ways: `LatencyBandChart` hands `isPending` to `ChartFrame` (which also drops the
-  legend and sets `aria-busy`), and the charts that own their own
-  `ResponsiveChart` branch to `charts/pending.tsx`'s `PendingChart` **outside** it.
-  That placement is deliberate, not stylistic: inside the render prop the pending
-  state renders nothing until a `ResizeObserver` fires, which never happens under
-  `renderToStaticMarkup` — a pending state its own test cannot observe is one that
-  gets quietly deleted. Same reason `speed-chart`/`bufferbloat-chart` do not use
-  `MultiLine`'s own `isPending`: the kind sits inside their measuring wrapper.
+  all of them. **Every one of them hands `isPending` straight to the framework.**
+  It used to take an app-side `PendingChart` branched OUTSIDE the measuring
+  wrapper, because inside the render prop nothing mounted until a `ResizeObserver`
+  fired and a pending state no server-rendered guard can observe is one that gets
+  quietly deleted. `ChartFrame` floors its plot rect at `minWidth` (200px), so it
+  renders `ChartPending`, drops the legend and sets `aria-busy` whether or not
+  anything has been measured. What the tests assert alongside the caption is the
+  dropped LEGEND, not the accessible label: `ChartFrame` keeps `ariaLabel` on its
+  container while pending, deliberately, so a screen reader is told what is
+  loading.
 - **A fold carries its unmeasured members.** The three bucketed strips downsample
-  to fit a narrow viewport (`charts/fold.ts`). A fold that calls a group measured
+  to fit a narrow viewport (each strip's own `foldColumns`/`foldPoints`). A fold
+  that calls a group measured
   because *any* member was measured paints an unmeasured stretch as clean — the
   founding fabrication, and on the `all` range it triggers below ~830px, not just
   on a phone. So every fold carries `unmeasuredMembers`, splits its column
@@ -321,13 +377,23 @@ anyone they disagreed.
   `count` against a per-bucket `expectedCycles` prints "30 of 10"). The mirror
   lie — a two-thirds-measured column drawn wholly unmeasured — is equally
   forbidden. Both are pinned by tests. Folding also changes the chart's hover key
-  space, so `foldSourceIndex` maps every unfolded key onto the column that
-  swallowed it; without it the shared cursor blinks on two hovers in three. That
-  map now feeds `useHoverSync`'s `resolveKey` (1.9.0) rather than a direct
-  `HoverContext` read that shadowed the hook's own `syncedPoint` — the framework
-  owns the provider-vs-standalone fallback again, and **the fold stays ours**:
-  which source buckets a drawn column stands for is domain knowledge no chart
-  library can compute.
+  space, and **that half is no longer ours to patch**: the app used to carry a
+  source→folded key index (`charts/fold.ts`) so a folded strip could resolve a key
+  the unfolded latency band broadcast, first by reading `HoverContext` directly and
+  later through `useHoverSync`'s `resolveKey`. `useChartCursor` resolves on the
+  parsed domain instead. **The mode is load-bearing and every synced chart here
+  declares it.** A folded column is keyed by its FIRST member (deliberately — a
+  midpoint key would fabricate a bucket start), so under the default `'nearest'` a
+  source bucket in the back half of a group resolves to the NEXT column and up to
+  half the band's keys put a follower's crosshair one column right. `getX` returns a
+  leading edge on all four of them, so all four pass `'leading'` — strict
+  containment, `[first, last + step)`, which is what "the column that swallowed this
+  bucket" means and holds at every fold width because it is a property of the keys,
+  not of the grouping. A key outside the span resolves to nothing rather than
+  snapping to an end column that does not contain it. The index and its `resolveKey`
+  are both deleted; the invariant it depended on (every source column accounted for
+  exactly once) is still pinned directly in the three fold tests, because a fold that
+  drops a column shortens the window without shortening the axis.
 
 ## Validation
 

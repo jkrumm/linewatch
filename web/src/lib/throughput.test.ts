@@ -51,7 +51,8 @@ describe('throughputPoints', () => {
   })
 
   /**
-   * `key` is the chart's band-scale domain value, its hover key and `foldSourceIndex`'s key, so it
+   * `key` is the chart's band-scale domain value and its hover key — which `useChartCursor`
+   * resolves by PARSING, so a folded column absorbs its members arithmetically — so it
    * must be unique per bucket: two points sharing one collapse onto a single x position and one of
    * them stops being drawn. This used to assert the same property of a pre-formatted `label`,
    * which was the domain value back when `AxisBottomDate` took no `tickFormat` — the field is gone

@@ -15,7 +15,7 @@ import type { ProbeBucketSeconds, ThroughputBucket } from './types'
  */
 export interface ThroughputPoint {
   /** The bucket's ISO start, from `densifyBuckets`. The chart's scale domain, its hover key and
-   * `foldSourceIndex`'s key — an identity, never a rendering. The axis label is derived from it at
+   * the cursor's resolution key — an identity, never a rendering. The axis label is derived from it at
    * draw time by `bucketTickFormat`; this type used to carry a pre-formatted `label` beside it
    * because `AxisBottomDate` took no `tickFormat` and there was no other way to reach the axis. */
   key: string

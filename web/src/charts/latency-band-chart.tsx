@@ -1,34 +1,31 @@
-import { useMemo, useRef } from 'react'
+import { useMemo } from 'react'
 import type { ReactNode } from 'react'
 import { Area } from '@visx/shape'
-import { scaleLinear, scalePoint } from '@visx/scale'
 import {
-  AxisBottomDate,
-  AxisLeftNumeric,
-  ChartFrame,
-  ChartTooltip,
-  Crosshair,
+  CartesianChart,
+  type ChartSeries,
   Group,
-  GridRows,
-  HoverOverlay,
   LinePath,
-  SeriesDot,
-  TooltipBody,
-  TooltipHeader,
+  type PlotContext,
   TooltipRow,
   VX,
   alpha,
   curveMonotoneX,
-  useHoverSync,
-  useTooltipStyles,
+  fmtTooltipDate,
+  useChartSize,
 } from 'basalt-ui/charts'
-import type { HomeLineVerdict, Outage, ProbeBucket, ProbeBucketSeconds, VantageBucket } from '../lib/types'
+import type {
+  HomeLineVerdict,
+  Outage,
+  ProbeBucket,
+  ProbeBucketSeconds,
+  VantageBucket,
+} from '../lib/types'
 import { densifyBuckets } from '../lib/densify'
-import { axisTickValues, bucketTickFormat } from '../lib/axis'
+import { AXIS_LABEL_PX, bucketTickFormat, fitTickCount } from '../lib/axis'
 import { PROBE_CYCLE_MS } from '../lib/range'
-import { fmtDateTime, fmtDuration, fmtMs, fmtPct } from '../lib/format'
+import { fmtClock, fmtDuration, fmtMs, fmtPct } from '../lib/format'
 import { HatchPattern, hatchFill } from './hatch'
-import { SyncedTip } from './synced-tip'
 
 /** One position on the time axis. `bucket === null` is a bucket the range route returned no row
  * for: unmeasured, which the chart must draw as its own state rather than as a gap the curve
@@ -37,17 +34,26 @@ import { SyncedTip } from './synced-tip'
  * median: always present on the point (null when there is no `overlay` prop, or the overlay's own
  * bucket at this slot has none), so the drawing code never has to ask the point "does an overlay
  * exist" separately from "what is its value here". */
-type Point = {
+export type Point = {
   /**
-   * ISO-8601 of the bucket start: the instant the tooltip's date formatting reads, the x-scale's
-   * domain value, and the key this chart broadcasts to the shared cursor.
+   * `densifyBuckets`' own ISO-8601 bucket start: the x-scale's domain value and the key this chart
+   * broadcasts to the shared cursor. One instant, one identity, shared verbatim with the strips.
+   *
+   * **It is no longer also what the tooltip header renders.** For one release it was a LOCAL ISO
+   * stamp with the offset written out, because `TooltipHeader` regexed `YYYY-MM-DD` out of the key
+   * and rebuilt a local `Date` from it — so a UTC key named a different calendar day than the
+   * axis, the badge and every sibling on the page for every bucket after 22:00 local. That is
+   * `tooltip.formatHeader` in 1.17.0, and rendering is now the only thing formatting does.
    *
    * It used to carry a pre-formatted `label` alongside, because `AxisBottomDate` accepted no
    * `tickFormat` and rendered the domain through `fmtAxisDate`, which reduces an ISO string to
    * `DD.MM` — a 24 h window drew `01.08` a dozen times across the bottom of the page's primary
    * latency chart. A pre-formatted label passed through untouched and was the only way to reach
-   * the axis, which is what forced the *display* string to also be the *identity*. basalt-ui
-   * 1.9.0's `tickFormat` ends that; see `lib/axis.ts`.
+   * the axis, which is what forced the *display* string to also be the *identity*. `tickFormat`
+   * ended that in 1.9.0 and `CartesianChart`'s `formatX` is the higher-level form of it now; see
+   * `lib/axis.ts`. The ISO key also earns its keep at the cursor: `useChartCursor` resolves a
+   * sibling's broadcast key by parsing it, so an ISO domain is what lets the folded strips below
+   * track this chart's 288 unfolded buckets with no index in between.
    */
   key: string
   /** The bucket's own start, unix ms — the tooltip header's date and the outage-overlay's x-map
@@ -81,17 +87,22 @@ const HOME_LINE_LABEL: Record<HomeLineVerdict, string> = {
 /** The *Solid* variants, not `VX.good`/`VX.warn`/`VX.bad`: those are area-fill tokens mixed down to
  * 18% / 8% / 18% opacity (`tokens.css`), which is right behind a line and invisible on a 3 px
  * marker. A loss marker has to read at a glance or it is not a warning. */
+/** Where the marker ramp steps from amber to red, named once because the legend entries
+ * (`loss-partial` / `loss-heavy`) and the gate that decides which dot to draw both read it. Two
+ * copies of a `20` would let a retuned threshold move the mark and leave the legend behind. */
+const HEAVY_LOSS_PCT = 20
+
 function lossColor(lossPct: number): string {
   if (lossPct <= 0) return VX.goodSolid
-  if (lossPct < 20) return VX.warnSolid
+  if (lossPct < HEAVY_LOSS_PCT) return VX.warnSolid
   return VX.badSolid
 }
 
 /** Height of the vantage rail along the bottom axis, in px. */
 const RAIL_H = 5
 
-/** Stable across renders, unlike an inline arrow — `useHoverSync` rebuilds its key→point Map
- * whenever `getKey`'s identity changes, and an inline `(p) => p.key` is a new function every
+/** Stable across renders, unlike an inline arrow — `CartesianChart` memoizes the x keys and the
+ * cursor's domain index on `getX`'s identity, and an inline `(p) => p.key` is a new function every
  * render of a page that re-renders on a 30 s heartbeat; see `availability-strip.tsx`'s identical
  * constant. */
 const getPointKey = (p: Point): string => p.key
@@ -99,8 +110,12 @@ const getPointKey = (p: Point): string => p.key
 /**
  * The SmokePing-style signature chart (DESIGN.md's "Latency" view): a median line with a shaded
  * p5–p95 band, loss encoded as marker color. Genuinely unique (a band between two arbitrary
- * series, per-point loss markers) so it's bespoke rather than a shipped kind — composes the visx
- * primitives directly, per the visx-charts rule's "stay bespoke" guidance.
+ * series, per-point loss markers) so it stays bespoke rather than becoming a shipped kind — but
+ * bespoke now means **composing `CartesianChart` and drawing only marks**, not assembling a plot.
+ * It is a single cartesian plot with one numeric y axis, which is exactly the shape that primitive
+ * owns, so the ~230 lines this file spent on margins, scales, the grid, the axes, the shared
+ * cursor, the crosshair, the hover overlay and the tooltip shell are gone. What is left below the
+ * render prop is the four marks nothing else on the page draws.
  *
  * The x-domain comes from the requested window, never from the response. Three things this chart
  * used to draw as identical blank space are now three distinct marks: a bucket that was never
@@ -148,7 +163,7 @@ export function LatencyBandChart({
 }: {
   /** How the primary series is named in the legend, tooltip and accessible label. */
   label: string
-  /** Stable identity for the hover-sync/chart id — must be unique per mounted instance. */
+  /** Stable identity for the cursor/chart id — must be unique per mounted instance. */
   chartKey: string
   buckets: ProbeBucket[]
   vantage: VantageBucket[]
@@ -158,9 +173,8 @@ export function LatencyBandChart({
   /**
    * True while the probe-buckets queries behind this band are in flight.
    *
-   * Forwarded straight to `ChartFrame`, which as of basalt-ui 1.9.0 reserves the plot, renders
-   * `ChartPending` in place of the marks, drops the legend and sets `aria-busy` — so this chart
-   * needs none of the app-side `PendingChart` scaffolding its `ResponsiveChart`-based siblings do.
+   * Forwarded to `CartesianChart`, which hands it to `ChartFrame` — the plot rect is reserved,
+   * `ChartPending` renders in place of the marks, the legend is dropped and `aria-busy` is set.
    * Dropping the legend is the part worth naming: it declares "Loss under 20%", "Loss 20% or
    * more" and "Cycles fully down" — an encoding for marks that, while pending, do not exist.
    */
@@ -233,160 +247,286 @@ export function LatencyBandChart({
   const expectedCycles = Math.max(1, Math.round((bucketSeconds * 1000) / PROBE_CYCLE_MS))
 
   // Alone, the primary is the bright neutral; against an overlay it takes the accent and the
-  // overlay steps down to the mid grey. ONE binding each, read by both the legend entry and the
-  // mark — see the docblock for the bug that made that worth spelling out.
+  // overlay steps down to the mid grey. ONE binding each, and the mark now reads it back off the
+  // series descriptor rather than repeating it — see `overlay-color.test.ts` for the bug that made
+  // that worth spelling out, and why the fix is structural rather than a comment.
   const primaryColor = overlay ? VX.accent : VX.line
+  const overlayKey = `${chartKey}-overlay`
 
   const hasOutages = outages !== undefined && outages.length > 0
+  const bucketMs = bucketSeconds * 1000
+
+  /**
+   * The single source of truth for the marks, the legend and the tooltip's per-series rows.
+   *
+   * Six entries, only two of which carry a value. The other four are ENCODINGS — the two loss
+   * marker thresholds, the full-loss band, the outage rail — which the legend has to name because
+   * they are the marks on this chart a reader cannot decode from the axes. They return `null` from
+   * `getValue`, so they are legended and never become a tooltip row or a crosshair dot; `mark`
+   * still governs their swatch, and `fillOpacity` keeps the washed band's swatch distinguishable
+   * from the solid dots.
+   *
+   * **Encoding does not mean "no mark behind it".** All four are read back out of `ctx.visible` in
+   * `LatencyMarks` and gate the mark they name, one for one — which is what makes them honest
+   * entries rather than captions, and what `legend={{ toggle: false }}` is currently the only
+   * reason nobody can see.
+   */
+  const series: ChartSeries<Point>[] = [
+    {
+      key: chartKey,
+      label,
+      color: primaryColor,
+      mark: 'line',
+      getValue: (p) => p.bucket?.medianMs ?? null,
+      formatValue: fmtMs,
+      // The crosshair dot tracks the WORST cycle in the bucket, exactly as the per-point marker on
+      // the line does. `getMarker` is the shipped seam for that — the dot used to be hand-placed
+      // for this one reason, and losing the colour would have made the synced cursor say something
+      // the mark under it does not.
+      getMarker: (p) =>
+        p.bucket !== null && p.bucket.maxLossPct > 0
+          ? { color: lossColor(p.bucket.maxLossPct) }
+          : null,
+    },
+    ...(overlay
+      ? [
+          {
+            key: overlayKey,
+            label: overlay.label,
+            color: OVERLAY_COLOR,
+            mark: 'line' as const,
+            strokeWidth: VX.line2Width,
+            getValue: (p: Point) => p.overlayMs,
+            formatValue: fmtMs,
+          },
+        ]
+      : []),
+    // The loss markers, named. Two entries and not three: `lossColor(0)` returns the good token, but a
+    // marker is only DRAWN when maxLossPct > 0, so a "No loss" swatch would name a mark this chart
+    // never puts on a plot. (The tooltip's own Loss row does render that token at 0% — there it is a
+    // value's swatch, not the marker legend, and it has a number beside it.)
+    {
+      key: 'loss-partial',
+      label: 'Loss under 20%',
+      color: VX.warnSolid,
+      mark: 'bar',
+      getValue: () => null,
+    },
+    {
+      key: 'loss-heavy',
+      label: 'Loss 20% or more',
+      color: VX.badSolid,
+      mark: 'bar',
+      getValue: () => null,
+    },
+    // The full-loss band behind the line (the `alpha(VX.badSolid, 0.1–0.55)` rect keyed to
+    // `downCycles`) had no legend entry at all — three distinct marks sharing one hue with only
+    // two of them named. A lower, fixed `fillOpacity` distinguishes its washed-band swatch from
+    // the solid dot swatches above, matching how the band itself reads against the loss dots.
+    {
+      key: 'down-band',
+      label: 'Cycles fully down',
+      color: VX.badSolid,
+      mark: 'bar',
+      fillOpacity: 0.3,
+      getValue: () => null,
+    },
+    // `mark: 'line'`, not `'bar'` — the outage overlay is drawn as a thin rail along the top
+    // edge, not a filled block, and sharing `loss-heavy`'s exact bar swatch made the two entries
+    // byte-identical (same hue, same shape) with nothing to tell a reader which mark was which.
+    ...(hasOutages
+      ? [
+          {
+            key: 'outage',
+            label: 'Recorded outage',
+            color: VX.badSolid,
+            mark: 'line' as const,
+            getValue: () => null,
+          },
+        ]
+      : []),
+  ]
+
+  // Measured for the x tick COUNT alone — see `speed-chart.tsx`'s identical wrapper. The default
+  // (`smartTicks` at `VX.minPxPerTick`, 55) is sized for the bare `DD.MM` basalt's own formatter
+  // produces, and `bucketTickFormat` draws `DD.MM HH:MM`; left to it, a 24 h window's ticks overlap
+  // end to end. `VX.margin` is only a floor on the measured gutter now, so `plotWidth` slightly
+  // OVER-estimates — absorbed by `AXIS_LABEL_PX`, which is already 96px for a ~72px label.
+  const { ref: sizeRef, width } = useChartSize()
+  const plotWidth = Math.max(1, width - VX.margin.left - VX.margin.right)
 
   return (
-    <ChartFrame
-      series={[
-        { key: chartKey, label, color: primaryColor, mark: 'line' },
-        ...(overlay
-          ? [{ key: `${chartKey}-overlay`, label: overlay.label, color: OVERLAY_COLOR, mark: 'line' as const }]
-          : []),
-        // The loss markers, named. Two entries and not three: `lossColor(0)` returns the good token, but a
-        // marker is only DRAWN when maxLossPct > 0, so a "No loss" swatch would name a mark this chart
-        // never puts on a plot. (The tooltip's own Loss row does render that token at 0% — there it is a
-        // value's swatch, not the marker legend, and it has a number beside it.)
-        { key: 'loss-partial', label: 'Loss under 20%', color: VX.warnSolid, mark: 'bar' as const },
-        { key: 'loss-heavy', label: 'Loss 20% or more', color: VX.badSolid, mark: 'bar' as const },
-        // The full-loss band behind the line (the `alpha(VX.badSolid, 0.1–0.55)` rect keyed to
-        // `downCycles`) had no legend entry at all — three distinct marks sharing one hue with only
-        // two of them named. A lower, fixed `fillOpacity` distinguishes its washed-band swatch from
-        // the solid dot swatches above, matching how the band itself reads against the loss dots.
-        { key: 'down-band', label: 'Cycles fully down', color: VX.badSolid, mark: 'bar' as const, fillOpacity: 0.3 },
-        // `mark: 'line'`, not `'bar'` — the outage overlay is drawn as a thin rail along the top
-        // edge, not a filled block, and sharing `loss-heavy`'s exact bar swatch made the two entries
-        // byte-identical (same hue, same shape) with nothing to tell a reader which mark was which.
-        ...(hasOutages
-          ? [{ key: 'outage', label: 'Recorded outage', color: VX.badSolid, mark: 'line' as const }]
-          : []),
-      ]}
-      height={190}
-      chartId={`latency-${chartKey}`}
-      // The legend is now unconditional, and the reason it used to be suppressed on the single-series
-      // case no longer applies. It is not a caption restating the title any more — it is the only place
-      // on the page that says what the red and amber dots mean. Those thresholds are an ENCODING, and an
-      // encoding cannot live in the tooltip (which states one bucket's value, not the rule) or in the
-      // guide drawer (which is a click away, which is why nobody found it there).
-      legend={{}}
-      isPending={isPending}
-      ariaLabel={
-        overlay
-          ? `${label} latency with ${overlay.label} overlaid — median with p5 to p95 band, worst-ping envelope, and unmeasured periods marked${hasOutages ? ', with outages flagged' : ''}`
-          : `${label} latency — median with p5 to p95 band, worst-ping envelope, and unmeasured periods marked${hasOutages ? ', with outages flagged' : ''}`
-      }
-    >
-      {({ width, height }) => (
-        <LatencyBandPlot
-          label={label}
-          chartKey={chartKey}
-          points={points}
-          expectedCycles={expectedCycles}
-          primaryColor={primaryColor}
-          overlayLabel={overlay?.label}
-          renderExtraTooltipRows={renderExtraTooltipRows}
-          bucketSeconds={bucketSeconds}
-          outages={outages}
-          windowTo={to}
-          width={width}
-          height={height}
-        />
-      )}
-    </ChartFrame>
+    <div ref={sizeRef}>
+      <CartesianChart
+        data={points}
+        chartId={`latency-${chartKey}`}
+        getX={getPointKey}
+        series={series}
+        // The envelope is part of the domain: `maxMs` is the only stored witness of a sub-cycle
+        // stall (all four targets showing a worst RTT 8×+ their own median at zero loss), and a
+        // domain sized to p95 alone would clip the very spikes it exists to show. The overlay's
+        // values are folded in too — a router faster than the internet's p5 is a real, expected
+        // reading, and sizing the axis off the primary alone would clip that line off the bottom.
+        //
+        // A FUNCTION rather than a tuple, because the function is handed the VISIBLE series: toggle
+        // the band off in the legend and the axis rescales to the overlay instead of leaving a
+        // permanent gap where the hidden series' spikes used to be.
+        y={{
+          domain: (data, visible) => [0, domainMax(data, visible, chartKey, overlayKey)],
+          ticks: 4,
+          format: fmtMs,
+        }}
+        xTicks={fitTickCount(
+          points.length,
+          Math.max(2, Math.floor(plotWidth / AXIS_LABEL_PX)),
+          plotWidth,
+        )}
+        formatX={bucketTickFormat(bucketSeconds)}
+        height={190}
+        // The legend is unconditional, and the reason it used to be suppressed on the single-series
+        // case no longer applies. It is not a caption restating the title any more — it is the only
+        // place on the page that says what the red and amber dots mean. Those thresholds are an
+        // ENCODING, and an encoding cannot live in the tooltip (which states one bucket's value,
+        // not the rule) or in the guide drawer (which is a click away, which is why nobody found it
+        // there).
+        //
+        // **Toggling is off, and not because it would not work.** Every entry here gates the mark
+        // it names (`LatencyMarks` reads all six out of `ctx.visible`) and the y domain is a
+        // function of the visible set, so a click would remove a mark and rescale the axis exactly
+        // as the framework intends. It is off because this legend is a KEY first and a control
+        // second: `ChartFrame` turns any legend of two or more entries into a toggle by default,
+        // which on a chart whose legend explains its encoding invites a reader to hide the finding
+        // they opened the page for. Same rule the compact-mode split already states — a section's
+        // evidence may sit behind a named switch, a conclusion never may.
+        // `getX` is a bucket's LEADING EDGE, so containment — not proximity — is what relates a
+        // broadcast key to a column. It costs this chart nothing (it is unfolded, so every sibling
+        // key it owns matches exactly) and is set anyway: the mode is a statement about what the
+        // domain values MEAN, and a chart that declares it wrong stays wrong the day it folds.
+        cursorResolution="leading"
+        legend={{ toggle: false }}
+        isPending={isPending}
+        // Anchored to the crosshair rather than the pointer. Three charts on this page share one
+        // cursor, and a tooltip that follows the mouse puts the primary band's numbers wherever the
+        // hand happens to be while the strips below show the same instant at a fixed x — anchoring
+        // lines all of them up on the column being read.
+        tooltip={{
+          follow: false,
+          // The header states the calendar day and the badge the clock, because the header's own
+          // formatter drops the time — right for a daily series, useless on a 5-minute grid.
+          //
+          // Both read `bucketStart`, never the domain key. Handing `fmtTooltipDate` a `Date`
+          // takes its local-getter branch rather than its parse-a-string one, which is exactly the
+          // day the axis and the badge name; formatting off the instant means the key never has to
+          // be written in a particular zone to make the header come out right.
+          formatHeader: (_key, p) => fmtTooltipDate(new Date(p.bucketStart)),
+          label: (p) => ({ text: fmtClock(p.bucketStart), color: VX.legendText }),
+          extraRows: (p) => (
+            <>
+              <BucketRows point={p} expectedCycles={expectedCycles} primaryColor={primaryColor} />
+              <OutageRow point={p} outages={outages ?? []} bucketMs={bucketMs} windowTo={to} />
+              {p.bucket !== null && renderExtraTooltipRows?.(p.bucket)}
+              <VantageRows point={p} />
+            </>
+          ),
+        }}
+        ariaLabel={
+          overlay
+            ? `${label} latency with ${overlay.label} overlaid — median with p5 to p95 band, worst-ping envelope, and unmeasured periods marked${hasOutages ? ', with outages flagged' : ''}`
+            : `${label} latency — median with p5 to p95 band, worst-ping envelope, and unmeasured periods marked${hasOutages ? ', with outages flagged' : ''}`
+        }
+      >
+        {(ctx) => (
+          <LatencyMarks
+            ctx={ctx}
+            chartKey={chartKey}
+            overlayKey={overlayKey}
+            bucketMs={bucketMs}
+            outages={outages}
+            windowTo={to}
+          />
+        )}
+      </CartesianChart>
+    </div>
   )
 }
 
-function LatencyBandPlot({
-  label,
+/**
+ * The top of the y domain: the highest thing any VISIBLE series can put on the plot, padded.
+ *
+ * Not `resolveAxisDomain`'s own `'auto'`, which reads `getValue` — and `getValue` is the MEDIAN.
+ * A domain sized to the medians clips the band and the envelope drawn around them, which is most
+ * of what this chart is.
+ *
+ * Exported for `latency-domain.test.ts`: this is the one piece of the collapsed chart that is not
+ * the framework's, and whether it clips a spike is not observable in a render test.
+ */
+export function domainMax(
+  data: readonly Point[],
+  visible: readonly ChartSeries<Point>[],
+  chartKey: string,
+  overlayKey: string,
+): number {
+  const showPrimary = visible.some((s) => s.key === chartKey)
+  const showOverlay = visible.some((s) => s.key === overlayKey)
+  const values: number[] = []
+  for (const p of data) {
+    if (showPrimary && p.bucket !== null) {
+      for (const v of [p.bucket.p95Ms, p.bucket.maxMs]) if (v !== null) values.push(v)
+    }
+    if (showOverlay && p.overlayMs !== null) values.push(p.overlayMs)
+  }
+  const max = values.length > 0 ? Math.max(...values) : 1
+  return Math.max(1, max * 1.15)
+}
+
+/**
+ * Everything this chart draws that no other chart does — and nothing else.
+ *
+ * Absence, the full-loss band, the outage rails, the worst-ping envelope, the p5–p95 area, the
+ * median line, the overlay line, the loss markers and the vantage rail. The grid under them, the
+ * axes around them, the crosshair, the dots, the overlay and the tooltip are `CartesianChart`'s.
+ *
+ * **Every colour is read back off `ctx.visible`, never off a local literal.** That is what makes a
+ * legend swatch and its mark impossible to drift apart — the entry the legend renders and the
+ * value this file strokes with are the same object — and it is what makes the legend's toggle
+ * mean something: a series absent from `visible` draws nothing here.
+ */
+function LatencyMarks({
+  ctx,
   chartKey,
-  points,
-  expectedCycles,
-  primaryColor,
-  overlayLabel,
-  renderExtraTooltipRows,
-  bucketSeconds,
+  overlayKey,
+  bucketMs,
   outages,
   windowTo,
-  width,
-  height,
 }: {
-  label: string
+  ctx: PlotContext<Point>
   chartKey: string
-  points: Point[]
-  expectedCycles: number
-  primaryColor: string
-  overlayLabel?: string
-  renderExtraTooltipRows?: (bucket: ProbeBucket) => ReactNode
-  bucketSeconds: ProbeBucketSeconds
+  overlayKey: string
+  bucketMs: number
   outages?: readonly Outage[]
   windowTo: number
-  width: number
-  height: number
 }) {
-  // `VX.margin`'s 44 px left gutter is sized for two-digit axis labels, and this axis draws
-  // milliseconds: `100 ms` overflowed it and rendered as `00 ms`, clipped at the SVG's left edge.
-  // A clipped tick is worse than a missing one — it reads as a real number an order of magnitude
-  // out. Widened here rather than in the token, because the token is shared by charts whose labels
-  // genuinely do fit it.
-  const margin = { ...VX.margin, left: 56 }
-  const xMax = Math.max(0, width - margin.left - margin.right)
-  const yMax = Math.max(0, height - margin.top - margin.bottom)
+  // `LinePath`/`Area` take a mutable `data` array; `PlotContext.data` is `readonly` (the primitive
+  // hands out its own array), so it is spread once here rather than cast away four times.
+  const points = [...ctx.data]
+  const { visible, xScale, yScale, xMax, yMax } = ctx
+  const primary = visible.find((s) => s.key === chartKey)
+  const overlaySeries = visible.find((s) => s.key === overlayKey)
+  const showDownBand = visible.some((s) => s.key === 'down-band')
+  const showOutages = visible.some((s) => s.key === 'outage')
+  // Each loss threshold is gated on its OWN legend entry. They were one gate on `loss-partial`
+  // alone, which drew both dot colours or neither and read `loss-heavy` nowhere at all — dormant
+  // only because the legend does not toggle, and exactly the mark/legend disagreement this chart's
+  // own history is about.
+  const showLossPartial = visible.some((s) => s.key === 'loss-partial')
+  const showLossHeavy = visible.some((s) => s.key === 'loss-heavy')
+
   const absentHatchId = `latency-${chartKey}-absent`
   const vantageHatchId = `latency-${chartKey}-vantage`
   const unknownHatchId = `latency-${chartKey}-unknown`
-  const svgRef = useRef<SVGSVGElement | null>(null)
 
-  const xScale = useMemo(
-    () => scalePoint<string>({ domain: points.map((p) => p.key), range: [0, xMax], padding: 0.5 }),
-    [points, xMax],
-  )
   const bandWidth = points.length > 1 ? xScale.step() : xMax
-
-  /**
-   * An arbitrary instant's x position, on a scale whose domain is label STRINGS.
-   *
-   * There is no time→px path through `scalePoint`, but there does not need to be one: `densifyBuckets`
-   * emits a uniform grid, so `points[i].bucketStart` is `points[0].bucketStart + i * bucketMs` by
-   * construction and `xScale.step()` is the px per bucket. `xScale(points[0].key)` is bucket 0's
-   * CENTRE, so the grid's left edge is that minus half a step, and everything after is linear.
-   *
-   * This is the one mark on the chart whose x-extent is NOT quantised to a bucket, and that is the
-   * point of computing it this way: an 80-second outage inside a 5-minute bucket draws 27% of a
-   * column, which the full-loss band — snapped to bucket edges — structurally cannot express.
-   *
-   * Guarded on `points.length > 1`: `scalePoint.step()` on a one-element domain is degenerate, and a
-   * mapping derived from it would place the rail somewhere arbitrary rather than fail visibly.
-   */
-  const bucketMs = bucketSeconds * 1000
-  const gridFirst = points[0]?.bucketStart ?? 0
-  const gridX0 = points[0] === undefined ? 0 : (xScale(points[0].key) ?? 0)
-  const pxAt = (ms: number) => gridX0 - bandWidth / 2 + ((ms - gridFirst) / bucketMs) * bandWidth
-
-  // The envelope is part of the domain: `maxMs` is the only stored witness of a sub-cycle stall
-  // (all four targets showing a worst RTT 8×+ their own median at zero loss), and a domain sized
-  // to p95 alone would clip the very spikes it exists to show. The overlay's values are folded into
-  // the same domain — a router faster than the internet's p5 is a real, expected reading, and
-  // sizing the axis off the primary series alone would clip that line off the bottom of the plot.
-  const yDomainMax = useMemo(() => {
-    const bucketValues = points.flatMap((p) => {
-      const b = p.bucket
-      if (b === null) return []
-      return [b.p95Ms, b.maxMs].flatMap((v) => (v === null ? [] : [v]))
-    })
-    const overlayValues = points.flatMap((p) => (p.overlayMs === null ? [] : [p.overlayMs]))
-    const values = [...bucketValues, ...overlayValues]
-    const max = values.length > 0 ? Math.max(...values) : 1
-    return Math.max(1, max * 1.15)
-  }, [points])
-
-  const yScale = useMemo(() => scaleLinear<number>({ domain: [0, yDomainMax], range: [yMax, 0] }), [
-    yDomainMax,
-    yMax,
-  ])
-
+  const x = (p: Point): number => xScale(p.key) ?? Number.NaN
   /**
    * The two scale accessors, and the reason neither falls back to 0.
    *
@@ -397,226 +537,178 @@ function LatencyBandPlot({
    * fabrication this project exists to prevent. NaN drops the mark visibly instead.
    */
   const y = (value: number | null): number => (value === null ? Number.NaN : yScale(value))
-  // Takes the point rather than a bare string, so a call site cannot pass the wrong field and get
-  // a silent NaN for every position. That mattered more when the domain was a display label
-  // distinct from `key`; it is kept because the signature still documents which field is the
-  // scale's, and the cost is nothing.
-  const x = (p: Point): number => xScale(p.key) ?? Number.NaN
 
-  // No `resolveKey`. This chart does not fold — it keys all 288 raw buckets — so it already owns
-  // every key any sibling can broadcast, and `useHoverSync`'s default exact-match lookup is
-  // correct here. It is the chart the three folded strips need the seam *for*.
-  const { tip, tooltipRef, syncedPoint, isDirectHover, handleMouse, handleLeave } = useHoverSync<Point>({
-    data: points,
-    chartId: `latency-${chartKey}`,
-    getKey: getPointKey,
-    xScale,
-    marginLeft: margin.left,
-  })
-  const tooltipStyles = useTooltipStyles()
   /**
-   * The x-axis, formatted like every other time axis on this dashboard.
+   * An arbitrary instant's x position, on a scale whose domain is ISO bucket-start STRINGS.
    *
-   * This chart drew its ticks with `smartTicks` and let `AxisBottomDate`'s default formatter render
-   * them, which reduces an ISO string to `DD.MM` — so a 24 h window printed `01.08` a dozen times
-   * across the bottom of the page's primary latency chart, an axis costing its full height to say
-   * nothing about where in the window you are. The values are the scale's own domain (ISO bucket
-   * starts) and `bucketTickFormat` renders them; it decides the label's *resolution* from the
-   * bucket size, so the `all` range keeps the year that stops its first and last bucket reading
-   * identically.
+   * There is no time→px path through `scalePoint`, but there does not need to be one:
+   * `densifyBuckets` emits a uniform grid, so `points[i].bucketStart` is `points[0].bucketStart + i
+   * * bucketMs` by construction and `xScale.step()` is the px per bucket. `xScale(points[0].key)`
+   * is bucket 0's CENTRE, so the grid's left edge is that minus half a step, and everything after
+   * is linear.
    *
-   * `axisTickValues` rather than `smartTicks` for the reason its own docblock gives: `smartTicks`
-   * appends the final value unconditionally and the last two labels land on top of each other.
+   * This is the one mark on the chart whose x-extent is NOT quantised to a bucket, and that is the
+   * point of computing it this way: an 80-second outage inside a 5-minute bucket draws 27% of a
+   * column, which the full-loss band — snapped to bucket edges — structurally cannot express.
+   *
+   * Guarded on `points.length > 1`: `scalePoint.step()` on a one-element domain is degenerate, and
+   * a mapping derived from it would place the rail somewhere arbitrary rather than fail visibly.
    */
-  const dateTickValues = axisTickValues(
-    points.map((p) => p.key),
-    xMax,
-  )
-
-  if (width < 40 || height < 40) return null
+  const gridFirst = points[0]?.bucketStart ?? 0
+  const gridX0 = points[0] === undefined ? 0 : (xScale(points[0].key) ?? 0)
+  const pxAt = (ms: number) => gridX0 - bandWidth / 2 + ((ms - gridFirst) / bucketMs) * bandWidth
 
   return (
-    // The wrapper is now just the layout box the SVG and its tooltips share; it is no longer
-    // load-bearing. It was: `ChartTooltip` rendered a plain <div>, React only leaves the SVG host
-    // namespace for a <foreignObject>, so a <div> child of an <svg> was created with
-    // createElementNS and the browser drew nothing for it — this chart shipped eight authored
-    // tooltip rows no reader had ever seen. basalt-ui 1.9.0 portals `ChartTooltip` to
-    // `document.body`, so it is safe to author anywhere, this file included. Keeping the tooltip
-    // out here anyway costs nothing and keeps all four charts in this directory one shape.
-    <div style={{ position: 'relative' }}>
-      <svg ref={svgRef} width={width} height={height}>
-        <defs>
-          <HatchPattern id={absentHatchId} color={VX.neutral} />
-          <HatchPattern id={vantageHatchId} color={VX.warnSolid} opacity={0.8} size={5} />
-          <HatchPattern id={unknownHatchId} color={VX.neutral} opacity={0.8} size={5} />
-        </defs>
-        <Group left={margin.left} top={margin.top}>
-          {/* Absence and full-loss are drawn FIRST, before anything decides whether there is a line
-              to draw, so a bucket with nothing to plot still occupies pixels. */}
-          {points.map((p) => {
-            const left = x(p) - bandWidth / 2
-            if (p.bucket === null) {
-              return (
-                <rect
-                  key={`absent-${p.key}`}
-                  x={left}
-                  y={0}
-                  width={bandWidth}
-                  height={yMax}
-                  fill={hatchFill(absentHatchId)}
-                />
-              )
-            }
-            if (p.bucket.downCycles <= 0) return null
-            // Opacity carries the measurement: the share of the bucket's cycles that got nothing
-            // back. One blip in a 120-cycle hour is a faint tint; a bucket that was down throughout
-            // is a solid band. A fixed opacity would make those two read the same.
-            const downFraction = p.bucket.downCycles / Math.max(1, p.bucket.count)
+    <>
+      <defs>
+        <HatchPattern id={absentHatchId} color={VX.neutral} />
+        <HatchPattern id={vantageHatchId} color={VX.warnSolid} opacity={0.8} size={5} />
+        <HatchPattern id={unknownHatchId} color={VX.neutral} opacity={0.8} size={5} />
+      </defs>
+      <Group>
+        {/* Absence and full-loss are drawn FIRST, before anything decides whether there is a line
+            to draw, so a bucket with nothing to plot still occupies pixels. */}
+        {points.map((p) => {
+          const left = x(p) - bandWidth / 2
+          if (p.bucket === null) {
             return (
               <rect
-                key={`down-${p.key}`}
+                key={`absent-${p.key}`}
                 x={left}
                 y={0}
                 width={bandWidth}
                 height={yMax}
-                fill={alpha(VX.badSolid, 0.1 + 0.45 * downFraction)}
+                fill={hatchFill(absentHatchId)}
               />
             )
+          }
+          if (!showDownBand || p.bucket.downCycles <= 0) return null
+          // Opacity carries the measurement: the share of the bucket's cycles that got nothing
+          // back. One blip in a 120-cycle hour is a faint tint; a bucket that was down throughout
+          // is a solid band. A fixed opacity would make those two read the same.
+          const downFraction = p.bucket.downCycles / Math.max(1, p.bucket.count)
+          return (
+            <rect
+              key={`down-${p.key}`}
+              x={left}
+              y={0}
+              width={bandWidth}
+              height={yMax}
+              fill={alpha(VX.badSolid, 0.1 + 0.45 * downFraction)}
+            />
+          )
+        })}
+        {showOutages &&
+          points.length > 1 &&
+          (outages ?? []).map((outage) => {
+            // `GET /api/outages` filters on overlap, not containment, so an outage that began before
+            // the window arrives whole and maps to a negative x. Clamp, never skip: a straddling
+            // outage that vanishes is the recorded fact this overlay exists to show, silently
+            // dropped.
+            const left = Math.max(0, pxAt(outage.startedAt))
+            const right = Math.min(xMax, pxAt(Math.min(outage.endedAt ?? windowTo, windowTo)))
+            if (right - left <= 0) return null
+            // At least one pixel: a sub-pixel outage drawn as nothing is indistinguishable from no outage.
+            const railWidth = Math.max(1, right - left)
+            return (
+              <g key={`outage-${outage.id}`}>
+                <rect x={left} y={0} width={railWidth} height={3} fill={VX.badSolid} />
+                <rect x={left} y={0} width={1} height={yMax} fill={alpha(VX.badSolid, 0.5)} />
+                <rect
+                  x={Math.max(left, right - 1)}
+                  y={0}
+                  width={1}
+                  height={yMax}
+                  fill={alpha(VX.badSolid, 0.5)}
+                />
+              </g>
+            )
           })}
-          <GridRows scale={yScale} width={xMax} stroke={VX.grid} strokeDasharray="2 3" />
-          {points.length > 1 &&
-            (outages ?? []).map((outage) => {
-              // `GET /api/outages` filters on overlap, not containment, so an outage that began before
-              // the window arrives whole and maps to a negative x. Clamp, never skip: a straddling
-              // outage that vanishes is the recorded fact this overlay exists to show, silently
-              // dropped.
-              const left = Math.max(0, pxAt(outage.startedAt))
-              const right = Math.min(xMax, pxAt(Math.min(outage.endedAt ?? windowTo, windowTo)))
-              if (right - left <= 0) return null
-              // At least one pixel: a sub-pixel outage drawn as nothing is indistinguishable from no outage.
-              const railWidth = Math.max(1, right - left)
-              return (
-                <g key={`outage-${outage.id}`}>
-                  <rect x={left} y={0} width={railWidth} height={3} fill={VX.badSolid} />
-                  <rect x={left} y={0} width={1} height={yMax} fill={alpha(VX.badSolid, 0.5)} />
-                  <rect x={Math.max(left, right - 1)} y={0} width={1} height={yMax} fill={alpha(VX.badSolid, 0.5)} />
-                </g>
-              )
-            })}
-          {/* The worst individual round trip in each bucket. Thin, unfilled and faint so it can
-              never be mistaken for the p5–p95 band it encloses. */}
-          <LinePath
-            data={points}
-            x={(p) => x(p)}
-            y={(p) => y(p.bucket?.maxMs ?? null)}
-            defined={(p) => p.bucket !== null && p.bucket.maxMs !== null}
-            curve={curveMonotoneX}
-            stroke={alpha(primaryColor, 0.35)}
-            strokeWidth={1}
-            fill="none"
-          />
-          <Area
-            data={points}
-            x={(p) => x(p)}
-            y0={(p) => y(p.bucket?.p95Ms ?? null)}
-            y1={(p) => y(p.bucket?.p5Ms ?? null)}
-            curve={curveMonotoneX}
-            fill={alpha(primaryColor, 0.14)}
-            defined={isBanded}
-          />
-          <LinePath
-            data={points}
-            x={(p) => x(p)}
-            y={(p) => y(p.bucket?.medianMs ?? null)}
-            defined={(p) => p.bucket !== null && p.bucket.medianMs !== null}
-            curve={curveMonotoneX}
-            stroke={primaryColor}
-            // `lineWidth` (2.5), not `line2Width` (2). Both lines were drawn at the SECONDARY
-            // weight, so the primary was ranked above the overlay by colour alone — and colour
-            // alone is what the router overlay had already proved insufficient. Weight is the
-            // second half of the same ranking, and the token pair is named for it.
-            strokeWidth={VX.lineWidth}
-          />
-          {overlayLabel !== undefined && (
-            // Plain reference line: no band, no p5/p95, no loss markers of its own — `defined` stops
-            // it exactly at a null `overlayMs`, the same rule the primary median line follows, so an
-            // unmeasured router cycle breaks the line rather than interpolating across it.
+        {primary !== undefined && (
+          <>
+            {/* The worst individual round trip in each bucket. Thin, unfilled and faint so it can
+                never be mistaken for the p5–p95 band it encloses. */}
             <LinePath
               data={points}
               x={(p) => x(p)}
-              y={(p) => y(p.overlayMs)}
-              defined={(p) => p.overlayMs !== null}
+              y={(p) => y(p.bucket?.maxMs ?? null)}
+              defined={(p) => p.bucket !== null && p.bucket.maxMs !== null}
               curve={curveMonotoneX}
-              stroke={OVERLAY_COLOR}
-              strokeWidth={VX.line2Width}
+              stroke={alpha(primary.color, 0.35)}
+              strokeWidth={1}
+              fill="none"
             />
-          )}
-          {points.map((p) =>
-            p.bucket !== null && p.bucket.maxLossPct > 0 && p.bucket.medianMs !== null ? (
+            <Area
+              data={points}
+              x={(p) => x(p)}
+              y0={(p) => y(p.bucket?.p95Ms ?? null)}
+              y1={(p) => y(p.bucket?.p5Ms ?? null)}
+              curve={curveMonotoneX}
+              fill={alpha(primary.color, 0.14)}
+              defined={isBanded}
+            />
+            <LinePath
+              data={points}
+              x={(p) => x(p)}
+              y={(p) => y(p.bucket?.medianMs ?? null)}
+              defined={(p) => p.bucket !== null && p.bucket.medianMs !== null}
+              curve={curveMonotoneX}
+              stroke={primary.color}
+              // `lineWidth` (2.5), not `line2Width` (2). Both lines were drawn at the SECONDARY
+              // weight, so the primary was ranked above the overlay by colour alone — and colour
+              // alone is what the router overlay had already proved insufficient. Weight is the
+              // second half of the same ranking, and the token pair is named for it.
+              strokeWidth={primary.strokeWidth ?? VX.lineWidth}
+            />
+          </>
+        )}
+        {overlaySeries !== undefined && (
+          // Plain reference line: no band, no p5/p95, no loss markers of its own — `defined` stops
+          // it exactly at a null `overlayMs`, the same rule the primary median line follows, so an
+          // unmeasured router cycle breaks the line rather than interpolating across it.
+          <LinePath
+            data={points}
+            x={(p) => x(p)}
+            y={(p) => y(p.overlayMs)}
+            defined={(p) => p.overlayMs !== null}
+            curve={curveMonotoneX}
+            stroke={overlaySeries.color}
+            strokeWidth={overlaySeries.strokeWidth ?? VX.line2Width}
+          />
+        )}
+        {primary !== undefined &&
+          points.map((p) => {
+            const bucket = p.bucket
+            if (bucket === null || bucket.maxLossPct <= 0 || bucket.medianMs === null) return null
+            const heavy = bucket.maxLossPct >= HEAVY_LOSS_PCT
+            if (heavy ? !showLossHeavy : !showLossPartial) return null
+            return (
               <circle
                 key={p.key}
                 cx={x(p)}
-                cy={yScale(p.bucket.medianMs)}
+                cy={yScale(bucket.medianMs)}
                 r={3}
-                fill={lossColor(p.bucket.maxLossPct)}
+                fill={lossColor(bucket.maxLossPct)}
               />
-            ) : null,
-          )}
-          {/* The vantage rail. `all` is the only verdict that claims the whole bucket measured this
-              line, so everything else gets marked — `unknown` in neutral, since an unreported
-              vantage is not evidence of a failover either. */}
-          {points.map((p) =>
-            p.vantage !== null && p.vantage.onHomeLine !== 'all' ? (
-              <rect
-                key={`vantage-${p.key}`}
-                x={x(p) - bandWidth / 2}
-                y={yMax - RAIL_H}
-                width={bandWidth}
-                height={RAIL_H}
-                fill={hatchFill(p.vantage.onHomeLine === 'unknown' ? unknownHatchId : vantageHatchId)}
-              />
-            ) : null,
-          )}
-          <AxisLeftNumeric scale={yScale} numTicks={4} tickFormat={(v) => fmtMs(v)} />
-          <AxisBottomDate
-            scale={xScale}
-            top={yMax}
-            tickValues={dateTickValues}
-            tickFormat={bucketTickFormat(bucketSeconds)}
-          />
-          {syncedPoint && <Crosshair x={x(syncedPoint)} top={0} bottom={yMax} />}
-          {syncedPoint && syncedPoint.bucket !== null && syncedPoint.bucket.medianMs !== null && (
-            <SeriesDot
-              cx={x(syncedPoint)}
-              cy={yScale(syncedPoint.bucket.medianMs)}
-              color={lossColor(syncedPoint.bucket.maxLossPct)}
+            )
+          })}
+        {/* The vantage rail. `all` is the only verdict that claims the whole bucket measured this
+            line, so everything else gets marked — `unknown` in neutral, since an unreported
+            vantage is not evidence of a failover either. */}
+        {points.map((p) =>
+          p.vantage !== null && p.vantage.onHomeLine !== 'all' ? (
+            <rect
+              key={`vantage-${p.key}`}
+              x={x(p) - bandWidth / 2}
+              y={yMax - RAIL_H}
+              width={bandWidth}
+              height={RAIL_H}
+              fill={hatchFill(p.vantage.onHomeLine === 'unknown' ? unknownHatchId : vantageHatchId)}
             />
-          )}
-          <HoverOverlay width={xMax} height={yMax} onMove={handleMouse} onLeave={handleLeave} />
-        </Group>
-      </svg>
-      <ChartTooltip tip={isDirectHover ? tip : null} tooltipRef={tooltipRef} styles={tooltipStyles}>
-        {tip && (
-          <>
-            <TooltipHeader date={fmtDateTime(tip.data.bucketStart)} label={label} labelColor={primaryColor} />
-            <TooltipBody>
-              <BucketRows point={tip.data} expectedCycles={expectedCycles} primaryColor={primaryColor} />
-              <OutageRow point={tip.data} outages={outages ?? []} bucketMs={bucketMs} windowTo={windowTo} />
-              {tip.data.bucket !== null && renderExtraTooltipRows?.(tip.data.bucket)}
-              {overlayLabel !== undefined && <OverlayRow point={tip.data} overlayLabel={overlayLabel} />}
-              <VantageRows point={tip.data} />
-            </TooltipBody>
-          </>
+          ) : null,
         )}
-      </ChartTooltip>
-      {!isDirectHover && syncedPoint !== null && syncedPoint.bucket !== null && (
-        <SyncedTip svgRef={svgRef} x={margin.left + x(syncedPoint)} styles={tooltipStyles}>
-          <TooltipBody>
-            <TooltipRow color={primaryColor} label={label} value={fmtMs(syncedPoint.bucket.medianMs)} shape="line" />
-          </TooltipBody>
-        </SyncedTip>
-      )}
-    </div>
+      </Group>
+    </>
   )
 }
 
@@ -652,7 +744,11 @@ function BucketRows({
 
   return (
     <>
-      <TooltipRow color={primaryColor} label="Median" value={fmtMs(bucket.medianMs)} shape="line" />
+      {/* No "Median" row. `CartesianChart` DERIVES one from the primary series — labelled with the
+          series' own name, the same word the legend uses for the same mark — and its `getValue` is
+          the median, so authoring one here printed the number twice under two different names. The
+          rows below are the ones no series carries: a band, an envelope, two loss shares and the
+          cycle counts behind them. */}
       <TooltipRow
         color={primaryColor}
         label="p5 – p95"
@@ -725,14 +821,10 @@ function OutageRow({
       ? `${hits.length} recorded`
       : hits[0]!.endedAt === null
         ? 'ongoing'
-        : fmtDuration(hits[0]!.durationS ?? Math.round((hits[0]!.endedAt - hits[0]!.startedAt) / 1000))
+        : fmtDuration(
+            hits[0]!.durationS ?? Math.round((hits[0]!.endedAt - hits[0]!.startedAt) / 1000),
+          )
   return <TooltipRow color={VX.badSolid} shape="bar" label="Recorded outage" value={value} />
-}
-
-/** The overlay's own tooltip row — `fmtMs` already renders a null median as "—", the same
- * unmeasured treatment the primary rows use, so no separate branch is needed here. */
-function OverlayRow({ point, overlayLabel }: { point: Point; overlayLabel: string }) {
-  return <TooltipRow color={VX.line} label={overlayLabel} value={fmtMs(point.overlayMs)} shape="line" />
 }
 
 /**

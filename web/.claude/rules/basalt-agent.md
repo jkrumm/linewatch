@@ -1,6 +1,6 @@
 ---
 source: basalt-ui
-description: Streaming-agent layer for basalt-ui apps — Eden-native transport, AgentPart exhaustive handling, StickToBottom, chat history, AND the multi-thread ThreadWorkspace (concurrent runs + a distilled-outcome feed + detail panel). Headless layer in ./agent; the Mantine chrome and markdown rendering (basalt-ui/content's Markdown) ship from the root entry. Covers authoring doctrine and the Eden #231 footgun.
+description: Streaming-agent layer for basalt-ui apps — Eden-native transport, AgentPart exhaustive handling, StickToBottom, chat history, AND the multi-thread ThreadWorkspace (concurrent runs + a distilled-outcome feed + detail panel). Headless layer in ./agent (Mantine-free); the Mantine-coupled chrome ships from its own basalt-ui/agent-chat subpath (also re-exported from the root entry) and uses basalt-ui/content's Markdown for rendering. Covers authoring doctrine, the Eden #231 footgun, and the agent-chat lint guards (agent-resume-guard, agent-no-raw-usechat, ai-sdk-major) with their basalt-agent-allow escape token.
 paths:
   - 'src/**/*agent*'
   - 'src/**/chat*'
@@ -200,7 +200,8 @@ Built on `createPersistedState` — SSR-safe, cross-tab via the `storage` event.
 For the "many short chats" pattern — each prompt a short-lived thread, the feed showing only a
 distilled outcome (title + summary), a right-hand detail panel to open and continue — basalt-ui
 ships a full workspace. The headless multi-thread layer lives in `./agent` (Mantine-free); the
-ready-built Mantine chrome ships from the root `basalt-ui` entry.
+ready-built Mantine chrome ships from `basalt-ui/agent-chat` (also re-exported from the root
+entry).
 
 ### Headless (`basalt-ui/agent`)
 
@@ -231,10 +232,16 @@ Promise<AgentOutcome>` — the app supplies it. In production derive `{ title, s
 finished run (e.g. a structured final step of your own model) and return it. `heuristicOutcome` is
 a demo-only fallback that truncates the last assistant text — never the production path.
 
-### Ready-built UI (`basalt-ui`, Mantine)
+### Ready-built UI (`basalt-ui/agent-chat`, Mantine)
+
+The Mantine-coupled chrome (`ThreadWorkspace` and the lower-level pieces below it) ships its own
+subpath, `basalt-ui/agent-chat` — added in 1.10.0. The root `basalt-ui` entry still re-exports the
+same components (nothing that imported from `basalt-ui` before 1.10.0 needs to change), but a
+consumer who only needs the thread-chat UI can import from `./agent-chat` directly, without pulling
+in `BasaltProvider`, `BasaltShell`, the dashboard composites, or `basalt-ui/connectivity`:
 
 ```tsx
-import { ThreadWorkspace } from 'basalt-ui'
+import { ThreadWorkspace } from 'basalt-ui/agent-chat'
 ;<ThreadWorkspace
   useThreads={useThreads}
   transport={transport}
@@ -250,15 +257,65 @@ composer) on the right, collapsing to a single pane below 768px. The lower-level
 `threadPartRenderers`) are exported too for bespoke layouts. Motion (feed insert, panel slide) runs
 on the shared `MOTION_*` tokens and honours `useReducedMotion`.
 
+`ThreadFeed` also takes a `variant` (`'outcome'`, the default above, or `'inline'` for
+`ThreadFeedRow`, the Slack-style row that expands in place instead of opening a separate detail
+panel — lazily mounted on first expand, then kept mounted and hidden via CSS on every collapse
+after that) and a `renderRow` override that takes priority over `variant` entirely, for full control
+over live-run wiring (`onSend`/`onStop`/`liveParts`/`liveStatus`) the built-in `'inline'` row
+doesn't expose on its own; wire a real `onSend` on `ThreadFeed` itself to make the built-in row's
+composer usable, or omit it and the row's composer renders disabled rather than a live control that
+silently discards input. `ThreadTranscript` also takes `groupConsecutive` (suppresses role
+label/chrome on same-speaker runs), a per-message `affordances` contract (timestamp/copy/regenerate/
+custom actions), and an optional `virtualize`/`height` windowing mode for very long threads. A
+windowed transcript owns its own scroll node (never nest it in `BasaltStickToBottom`) and scrolls
+itself to the newest message once on mount — `virtualize={{ initialScroll: 'start' }}` opts out, and
+is what a consumer restoring its own saved scroll position wants so the two don't fight.
+
 **Boundary:** the headless layer (`createThreadsStore`, `useAgentThreadRuns`, the outcome types)
-stays Mantine-free in `./agent`; the components are Mantine-coupled and ship from the root entry.
-Never add `@mantine/*` under `src/agent/**` — it is oxlint-enforced Mantine-free.
+stays Mantine-free in `./agent`; the components are Mantine-coupled and ship from `./agent-chat`
+(also re-exported from the root entry). Never add `@mantine/*` under `src/agent/**` — it is
+oxlint-enforced Mantine-free.
 
 **No custom part types at the workspace level.** `ThreadWorkspace`, `ThreadDetailPanel`, and
 `ThreadTranscript` render the framework's `AgentPart` union only — they are not generic over a
 consumer-extended part type. If you need custom rendering for the existing part shapes, drop to
 the headless layer instead: compose your own transcript from `PartList` (`basalt-ui/agent`) with a
 custom `components` renderer map, rather than passing a wider type through `ThreadWorkspace`.
+
+## Lint guards (agent-chat) — a SEPARATE escape token from `theme-allow`
+
+Three oxlint rules (1.10.0) protect the streaming/resume discipline above. All three share one
+escape comment, `basalt-agent-allow` — deliberately NOT `theme-allow`. The two tokens are unrelated:
+a `theme-allow` comment on a color/spacing exception never suppresses one of these, and a
+`basalt-agent-allow` comment never suppresses a `theme-allow` finding. Don't reach for the color
+exemption to quiet a streaming guard — mark the correct token, on the correct line, and only when
+you actually own the guard you're bypassing.
+
+- **`basalt/agent-resume-guard`** — flags an unguarded `useChat({ resume: true })` or a bare
+  `resumeStream()` call outside `useAgentThreadRuns`. `useAgentThreadRuns` owns single-consumer
+  discipline and StrictMode-safe reconnection; a raw resume call re-fires on every effect re-run
+  (vercel/ai#7891, no merged fix upstream). Mark `basalt-agent-allow` only if you own the guard
+  yourself.
+- **`basalt/agent-no-raw-usechat`** — flags importing `useChat`/`useCompletion` directly from
+  `@ai-sdk/react` or `ai/react`. Use `useAgentStream`/`useAgentThreadRuns` over `aiSdkTransport`
+  instead — they add unmount abort, supersede guards, and single-consumer resume that the raw hook
+  doesn't. Type-only imports (`import type { useChat }`) are exempt; nothing to guard against at
+  runtime.
+- **`basalt/ai-sdk-major`** — flags a file whose nearest `package.json` declares a different `ai`
+  major than the one basalt-ui itself declares as a peer. A producer and consumer on different `ai`
+  majors can throw `'Unknown chunk type'` at runtime — this is the exact defect one production
+  consumer hit (one app package on `ai@5`, a sibling on `ai@7`). This rule is PER-FILE — it only
+  sees the nearest `package.json` to the linted file, so a lint run scoped to one workspace package
+  can't catch a skew against a _different_ package. `bunx basalt-ui doctor`'s `ai-major-parity`
+  check is the cross-package counterpart: it walks every workspace manifest and is a HARD failure,
+  not a lint warning — run both, they check different things. Like its two siblings above, it
+  honours `basalt-agent-allow` on the flagged import (or the line above it) — mark it on an
+  intentional producer/consumer file. The repo-wide equivalent for `doctor`'s check is
+  `basalt.aiMajorSkewReason` in package.json (a mandatory written reason, not a line comment) — see
+  the README and the `BasaltConfig` JSDoc.
+
+None of these three rules honour `theme-allow` — only `basalt-agent-allow`, on the flagged line or
+the line above it.
 
 ## Stream resumption — the reconnect seam
 

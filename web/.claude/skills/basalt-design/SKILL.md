@@ -233,9 +233,10 @@ Every chart composes the shipped primitives — never hand-rolled equivalents:
   `<AxisLeft>`/`<AxisBottom>` (they miss theme tokens + smart ticks). Now lint-enforced:
   `basalt-ui check-theme`'s `raw-visx-axis` guard fails the build on a raw axis inside a `/charts/`
   file (escape via `theme-allow`).
-- **`HoverOverlay`** + `HoverContext` + `useChartTooltip` for hover/crosshair. Wrap a group of
-  date-aligned charts in **`ChartHoverSync`** to cast a ghost crosshair across all siblings on hover
-  (without it, `useHoverSync` runs per-chart only and warns in dev).
+- **The cursor is shared by default** — `CartesianChart` wires the hover overlay, crosshair, dots
+  and tooltip itself, and every chart on the page tracks one cursor through a module-level store
+  with no provider. Reach for `useChartCursor` only in a hand-composed non-single-plot shape, and
+  for **`ChartCursorScope`** only to opt a subtree OUT of sharing.
 - **`AreaGradient`** / `areaFillUrl` for the soft single-hue fill.
 
 Shipped kinds beyond `ZonedLine` / `Bars` / `StackedArea` / `Donut`: **`MultiLine`** (N series on a

@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test'
 import { foldColumns, foldStates, summariseLink } from './link-speed-strip'
-import { foldSourceIndex } from './fold'
 import type { LinkBucketState } from '../lib/vantage'
 
 const STEADY_1000: LinkBucketState = { kind: 'steady', mbit: 1000 }
@@ -125,9 +124,9 @@ describe('foldColumns', () => {
     expect(folded).toHaveLength(2)
     expect(folded[0]?.foldedFrom).toBe(3)
     expect(folded[1]?.foldedFrom).toBe(2)
+    // Every source column accounted for exactly once — see `availability-strip.test.ts`'s
+    // identical assertion for why this stopped going through `foldSourceIndex`.
     expect(folded.reduce((sum, f) => sum + f.foldedFrom, 0)).toBe(columns.length)
-    const index = foldSourceIndex(columns, folded)
-    expect(columns.every((c) => index.has(c.key))).toBe(true)
   })
 
   test('a non-positive cap folds nothing', () => {

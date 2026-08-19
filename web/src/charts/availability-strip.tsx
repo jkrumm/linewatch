@@ -1,20 +1,18 @@
-import { useCallback, useMemo, useRef } from 'react'
+import { useCallback, useMemo } from 'react'
 import { scaleBand } from '@visx/scale'
 import {
   AxisBottomDate,
-  ChartLegend,
-  ChartTooltip,
+  ChartFrame,
+  ChartTooltipFloat,
   Crosshair,
   HoverOverlay,
-  type LegendEntry,
-  ResponsiveChart,
+  type SeriesStyle,
   TooltipBody,
   TooltipHeader,
   TooltipRow,
   VX,
   alpha,
-  useHoverSync,
-  useTooltipStyles,
+  useChartCursor,
 } from 'basalt-ui/charts'
 import type { ProbeBucket, ProbeBucketSeconds, TargetName } from '../lib/types'
 import { TARGET_LABEL } from '../lib/types'
@@ -22,10 +20,7 @@ import { densifyBuckets } from '../lib/densify'
 import { PROBE_CYCLE_MS } from '../lib/range'
 import { fmtDateTime, fmtPct } from '../lib/format'
 import { AXIS_LABEL_PX, axisTickValues, bucketTickFormat } from '../lib/axis'
-import { PendingChart } from './pending'
-import { foldSourceIndex } from './fold'
 import { HatchPattern, hatchFill } from './hatch'
-import { SyncedTip } from './synced-tip'
 
 /** Loss share at which a column is painted at full strength — the same absolute scale the
  * availability heatmap uses, so the two views of the same data agree on what "bad" looks like. */
@@ -64,6 +59,20 @@ const STRIP_HEIGHT = 44
 const AXIS_HEIGHT = 22
 
 /**
+ * The one-row legend band, reserved out of the height handed to `ChartFrame`.
+ *
+ * The frame owns the legend now (it derives it from `series` and drops it while pending), and it
+ * subtracts the legend's MEASURED height from the height it is given before handing the rest to the
+ * plot. The legend used to sit outside the measuring wrapper and add its own height to the card, so
+ * the strip's footprint has to grow by a band to stay where it was.
+ *
+ * It is a starting allowance, not a promise: `StripPlot` derives its column band from the plot rect
+ * it is actually handed, so a legend that wraps to two rows on a narrow viewport takes the pixels
+ * from the strip rather than being drawn over by it.
+ */
+const LEGEND_BAND = 24
+
+/**
  * Horizontal room the edge axis labels need, in px.
  *
  * The strip drew its columns edge to edge and its bottom axis centred each label on its own tick,
@@ -85,7 +94,7 @@ const PLOT_RIGHT = Math.round(AXIS_LABEL_PX / 2)
 
 type Column = {
   /** The bucket's ISO start. The band scale's domain value, the broadcast hover key and
-   * `foldSourceIndex`'s key — an identity, never a rendering. The axis label is derived from it at
+   * the cursor's resolution key — an identity, never a rendering. The axis label is derived from it at
    * draw time by `bucketTickFormat`; this used to carry a pre-formatted `label` alongside, because
    * `AxisBottomDate` took no `tickFormat` and a display string was the only thing that reached the
    * axis. See `lib/axis.ts`. */
@@ -123,7 +132,11 @@ type PlotColumn = Column & { foldedFrom: number; unmeasuredMembers: number }
 export function foldColumns(columns: Column[], cap: number): PlotColumn[] {
   if (cap <= 0) return []
   if (columns.length <= cap)
-    return columns.map((c) => ({ ...c, foldedFrom: 1, unmeasuredMembers: c.bucket === null ? 1 : 0 }))
+    return columns.map((c) => ({
+      ...c,
+      foldedFrom: 1,
+      unmeasuredMembers: c.bucket === null ? 1 : 0,
+    }))
 
   const groupSize = Math.ceil(columns.length / cap)
   const folded: PlotColumn[] = []
@@ -153,9 +166,10 @@ export function foldColumns(columns: Column[], cap: number): PlotColumn[] {
   return folded
 }
 
-/** Stable across renders, unlike an inline arrow — `useHoverSync` rebuilds its 288-entry key→point
- * Map whenever `getKey`'s identity changes, and an inline `(c) => c.key` is a new function every
- * render of a page that re-renders on a 30 s heartbeat. */
+/** Stable across renders, unlike an inline arrow — `useChartCursor` rebuilds its 288-entry domain
+ * index whenever `data` changes, and the callbacks that close over `getKey` are memoized, so an
+ * inline `(c) => c.key` is a new function on every render of a page that re-renders on a 30 s
+ * heartbeat. */
 const getColumnKey = (c: PlotColumn): string => c.key
 
 /**
@@ -214,48 +228,62 @@ export function AvailabilityStrip({
   const expectedCycles = Math.max(1, Math.round((bucketSeconds * 1000) / PROBE_CYCLE_MS))
 
   return (
-    // A floor, not a height. `ResponsiveChart` draws nothing until `useParentSize` has measured in an
-    // effect, so every mount contributes 0px for one frame — which under a sticky header is the page
-    // visibly dropping and snapping back every time a section view is switched.
-    <div style={{ minHeight: STRIP_HEIGHT + AXIS_HEIGHT }}>
-      {isPending === true ? (
-        <PendingChart height={STRIP_HEIGHT + AXIS_HEIGHT} />
-      ) : (
-        <>
-          <ResponsiveChart height={STRIP_HEIGHT + AXIS_HEIGHT}>
-            {({ width }) => (
-              <StripPlot
-                target={target}
-                columns={columns}
-                expectedCycles={expectedCycles}
-                bucketSeconds={bucketSeconds}
-                width={width}
-              />
-            )}
-          </ResponsiveChart>
-          {/* This strip shipped with four distinct fills and nothing anywhere naming them, so the
-              only way to learn that a faint column meant "clean" and a hatched one meant "never
-              measured" was to hover every kind of column until the tooltip said so. A mark that
-              renders and a legend that does not are not independently reviewable — the same lesson
-              the ChartTooltip trap taught this repo, arriving from the other direction. Suppressed
-              while pending, with the plot, per the framework's own rule: a legend naming states
-              nothing on screen can be pointed at is its own small lie. */}
-          <ChartLegend chartId="availability-strip" items={FILL_LEGEND} />
-        </>
-      )}
+    // A floor, not a height. `ChartFrame` floors its own plot rect at `minWidth`, but its measured
+    // HEIGHT still arrives an effect late, so every mount contributes 0px for one frame — which
+    // under a sticky header is the page visibly dropping and snapping back every time a section
+    // view is switched.
+    <div style={{ minHeight: STRIP_HEIGHT + AXIS_HEIGHT + LEGEND_BAND }}>
+      <ChartFrame
+        series={FILL_SERIES}
+        chartId="availability-strip"
+        height={STRIP_HEIGHT + AXIS_HEIGHT + LEGEND_BAND}
+        isPending={isPending === true}
+        ariaLabel={`${TARGET_LABEL[target]} availability in ${Math.round(bucketSeconds / 60)}-minute buckets, with unmeasured buckets marked`}
+        // The legend toggles nothing: these four entries are FILLS, not series with values, so
+        // hiding one would remove a name from the key and change no mark. `ChartFrame` would
+        // otherwise turn a four-entry legend into a toggle by default.
+        legend={{ toggle: false }}
+      >
+        {({ width, height }) => (
+          <StripPlot
+            target={target}
+            columns={columns}
+            expectedCycles={expectedCycles}
+            bucketSeconds={bucketSeconds}
+            width={width}
+            height={height}
+          />
+        )}
+      </ChartFrame>
     </div>
   )
 }
 
-/** The four fills `columnFill` can return, named. `fillOpacity` mirrors the real alphas rather
- * than a swatch-friendly constant, so the legend cannot drift into describing a fill the chart
- * does not draw — `LegendEntry.fillOpacity` exists for exactly this. The loss swatch sits at the
- * ramp's midpoint: it stands for a range, not for one value. */
-const FILL_LEGEND: LegendEntry[] = [
-  { key: 'clean', label: 'No loss', color: VX.neutral, shape: 'bar', fillOpacity: CLEAN_ALPHA },
-  { key: 'loss', label: 'Packet loss', color: VX.badSolid, shape: 'bar', fillOpacity: (LOSS_FLOOR_ALPHA + 1) / 2 },
-  { key: 'down', label: 'Every cycle down', color: VX.badSolid, shape: 'bar', fillOpacity: 1 },
-  { key: 'absent', label: 'Not measured', color: VX.neutral, shape: 'bar', fillOpacity: 0.5 },
+/**
+ * The four fills `columnFill` can return, as the series array `ChartFrame` derives the legend from.
+ *
+ * `fillOpacity` mirrors the real alphas rather than a swatch-friendly constant, so the legend cannot
+ * drift into describing a fill the chart does not draw. The loss swatch sits at the ramp's midpoint:
+ * it stands for a range, not for one value.
+ *
+ * This used to be a hand-written `LegendEntry[]` handed straight to `ChartLegend`. `deriveLegend`
+ * (which `ChartFrame` calls for us) is the shipped path and `basalt/chart-legend-literal` is the
+ * rule that now says so — a legend authored beside the marks is a second source of truth that goes
+ * stale silently. The array is still hand-written here, because these entries genuinely are not
+ * plotted series; what changed is that it is now the SAME array the frame reads, in the shape the
+ * framework understands (`mark`, not `shape`).
+ */
+const FILL_SERIES: SeriesStyle[] = [
+  { key: 'clean', label: 'No loss', color: VX.neutral, mark: 'bar', fillOpacity: CLEAN_ALPHA },
+  {
+    key: 'loss',
+    label: 'Packet loss',
+    color: VX.badSolid,
+    mark: 'bar',
+    fillOpacity: (LOSS_FLOOR_ALPHA + 1) / 2,
+  },
+  { key: 'down', label: 'Every cycle down', color: VX.badSolid, mark: 'bar', fillOpacity: 1 },
+  { key: 'absent', label: 'Not measured', color: VX.neutral, mark: 'bar', fillOpacity: 0.5 },
 ]
 
 function StripPlot({
@@ -264,16 +292,21 @@ function StripPlot({
   expectedCycles,
   bucketSeconds,
   width,
+  height,
 }: {
   target: TargetName
   columns: Column[]
   expectedCycles: number
   bucketSeconds: ProbeBucketSeconds
   width: number
+  /** The plot rect `ChartFrame` handed down — already net of the measured legend band. */
+  height: number
 }) {
-  const tooltipStyles = useTooltipStyles()
   const absentHatchId = 'availability-strip-absent'
-  const svgRef = useRef<SVGSVGElement | null>(null)
+  // Derived from the rect rather than the constant, so a legend that wraps takes its pixels from
+  // the columns instead of being overdrawn. Floored so a degenerate rect cannot produce a
+  // negative-height <rect>, which renders nothing and would read as an unmeasured window.
+  const stripHeight = Math.max(1, height - AXIS_HEIGHT)
 
   // The insets are half an axis-label width, which is right at 1548px and absurd at 390 — 104px of a
   // 338px chart spent on empty gutter, for a strip that has no left axis at all. Capped at an eighth
@@ -291,22 +324,27 @@ function StripPlot({
   // that width draws a 0.5px fill next to a 1px hatch, both of which antialias into a smudge no
   // reader can tell apart from a fully-measured column. `/ 3` trades some of that resolution back
   // for the room the split needs to render as two visibly distinct pieces.
-  const plotColumns = useMemo(() => foldColumns(columns, Math.floor(plotWidth / 3)), [columns, plotWidth])
-  // Memoized so `scale` below is referentially stable across renders that don't change the fold —
-  // `scaleBand` and the `xScale` wrapper closing over it are otherwise rebuilt every render, which
-  // invalidates `useHoverSync`'s `handleMouse` callback identity for no reason.
+  const plotColumns = useMemo(
+    () => foldColumns(columns, Math.floor(plotWidth / 3)),
+    [columns, plotWidth],
+  )
+  // Memoized so `scale` below is referentially stable across renders that don't change the fold.
+  // The reason has changed and shrunk: it used to be that an unstable `scale` invalidated
+  // `useHoverSync`'s `handleMouse` identity, which no longer holds — `useChartCursor` reads
+  // `xScale` through a ref and its `onPointerMove` closes over `[data, marginLeft, chartId, store]`
+  // only, so `scale` identity cannot reach it. What is left is `bandCenter` itself (memoized on
+  // `scale`) and rebuilding a 288-entry `scaleBand` on a page that re-renders on a 30 s heartbeat.
   const keys = useMemo(() => plotColumns.map((c) => c.key), [plotColumns])
   // The band scale is built before the width guard's early return so the hook order below it stays
   // fixed; `scaleBand` is a plain call, not a hook, so this is only ordering hygiene for readers.
-  const scale = useMemo(() => scaleBand<string>({ domain: keys, range: [0, plotWidth] }), [keys, plotWidth])
-  // Every source (unfolded) column's key, resolved to the folded column that swallowed it — see
-  // `foldSourceIndex`. This is what lets the crosshair follow a key broadcast by the latency chart,
-  // which keys all 288 raw buckets rather than this strip's folded ~96.
-  const sourceIndex = useMemo(() => foldSourceIndex(columns, plotColumns), [columns, plotColumns])
-
-  // `+ bandwidth()/2` is mandatory. `useHoverSync`'s nearest-point loop compares the pointer against
-  // `xScale(getKey(d))`, and `scaleBand` returns the band's LEFT edge — passing `scale` raw biases
-  // every snap by half a column, which at 288 columns is a systematic one-bucket-early cursor.
+  const scale = useMemo(
+    () => scaleBand<string>({ domain: keys, range: [0, plotWidth] }),
+    [keys, plotWidth],
+  )
+  // `+ bandwidth()/2` is mandatory. `useChartCursor`'s nearest-point loop compares the pointer
+  // against `xScale(getKey(d))`, and `scaleBand` returns the band's LEFT edge — passing `scale` raw
+  // biases every snap by half a column, which at 288 columns is a systematic one-bucket-early
+  // cursor.
   const bandCenter = useCallback(
     (key: string) => {
       const v = scale(key)
@@ -314,29 +352,37 @@ function StripPlot({
     },
     [scale],
   )
-  // The `resolveKey` seam, and the reason this file no longer reads `HoverContext` itself. The hook
-  // resolves a sibling's broadcast key by exact string match against its own drawn points, which on
-  // a folded chart misses two keys in three; this overrides just that lookup. It was previously
-  // done by reading the context directly and shadowing the hook's own `syncedPoint` — same result,
-  // but it duplicated the hook's provider-vs-standalone fallback (`tip?.data ?? null`) at the call
-  // site, where it could drift from the hook's.
-  const resolveKey = useCallback((key: string) => sourceIndex.get(key) ?? null, [sourceIndex])
-
-  // This strip's own docblock has claimed since it was written that it shares a hover cursor with the
-  // plots below, and pinned PLOT_LEFT to match their gutter for exactly that reason. The alignment
-  // shipped; the sync did not — it was on bare `useChartTooltip` and the provider mounted around the
-  // whole chart region never saw it. Its key is the same bucket ISO start `densifyBuckets` gives
-  // the latency chart over the same window, so the key space needed no design, only wiring.
-  const { tip, tooltipRef, syncedPoint, isDirectHover, handleMouse, handleLeave } = useHoverSync<PlotColumn>({
+  // **The fold needs no seam, and `resolution: 'leading'` is what makes that exact.** This strip
+  // folds up to 288 raw buckets down to the columns a narrow plot can draw, so most keys the
+  // unfolded latency band broadcasts are keys it does not own. The shared crosshair used to blink
+  // on and off with no rule a reader could infer, and the app patched it with a source→folded index
+  // (`charts/fold.ts`) handed to `useHoverSync`'s `resolveKey`.
+  //
+  // `useChartCursor` resolves on the parsed domain instead, and the mode matters: a folded column
+  // is keyed by its FIRST member (`foldColumns` takes identity from `group[0]`, deliberately, so
+  // the key names a real bucket start rather than an invented midpoint). Under the default
+  // `'nearest'` a source bucket in the back half of a group is nearer the NEXT column's key than
+  // its own, so up to half the band's keys landed the follower crosshair one column right.
+  // `'leading'` is strict containment — the last column start at or before the key — which is
+  // exactly what "the column that swallowed this bucket" means, and it holds for every fold width
+  // because it is a property of the keys, not of the grouping. Its edge behaviour is the honest
+  // one too: a key outside `[first, last + step)` resolves to nothing rather than snapping to an
+  // end column that does not contain it.
+  //
+  // No provider either: the cursor store is module-level, so this strip shares a cursor with every
+  // other chart on the page out of the box. That is what its own docblock has claimed since it was
+  // written, and what PLOT_LEFT is aligned to the plots below for.
+  const cursor = useChartCursor<PlotColumn>({
     data: plotColumns,
     chartId: 'availability-strip',
     getKey: getColumnKey,
     xScale: bandCenter,
+    resolution: 'leading',
     // `localPoint` returns SVG-viewport coordinates, so this is PLOT_LEFT even though the overlay
     // sits inside the translated <g>.
     marginLeft: plotLeft,
-    resolveKey,
   })
+  const point = cursor.point
 
   if (width < plotLeft + plotRight + 20 || plotColumns.length === 0) return null
 
@@ -349,14 +395,8 @@ function StripPlot({
   const hatchSize = Math.max(2, Math.min(5, Math.round(barWidth)))
 
   return (
-    <div style={{ position: 'relative' }}>
-      <svg
-        ref={svgRef}
-        width={width}
-        height={STRIP_HEIGHT + AXIS_HEIGHT}
-        role="img"
-        aria-label={`${TARGET_LABEL[target]} availability in ${Math.round(bucketSeconds / 60)}-minute buckets, with unmeasured buckets marked`}
-      >
+    <>
+      <svg width={width} height={height}>
         <defs>
           <HatchPattern id={absentHatchId} color={VX.neutral} opacity={0.7} size={hatchSize} />
         </defs>
@@ -381,7 +421,7 @@ function StripPlot({
                     x={i * step}
                     y={0}
                     width={measuredWidth}
-                    height={STRIP_HEIGHT}
+                    height={stripHeight}
                     rx={1}
                     fill={columnFill(column.bucket, absentHatchId)}
                     pointerEvents="none"
@@ -392,7 +432,7 @@ function StripPlot({
                     x={i * step + measuredWidth}
                     y={0}
                     width={hatchWidth}
-                    height={STRIP_HEIGHT}
+                    height={stripHeight}
                     rx={1}
                     fill={hatchFill(absentHatchId)}
                     pointerEvents="none"
@@ -401,70 +441,68 @@ function StripPlot({
               </g>
             )
           })}
-          {syncedPoint && (
+          {point && (
+            /* theme-allow — declared non-single-plot. A strip has ONE dimension: columns over time,
+               no y scale, no numeric axis, no grid. `CartesianChart` owns a plot rect with one or
+               two numeric y axes and renders `AxisLeftNumeric` unconditionally, so composing it
+               here would draw a y axis over a chart that measures nothing vertically. This is the
+               multi-pane/radial/matrix escape `basalt/hand-rolled-plot` describes, and everything
+               below the marks — the cursor, the crosshair, the overlay, the bottom axis, the
+               tooltip — is the shipped primitive, assembled rather than re-implemented. */
             <Crosshair
-              x={(scale(syncedPoint.key) ?? 0) + scale.bandwidth() / 2}
+              x={(scale(point.key) ?? 0) + scale.bandwidth() / 2}
               top={0}
-              bottom={STRIP_HEIGHT}
+              bottom={stripHeight}
             />
           )}
-          <HoverOverlay width={plotWidth} height={STRIP_HEIGHT} onMove={handleMouse} onLeave={handleLeave} />
+          <HoverOverlay
+            width={plotWidth}
+            height={stripHeight}
+            onMove={cursor.onPointerMove}
+            onLeave={cursor.onPointerLeave}
+            onKeyDown={cursor.onKeyDown}
+            onBlur={cursor.onBlur}
+            // `CartesianChart` forwards its own `ariaLabel` to the overlay so the focusable slider
+            // announces the chart rather than a generic "Chart data". A hand-composed plot has to
+            // do it itself, or tabbing into it says nothing about which chart was reached.
+            ariaLabel={`${TARGET_LABEL[target]} availability in ${Math.round(bucketSeconds / 60)}-minute buckets`}
+            valueMax={Math.max(plotColumns.length - 1, 0)}
+            {...(point !== null && {
+              valueNow: plotColumns.indexOf(point),
+              valueText: bucketTickFormat(bucketSeconds)(point.key),
+            })}
+          />
           {/* `axisTickValues` rather than basalt's own `smartTicks`, for the reason its docblock
               gives: `smartTicks` appends the final value unconditionally and the last two labels
               land on top of each other. The tick VALUES are ISO bucket starts (the scale's domain);
               `bucketTickFormat` turns each into the time a reader sees — see `lib/axis.ts`. */}
           <AxisBottomDate
             scale={scale}
-            top={STRIP_HEIGHT}
+            top={stripHeight}
             tickValues={axisTickValues(keys, plotWidth, AXIS_LABEL_PX)}
             tickFormat={bucketTickFormat(bucketSeconds)}
           />
         </g>
       </svg>
-      <ChartTooltip tip={isDirectHover ? tip : null} tooltipRef={tooltipRef} styles={tooltipStyles}>
-        {tip && (
+      {/* Only the chart the pointer is actually on shows a tooltip. The follower chip this file used
+          to draw (`charts/synced-tip.tsx`) is gone with `ChartTooltip`: `useChartCursor` exposes
+          `isSource`, and the shipped policy for a chart following a sibling's cursor is crosshair
+          and dots, not a second floating card. */}
+      <ChartTooltipFloat anchor={cursor.isSource ? cursor.anchor : null}>
+        {point && (
           <>
             <TooltipHeader
-              date={fmtDateTime(tip.data.bucketStart)}
+              date={fmtDateTime(point.bucketStart)}
               label={TARGET_LABEL[target]}
               labelColor={VX.line}
             />
             <TooltipBody>
-              <ColumnRows column={tip.data} expectedCycles={expectedCycles} />
+              <ColumnRows column={point} expectedCycles={expectedCycles} />
             </TooltipBody>
           </>
         )}
-      </ChartTooltip>
-      {!isDirectHover && syncedPoint !== null && syncedPoint.bucket !== null && (
-        <SyncedTip
-          svgRef={svgRef}
-          x={plotLeft + (scale(syncedPoint.key) ?? 0) + scale.bandwidth() / 2}
-          styles={tooltipStyles}
-        >
-          <TooltipBody>
-            <TooltipRow
-              color={VX.badSolid}
-              shape="bar"
-              label="Loss"
-              value={fmtPct(syncedPoint.bucket?.lossPct ?? null, 2)}
-            />
-            {/* The direct-hover tooltip has `ColumnRows`' own "Folded from" caveat; this chip has
-                none, and a follower has no header naming the column it belongs to either — so a
-                1-of-3-measured fold reads exactly like a fully-measured reading with nobody pointed
-                at the difference. Suppressing the whole chip on a partial fold would be worse: it
-                would draw nothing for a column that genuinely did measure something. */}
-            {syncedPoint.unmeasuredMembers > 0 && syncedPoint.unmeasuredMembers < syncedPoint.foldedFrom && (
-              <TooltipRow
-                color={VX.neutral}
-                shape="dot"
-                label="Partial"
-                value={`${syncedPoint.foldedFrom - syncedPoint.unmeasuredMembers} of ${syncedPoint.foldedFrom} buckets`}
-              />
-            )}
-          </TooltipBody>
-        </SyncedTip>
-      )}
-    </div>
+      </ChartTooltipFloat>
+    </>
   )
 }
 

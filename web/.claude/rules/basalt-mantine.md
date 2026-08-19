@@ -114,8 +114,10 @@ Route components import chart primitives directly from `basalt-ui/charts` — ne
   as dead code against the floor.
 - **DatePickerInput**: from `@mantine/dates` (if you separately install it). In v9 it uses string
   values (`YYYY-MM-DD`) for `value`/`onChange` — no `Date` conversion.
-- **Responsive chart sizing**: use `ResponsiveChart` or `useChartSize` from `basalt-ui/charts`
-  (see basalt-charts.md). Never `useElementSize` from `@mantine/hooks` in a chart file (Mantine is
+- **Responsive chart sizing**: charts measure themselves — `CartesianChart`/`ChartFrame` do it,
+  including reserving the legend band, so pass `height` / `aspectRatio` / `fill` and nothing else
+  (see basalt-charts.md). `useChartSize` from `basalt-ui/charts` is for a non-chart box that needs
+  measuring. Never `useElementSize` from `@mantine/hooks` in a chart file (Mantine is
   banned inside `charts/**`), and never raw `@visx/responsive` outside `charts/**`.
 
 ## Strict surfaces & layout primitives

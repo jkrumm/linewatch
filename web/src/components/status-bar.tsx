@@ -8,7 +8,7 @@ import {
 } from '@tabler/icons-react'
 import type { ReactNode } from 'react'
 import { DeltaBadge } from 'basalt-ui'
-import { BarSparkline, LineSparkline, ResponsiveChart, VX } from 'basalt-ui/charts'
+import { BarSparkline, LineSparkline, VX, useChartSize } from 'basalt-ui/charts'
 import type { LiveReading } from '../lib/live'
 import { liveGateway, liveInternet } from '../lib/live'
 import type { OngoingOutage, ProbeBucketSeconds, SpeedTest, StatusSample } from '../lib/types'
@@ -32,12 +32,32 @@ import {
 } from '../lib/kpi'
 import { fmtDateTime, fmtDuration, fmtMbps, fmtMinutes, fmtMs, fmtPct, fmtRelative } from '../lib/format'
 
+/**
+ * A sparkline sized to the cell it sits in.
+ *
+ * `ResponsiveChart` is gone in basalt-ui 1.15.0 — `ChartFrame` is the one responsive path, and it
+ * is a chart shell (legend band, pending state, plot rect) rather than a measuring box, which is
+ * not what a bare sparkline wants. `useChartSize` is the shipped hook for exactly this case, and
+ * its own JSDoc names it: "sizing a sparkline to its table cell".
+ *
+ * The `width > 0` gate is the hook's documented pattern, not caution: `LineSparkline` takes a
+ * numeric `width` and would draw a zero-width path on the first frame.
+ */
+function MeasuredSpark({ children }: { children: (size: { width: number; height: number }) => ReactNode }) {
+  const { ref, width } = useChartSize()
+  return (
+    <Box ref={ref} mih={SPARK_H} h={SPARK_H}>
+      {width > 0 && children({ width, height: SPARK_H })}
+    </Box>
+  )
+}
+
 const SCOPE_LABEL: Record<OngoingOutage['scope'], string> = {
   wan: 'WAN outage',
   gateway: 'Gateway outage',
 }
 
-/** Sparkline height — width is measured per cell by `ResponsiveChart`, never a fixed constant
+/** Sparkline height — width is measured per cell by `MeasuredSpark` below, never a fixed constant
  * (a fixed 260px overflowed the 390px mobile viewport by 74px, clipping mid-curve). */
 const SPARK_H = 44
 
@@ -266,11 +286,7 @@ export function StatusBar({
   const spark = (node: (size: { width: number; height: number }) => ReactNode) => {
     if (plottablePending) return <Box mih={SPARK_H} />
     if (allSeries === null) return null
-    return (
-      <Box mih={SPARK_H}>
-        <ResponsiveChart height={SPARK_H}>{node}</ResponsiveChart>
-      </Box>
-    )
+    return <MeasuredSpark>{node}</MeasuredSpark>
   }
 
   /**

@@ -1,10 +1,9 @@
-import { ChartCard, ResponsiveChart, TooltipRow, VX } from 'basalt-ui/charts'
+import { ChartCard, ChartFrame, TooltipRow, VX } from 'basalt-ui/charts'
 import type { SpeedTest } from '../lib/types'
 import { densifyBuckets } from '../lib/densify'
 import { fmtMbps, fmtPct } from '../lib/format'
 import { CategoryGrid, type GridCell } from './category-grid'
 import { localDayKey, localDayStart, localHourKey } from './local-calendar'
-import { PendingChart } from './pending'
 import { useCardTitle } from '../lib/compact'
 
 /** One cell is one hour of the reader's own day, matching the availability grid so the two
@@ -153,53 +152,60 @@ export function SpeedHeatmap({
       subtitle={`When the line is slow · never more than the trailing ${MAX_DAYS} days, by hour of your day.`}
       tooltip="Darker cells averaged lower download throughput that hour; a cell paints full at half the fastest hour in range. Hatched cells either had no run or had one that failed — the tooltip says which."
     >
-      {/* See `availability-strip.tsx`'s identical wrapper for why this is a floor, not a height. Here
-          the height itself is already computed (`rows.length * 15`), not fixed — this only stops it
-          from momentarily reporting 0 before the first measurement. */}
+      {/* `ChartFrame` is the one responsive path now — `ResponsiveChart` is gone, and the frame
+          measures, reserves the plot rect and renders `ChartPending` in place of the grid while
+          the query is in flight (which is what the app-side `PendingChart` used to do out here).
+          `series={[]}` + `legend={false}` opt out of the derived legend: this grid ships its own
+          gradient strip, the same opt-out basalt's own `Heatmap` kind makes. A floor under the
+          frame, not a height — the height is already computed from the row count; this only stops
+          it reporting 0 before the first measurement. */}
       <div style={{ minHeight: 220 }}>
-        {isPending === true ? (
-          <PendingChart height={Math.max(220, rows.length * 15)} />
-        ) : (
-          <ResponsiveChart height={Math.max(220, rows.length * 15)}>
-            {({ width, height }) => (
-              <CategoryGrid
-                cells={cells}
-                rows={rows}
-                cols={HOUR_LABELS}
-                width={width}
-                height={height}
-                chartId="speed-heatmap"
-                color={VX.accent}
-                rowLabel={(row) => DAY_FORMAT.format(localDayStart(row))}
-                // The captions are the strip's two ends, and they carry the real numbers rather than
-                // bare superlatives: "Slowest" over a range-relative ramp was the lie itself.
-                legend={{
-                  min: fastest === null ? 'No successful run' : `Fastest ${fmtMbps(fastest)}`,
-                  max: `≥${FULL_INTENSITY_DEFICIT_PCT}% slower`,
-                }}
-                renderTooltip={(cell) => {
-                  const source = sources.get(cellKey(cell.row, cell.col))
-                  const hour = source?.row ?? null
-                  const mean = source?.mean ?? null
-                  if (hour === null) {
-                    return (
-                      <TooltipRow
-                        color={VX.neutral}
-                        shape="bar"
-                        label="No run"
-                        value="Not measured"
-                      />
-                    )
-                  }
+        <ChartFrame
+          series={[]}
+          legend={false}
+          height={Math.max(220, rows.length * 15)}
+          isPending={isPending === true}
+          ariaLabel="Download throughput by hour of day, with hours that had no run or a failed run marked"
+        >
+          {({ width, height }) => (
+            <CategoryGrid
+              cells={cells}
+              rows={rows}
+              cols={HOUR_LABELS}
+              width={width}
+              height={height}
+              chartId="speed-heatmap"
+              color={VX.accent}
+              rowLabel={(row) => DAY_FORMAT.format(localDayStart(row))}
+              // The captions are the strip's two ends, and they carry the real numbers rather than
+              // bare superlatives: "Slowest" over a range-relative ramp was the lie itself.
+              legend={{
+                min: fastest === null ? 'No successful run' : `Fastest ${fmtMbps(fastest)}`,
+                max: `≥${FULL_INTENSITY_DEFICIT_PCT}% slower`,
+              }}
+              renderTooltip={(cell) => {
+                const source = sources.get(cellKey(cell.row, cell.col))
+                const hour = source?.row ?? null
+                const mean = source?.mean ?? null
+                if (hour === null) {
                   return (
-                    <>
-                      {mean !== null && (
-                        <TooltipRow
-                          color={VX.accent}
-                          shape="bar"
-                          label={hour.downloads.length > 1 ? 'Download (mean)' : 'Download'}
-                          value={fmtMbps(mean)}
-                        />
+                    <TooltipRow
+                      color={VX.neutral}
+                      shape="bar"
+                      label="No run"
+                      value="Not measured"
+                    />
+                  )
+                }
+                return (
+                  <>
+                    {mean !== null && (
+                      <TooltipRow
+                        color={VX.accent}
+                        shape="bar"
+                        label={hour.downloads.length > 1 ? 'Download (mean)' : 'Download'}
+                        value={fmtMbps(mean)}
+                      />
                       )}
                       {mean !== null && fastest !== null && fastest > 0 && (
                         <TooltipRow
@@ -228,10 +234,9 @@ export function SpeedHeatmap({
                     </>
                   )
                 }}
-              />
-            )}
-          </ResponsiveChart>
-        )}
+            />
+          )}
+        </ChartFrame>
       </div>
     </ChartCard>
   )

@@ -1,15 +1,6 @@
-import type { ReactNode } from 'react'
-import { useEffect, useRef } from 'react'
-import {
-  ChartTooltip,
-  Group,
-  TooltipBody,
-  TooltipHeader,
-  VX,
-  alpha,
-  useChartTooltip,
-  useTooltipStyles,
-} from 'basalt-ui/charts'
+import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { ChartTooltipFloat, Group, TooltipBody, TooltipHeader, VX, alpha } from 'basalt-ui/charts'
 import { HatchPattern, hatchFill } from './hatch'
 
 /**
@@ -104,21 +95,33 @@ export function CategoryGrid({
   legend,
   renderTooltip,
 }: CategoryGridProps) {
-  const tooltipStyles = useTooltipStyles()
-  const { tip, show, hide, tooltipRef } = useChartTooltip<GridCell>()
+  // The hovered cell and the viewport point to anchor its tooltip at.
+  //
+  // `useChartTooltip` is gone in basalt-ui 1.15.0, and nothing replaced it for a grid: its successor
+  // `useChartCursor` is a *shared-cursor* hook keyed on an x-domain, which a category×category
+  // matrix has none of. `ChartTooltipFloat` takes a plain viewport anchor and owns the measuring,
+  // flipping and clamping that `useChartTooltip` used to do here — so what is left is two pieces of
+  // state, which is less than the hook cost.
+  const [hovered, setHovered] = useState<{ cell: GridCell; anchor: { x: number; y: number } } | null>(null)
+  const hide = useCallback(() => setHovered(null), [])
+  const show = useCallback(
+    (cell: GridCell, event: ReactPointerEvent<SVGRectElement>) =>
+      setHovered({ cell, anchor: { x: event.clientX, y: event.clientY } }),
+    [],
+  )
   const absentHatchId = `${chartId}-absent`
   const failedHatchId = `${chartId}-failed`
   const svgRef = useRef<SVGSVGElement | null>(null)
 
-  // `CategoryGrid` stays outside the shared cursor (see the module docblock in the charts that join
-  // it) but still needs to be reachable on a phone. It composes no `HoverOverlay` — hit-testing is
-  // per-cell, because a cell is the unit a reader points at — so basalt-ui 1.9.0's pointer-event
-  // overlay does not reach it and this file keeps wiring `useChartTooltip`'s `show`/`hide` to
-  // pointer events itself. The one thing per-cell wiring cannot give for free is a way to dismiss
-  // on touch, where `pointerleave` fires on lift and would close the tooltip the instant it opened.
-  // One listener for the whole grid, not one per cell.
+  // `CategoryGrid` stays outside the shared cursor — it has no x-domain to share one over — but
+  // still needs to be reachable on a phone. It composes no `HoverOverlay`, because hit-testing here
+  // is per-cell and a cell is the unit a reader points at, so the shipped overlay's pointer and
+  // keyboard wiring does not reach it and the `show`/`hide` above are bound to each cell instead.
+  // The one thing per-cell wiring cannot give for free is a way to dismiss on touch, where
+  // `pointerleave` fires on lift and would close the tooltip the instant it opened. One listener
+  // for the whole grid, not one per cell.
   useEffect(() => {
-    if (tip === null) return
+    if (hovered === null) return
     const dismiss = (event: PointerEvent) => {
       const svg = svgRef.current
       if (svg === null) return
@@ -127,7 +130,7 @@ export function CategoryGrid({
     }
     document.addEventListener('pointerdown', dismiss, true)
     return () => document.removeEventListener('pointerdown', dismiss, true)
-  }, [tip, hide])
+  }, [hovered, hide])
 
   const lookup = new Map(cells.map((c) => [cellKey(c.row, c.col), c]))
 
@@ -266,14 +269,17 @@ export function CategoryGrid({
           </Group>
         )}
       </svg>
-      <ChartTooltip tip={tip} tooltipRef={tooltipRef} styles={tooltipStyles}>
-        {tip && (
+      {/* `TooltipHeader` runs its `date` through `fmtTooltipDate`, which returns a string it cannot
+          parse as a date unchanged — and a row label here is `30 Jul`, not an ISO stamp, so it
+          passes through verbatim. That is the behaviour this header has always relied on. */}
+      <ChartTooltipFloat anchor={hovered?.anchor ?? null}>
+        {hovered && (
           <>
-            <TooltipHeader date={rowLabel(tip.data.row)} label={colLabel(tip.data.col)} />
-            <TooltipBody>{renderTooltip(tip.data)}</TooltipBody>
+            <TooltipHeader date={rowLabel(hovered.cell.row)} label={colLabel(hovered.cell.col)} />
+            <TooltipBody>{renderTooltip(hovered.cell)}</TooltipBody>
           </>
         )}
-      </ChartTooltip>
+      </ChartTooltipFloat>
     </div>
   )
 }

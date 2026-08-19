@@ -1,11 +1,10 @@
-import { ChartCard, ResponsiveChart, TooltipRow, VX } from 'basalt-ui/charts'
+import { ChartCard, ChartFrame, TooltipRow, VX } from 'basalt-ui/charts'
 import type { ProbeBucket } from '../lib/types'
 import { densifyBuckets } from '../lib/densify'
 import { PROBE_CYCLE_MS } from '../lib/range'
 import { fmtPct } from '../lib/format'
 import { CategoryGrid, type GridCell } from './category-grid'
 import { localDayKey, localDayStart, localHourKey } from './local-calendar'
-import { PendingChart } from './pending'
 import { useCardTitle } from '../lib/compact'
 
 /**
@@ -136,72 +135,78 @@ export function AvailabilityHeatmap({
       subtitle="Last 30 days, by hour of your day"
       tooltip="Each cell is one hour's WAN availability, on your own clock — darker means more loss that hour, up to 5% which paints full. Hatched cells were not measured at all, which is not the same as an hour with no loss."
     >
-      {/* See `availability-strip.tsx`'s identical wrapper for why this is a floor, not a height. Here
-          the height itself is already computed (`rows.length * 15`), not fixed — this only stops it
-          from momentarily reporting 0 before the first measurement. */}
+      {/* `ChartFrame` is the one responsive path now — `ResponsiveChart` is gone, and the frame
+          measures, reserves the plot rect and renders `ChartPending` in place of the grid while
+          the query is in flight (which is what the app-side `PendingChart` used to do out here).
+          `series={[]}` + `legend={false}` opt out of the derived legend: this grid ships its own
+          gradient strip, the same opt-out basalt's own `Heatmap` kind makes. A floor under the
+          frame, not a height — the height is already computed from the row count; this only stops
+          it reporting 0 before the first measurement. */}
       <div style={{ minHeight: 220 }}>
-        {isPending === true ? (
-          <PendingChart height={gridHeight} />
-        ) : (
-          <ResponsiveChart height={gridHeight}>
-            {({ width, height }) => (
-              <CategoryGrid
-                cells={cells}
-                rows={rows}
-                cols={HOUR_LABELS}
-                width={width}
-                height={height}
-                chartId="availability-heatmap"
-                // badSolid, not bad: the ramp is alpha(color, intensity), so handing it the
-                // 18%-opacity fill token attenuates it twice into near-invisibility.
-                color={VX.badSolid}
-                rowLabel={(row) => DAY_FORMAT.format(localDayStart(row))}
-                legend={{ min: 'No loss', max: '≥5% loss' }}
-                renderTooltip={(cell) => {
-                  const bucket = sources.get(cellKey(cell.row, cell.col))?.bucket ?? null
-                  if (bucket === null) {
-                    return (
-                      <TooltipRow
-                        color={VX.neutral}
-                        shape="bar"
-                        label="Not measured"
-                        value={`0 of ${expectedCycles} expected cycles`}
-                      />
-                    )
-                  }
+        <ChartFrame
+          series={[]}
+          legend={false}
+          height={gridHeight}
+          isPending={isPending === true}
+          ariaLabel="WAN availability by hour of day over the last 30 days, with unmeasured hours marked"
+        >
+          {({ width, height }) => (
+            <CategoryGrid
+              cells={cells}
+              rows={rows}
+              cols={HOUR_LABELS}
+              width={width}
+              height={height}
+              chartId="availability-heatmap"
+              // badSolid, not bad: the ramp is alpha(color, intensity), so handing it the
+              // 18%-opacity fill token attenuates it twice into near-invisibility.
+              color={VX.badSolid}
+              rowLabel={(row) => DAY_FORMAT.format(localDayStart(row))}
+              legend={{ min: 'No loss', max: '≥5% loss' }}
+              renderTooltip={(cell) => {
+                const bucket = sources.get(cellKey(cell.row, cell.col))?.bucket ?? null
+                if (bucket === null) {
                   return (
-                    <>
-                      <TooltipRow
-                        color={VX.badSolid}
-                        shape="bar"
-                        label="Loss"
-                        value={fmtPct(bucket.lossPct, 2)}
-                      />
-                      <TooltipRow
-                        color={VX.warnSolid}
-                        shape="dot"
-                        label="Worst cycle"
-                        value={fmtPct(bucket.maxLossPct)}
-                      />
-                      <TooltipRow
-                        color={VX.badSolid}
-                        shape="dot"
-                        label="Cycles fully down"
-                        value={String(bucket.downCycles)}
-                      />
-                      <TooltipRow
-                        color={VX.neutral}
-                        shape="bar"
-                        label="Measured"
-                        value={`${bucket.count} of ${expectedCycles} expected cycles`}
-                      />
-                    </>
+                    <TooltipRow
+                      color={VX.neutral}
+                      shape="bar"
+                      label="Not measured"
+                      value={`0 of ${expectedCycles} expected cycles`}
+                    />
                   )
-                }}
-              />
-            )}
-          </ResponsiveChart>
-        )}
+                }
+                return (
+                  <>
+                    <TooltipRow
+                      color={VX.badSolid}
+                      shape="bar"
+                      label="Loss"
+                      value={fmtPct(bucket.lossPct, 2)}
+                    />
+                    <TooltipRow
+                      color={VX.warnSolid}
+                      shape="dot"
+                      label="Worst cycle"
+                      value={fmtPct(bucket.maxLossPct)}
+                    />
+                    <TooltipRow
+                      color={VX.badSolid}
+                      shape="dot"
+                      label="Cycles fully down"
+                      value={String(bucket.downCycles)}
+                    />
+                    <TooltipRow
+                      color={VX.neutral}
+                      shape="bar"
+                      label="Measured"
+                      value={`${bucket.count} of ${expectedCycles} expected cycles`}
+                    />
+                  </>
+                )
+              }}
+            />
+          )}
+        </ChartFrame>
       </div>
     </ChartCard>
   )

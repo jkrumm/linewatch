@@ -1,30 +1,25 @@
-import { useCallback, useMemo, useRef } from 'react'
+import { useCallback, useMemo } from 'react'
 import { scaleBand, scaleLinear } from '@visx/scale'
 import {
   AxisBottomDate,
   AxisLeftNumeric,
-  ChartLegend,
-  deriveLegend,
-  ChartTooltip,
+  ChartFrame,
+  ChartTooltipFloat,
   Crosshair,
   HoverOverlay,
-  ResponsiveChart,
+  type SeriesStyle,
   TooltipBody,
   TooltipHeader,
   TooltipRow,
   VX,
   alpha,
-  useHoverSync,
-  useTooltipStyles,
+  useChartCursor,
 } from 'basalt-ui/charts'
 import type { ProbeBucketSeconds, ThroughputBucket } from '../lib/types'
 import { throughputPoints, type ThroughputPoint } from '../lib/throughput'
 import { fmtBytes, fmtDateTime, fmtRate } from '../lib/format'
 import { AXIS_LABEL_PX, axisTickValues, bucketTickFormat } from '../lib/axis'
-import { PendingChart } from './pending'
-import { foldSourceIndex } from './fold'
 import { HatchPattern, hatchFill } from './hatch'
-import { SyncedTip } from './synced-tip'
 
 // 180, not 240. This is a two-sided bar chart with three y ticks per half and no line to trace,
 // so the extra 60 px bought no resolution — it bought a section that pushed the one below it off
@@ -32,6 +27,9 @@ import { SyncedTip } from './synced-tip'
 // curve worth the pixels) is 190.
 const CHART_HEIGHT = 180
 const AXIS_HEIGHT = 22
+/** The one-row legend band reserved out of `ChartFrame`'s height — see `availability-strip.tsx`'s
+ * identical constant. */
+const LEGEND_BAND = 24
 /**
  * Room for this chart's y labels, which are rates rather than plain numbers: `fmtRate` produces
  * `1.0 MB/s` and `400 kB/s`, eight characters at the 11 px axis font. At 56 px the widest of them
@@ -56,15 +54,17 @@ const PLOT_RIGHT = Math.round(AXIS_LABEL_PX / 2)
  *
  * The legend used to be a hand-written array literal beside a set of `fill=` expressions that
  * repeated the same three tokens — so a retuned download hue moved the bars and left the legend
- * swatch behind, and nothing would have caught it. `deriveLegend` builds the legend from this
- * array, and the drawing code reads its colours from the same place: one edit moves both.
+ * swatch behind, and nothing would have caught it. `ChartFrame` derives the legend from this array
+ * (`deriveLegend` internally) and the drawing code reads its colours from the same place: one edit
+ * moves both. `basalt/chart-legend-literal` is the rule that now makes the old shape a build
+ * failure rather than a convention.
  *
  * "Not measured" is a series here in the legend's sense but not in the data's — it has no values,
  * only an absence, which is why it carries no `getValue`. It has to be named on the legend all the
  * same: a hatched column is the one mark on this chart a reader cannot decode from the axes.
  */
-const THROUGHPUT_SERIES = [
-  { key: 'down', label: 'Download', color: VX.accent, mark: 'bar' as const },
+const THROUGHPUT_SERIES: SeriesStyle[] = [
+  { key: 'down', label: 'Download', color: VX.accent, mark: 'bar' },
   // `VX.line2` (`#a1a1aa`, 5.5:1 against the panel) — the MID grey, not `VX.line` (`#e4e4e7`,
   // 11.1:1), which is the brightest thing available on a dark panel and as a dense mass of bars
   // out-shouted the accent this chart's download half is drawn in. Three earlier answers were
@@ -72,8 +72,8 @@ const THROUGHPUT_SERIES = [
   // from the never-measured grey, and a registered teal series separated cleanly but read as loud
   // as the red had. Blue against a mid grey is the calm version, and it needs no series row —
   // never-measured stays the light grey above it AND is hatched, so all three are distinct.
-  { key: 'up', label: 'Upload', color: VX.line2, mark: 'bar' as const },
-  { key: 'absent', label: 'Not measured', color: VX.neutral, mark: 'bar' as const },
+  { key: 'up', label: 'Upload', color: VX.line2, mark: 'bar' },
+  { key: 'absent', label: 'Not measured', color: VX.neutral, mark: 'bar' },
 ]
 
 const DOWN_COLOR = THROUGHPUT_SERIES[0]!.color
@@ -105,7 +105,11 @@ type PlotPoint = ThroughputPoint & { foldedFrom: number; unmeasuredMembers: numb
 export function foldPoints(points: ThroughputPoint[], cap: number): PlotPoint[] {
   if (cap <= 0) return []
   if (points.length <= cap)
-    return points.map((p) => ({ ...p, foldedFrom: 1, unmeasuredMembers: p.downBytesPerS === null ? 1 : 0 }))
+    return points.map((p) => ({
+      ...p,
+      foldedFrom: 1,
+      unmeasuredMembers: p.downBytesPerS === null ? 1 : 0,
+    }))
 
   const groupSize = Math.ceil(points.length / cap)
   const folded: PlotPoint[] = []
@@ -165,12 +169,10 @@ const getPointKey = (p: PlotPoint): string => p.key
  * prop, and the `ChartPending` it renders in place of `MirroredBars`/`ChartLegend`, is that fix —
  * the same `isPending` idiom `OutageTable`/`TransitionTimeline` already use for their own queries.
  *
- * `ChartPending` is basalt-ui's now (1.9.0), not this directory's. The hand-rolled one it replaces
- * existed only because the package had no pending state at all; the shipped component draws the
- * same reserved, mark-free box and needs no `theme-allow` for its centring, because `ChartCenter`
- * is the layout primitive the Mantine-free boundary was missing. The legend suppression below
- * stays local: this chart composes `ChartLegend` itself rather than going through `ChartFrame`,
- * which is what would otherwise drop the legend for it.
+ * Both halves are the framework's now. `ChartFrame` reserves the plot, renders `ChartPending` in
+ * place of the marks, drops the legend and sets `aria-busy` — so the app-side `PendingChart` and
+ * the local `!isPending &&` guard around the legend are both gone, and there is one pending
+ * renderer on the page rather than one per chart.
  */
 export function ThroughputChart({
   buckets,
@@ -192,23 +194,30 @@ export function ThroughputChart({
   )
 
   return (
-    <>
-      {/* See `availability-strip.tsx`'s identical wrapper for why this is a floor, not a height. */}
-      <div style={{ minHeight: CHART_HEIGHT + AXIS_HEIGHT }}>
-        {isPending === true ? (
-          <PendingChart height={CHART_HEIGHT + AXIS_HEIGHT} />
-        ) : (
-          <ResponsiveChart height={CHART_HEIGHT + AXIS_HEIGHT}>
-            {({ width }) => <MirroredBars points={points} bucketSeconds={bucketSeconds} width={width} />}
-          </ResponsiveChart>
+    // A floor, not a height — see `availability-strip.tsx`'s identical wrapper.
+    <div style={{ minHeight: CHART_HEIGHT + AXIS_HEIGHT + LEGEND_BAND }}>
+      <ChartFrame
+        series={THROUGHPUT_SERIES}
+        chartId="throughput"
+        height={CHART_HEIGHT + AXIS_HEIGHT + LEGEND_BAND}
+        isPending={isPending === true}
+        ariaLabel="Data carried per bucket — download below the baseline, upload above it, with unmeasured buckets marked"
+        // "Not measured" is a hatch, not a series with values, so a three-entry toggle would offer
+        // to hide a state rather than a measurement. The two real halves are scaled independently
+        // and drawn against one baseline; hiding one would leave the other reading against an axis
+        // that no longer has an opposite.
+        legend={{ toggle: false }}
+      >
+        {({ width, height }) => (
+          <MirroredBars
+            points={points}
+            bucketSeconds={bucketSeconds}
+            width={width}
+            height={height}
+          />
         )}
-      </div>
-      {/* The legend names a "Not measured" hatch series that has nothing to point at while pending
-          — drawing it over `ChartPending`'s own unrelated text would name a mark that isn't there. */}
-      {!isPending && (
-        <ChartLegend chartId="throughput-legend" placement="bottom" items={deriveLegend(THROUGHPUT_SERIES)} />
-      )}
-    </>
+      </ChartFrame>
+    </div>
   )
 }
 
@@ -216,14 +225,18 @@ function MirroredBars({
   points,
   bucketSeconds,
   width,
+  height,
 }: {
   points: ThroughputPoint[]
   bucketSeconds: ProbeBucketSeconds
   width: number
+  /** The plot rect `ChartFrame` handed down — already net of the measured legend band. */
+  height: number
 }) {
-  const tooltipStyles = useTooltipStyles()
   const absentHatchId = 'throughput-absent'
-  const svgRef = useRef<SVGSVGElement | null>(null)
+  // The bar band, derived from the rect rather than the constant, so a legend that wraps to two
+  // rows on a phone takes its pixels from the bars instead of being drawn over by them.
+  const barBand = Math.max(2, height - AXIS_HEIGHT)
 
   // `plotRight` scales down at narrow widths the same way the two strips' `plotLeft`/`plotRight`
   // already do — `PLOT_RIGHT` unscaled left the least room of any of the three charts (it does not
@@ -236,13 +249,16 @@ function MirroredBars({
   // `/ 3`, not `/ 2` — see `availability-strip.tsx`'s identical constant for why the wider margin
   // is needed: a `/ 2` cap leaves no room for a partial fold's fill/hatch split to render as two
   // visibly distinct pieces.
-  const plotPoints = useMemo(() => foldPoints(points, Math.floor(plotWidth / 3)), [points, plotWidth])
+  const plotPoints = useMemo(
+    () => foldPoints(points, Math.floor(plotWidth / 3)),
+    [points, plotWidth],
+  )
   // Memoized — see `availability-strip.tsx`'s identical `keys`/`scale`.
   const keys = useMemo(() => plotPoints.map((p) => p.key), [plotPoints])
-  const xScale = useMemo(() => scaleBand<string>({ domain: keys, range: [0, plotWidth] }), [keys, plotWidth])
-  // See `availability-strip.tsx`'s identical `sourceIndex`.
-  const sourceIndex = useMemo(() => foldSourceIndex(points, plotPoints), [points, plotPoints])
-
+  const xScale = useMemo(
+    () => scaleBand<string>({ domain: keys, range: [0, plotWidth] }),
+    [keys, plotWidth],
+  )
   const bandCenter = useCallback(
     (key: string) => {
       const v = xScale(key)
@@ -250,17 +266,20 @@ function MirroredBars({
     },
     [xScale],
   )
-  // See `availability-strip.tsx`'s identical seam.
-  const resolveKey = useCallback((key: string) => sourceIndex.get(key) ?? null, [sourceIndex])
 
-  const { tip, tooltipRef, syncedPoint, isDirectHover, handleMouse, handleLeave } = useHoverSync<PlotPoint>({
+  // No fold seam any more — see `availability-strip.tsx`'s identical call, including why the
+  // resolution mode is `'leading'` rather than the default: `getKey` returns a bucket's LEADING
+  // EDGE, so containment is the relation that means anything here, and nearest put a follower's
+  // crosshair one column right for every source bucket in the back half of a folded group.
+  const cursor = useChartCursor<PlotPoint>({
     data: plotPoints,
     chartId: 'throughput',
     getKey: getPointKey,
     xScale: bandCenter,
+    resolution: 'leading',
     marginLeft: LEFT_GUTTER,
-    resolveKey,
   })
+  const point = cursor.point
 
   // Each half scaled independently — see the component docblock. `|| 1` keeps a window with no
   // traffic at all from producing a zero-width domain, which renders as NaN geometry.
@@ -268,8 +287,8 @@ function MirroredBars({
   const maxUp = Math.max(...plotPoints.map((p) => p.upBytesPerS ?? 0), 0) || 1
   // Upload gets the smaller half: on a household line it is an order of magnitude below download,
   // and splitting the height evenly would waste most of the chart on empty space above the upload.
-  const upHeight = Math.round(CHART_HEIGHT * 0.35)
-  const downHeight = CHART_HEIGHT - upHeight
+  const upHeight = Math.round(barBand * 0.35)
+  const downHeight = barBand - upHeight
   const baseline = upHeight
 
   const downScale = scaleLinear<number>({ domain: [0, maxDown], range: [0, downHeight] })
@@ -284,21 +303,22 @@ function MirroredBars({
   const hatchSize = Math.max(2, Math.min(5, Math.round(barWidth)))
 
   return (
-    <div style={{ position: 'relative' }}>
-      <svg
-        ref={svgRef}
-        width={width}
-        height={CHART_HEIGHT + AXIS_HEIGHT}
-        role="img"
-        aria-label="Data carried per bucket — download below the baseline, upload above it, with unmeasured buckets marked"
-      >
+    <>
+      <svg width={width} height={height}>
         <defs>
           <HatchPattern id={absentHatchId} color={ABSENT_COLOR} opacity={0.7} size={hatchSize} />
         </defs>
         <g transform={`translate(${LEFT_GUTTER}, 0)`}>
           {/* One axis per half, each in its own scale's units, because the halves are scaled
               independently — a single shared axis would be wrong for at least one of them. Both sit
-              inside this group so their ticks extend left into the gutter rather than off-canvas. */}
+              inside this group so their ticks extend left into the gutter rather than off-canvas.
+
+              theme-allow — declared non-single-plot. This is two panes, not one: download and
+              upload are scaled INDEPENDENTLY against a shared baseline (see the component
+              docblock), so the chart has two y scales stacked vertically rather than one plot rect
+              with one or two numeric axes. `CartesianChart` cannot express that; `DualPanel` is the
+              shipped kind of the same shape and composes `ChartFrame` for the same reason.
+              Everything below the marks is the shipped primitive, assembled not re-implemented. */}
           <AxisLeftNumeric
             scale={scaleLinear<number>({ domain: [maxUp, 0], range: [0, upHeight] })}
             numTicks={2}
@@ -311,49 +331,49 @@ function MirroredBars({
               tickFormat={(v) => fmtRate(Number(v))}
             />
           </g>
-          {plotPoints.map((point, i) => {
+          {plotPoints.map((p, i) => {
             const x = i * step
-            if (point.downBytesPerS === null || point.upBytesPerS === null) {
+            if (p.downBytesPerS === null || p.upBytesPerS === null) {
               // Absence spans the whole height rather than sitting on the baseline: a hatch drawn
               // only on the download half would read as "downloaded nothing, uploaded nothing",
               // which is the measured-and-idle state this must be distinguishable from.
               return (
                 <rect
-                  key={point.key}
+                  key={p.key}
                   x={x}
                   y={0}
                   width={barWidth}
-                  height={CHART_HEIGHT}
+                  height={barBand}
                   fill={hatchFill(absentHatchId)}
                   pointerEvents="none"
                 />
               )
             }
 
-            const downPx = downScale(point.downBytesPerS)
-            const upPx = upScale(point.upBytesPerS)
+            const downPx = downScale(p.downBytesPerS)
+            const upPx = upScale(p.upBytesPerS)
             // A partial bucket is drawn at reduced opacity and named in the tooltip. It is a real
             // measurement — just a short one — so dimming is the right weight: visible enough not
             // to be read as complete, not so loud as to be read as a fault.
-            const opacity = point.skipped > 0 ? 0.45 : 1
-            // `spanMs > 0` after folding only takes ONE measured member, so `point.downBytesPerS`
+            const opacity = p.skipped > 0 ? 0.45 : 1
+            // `spanMs > 0` after folding only takes ONE measured member, so `p.downBytesPerS`
             // can be a real rate while a share of the folded span reported nothing — see
             // `foldPoints`'s docblock. That share is hatched at full column height, the same
             // "spans the whole height" rule the fully-unmeasured branch above already uses, rather
             // than letting the bars imply the whole width agreed with a rate only part of it set.
-            const unmeasuredFrac = point.unmeasuredMembers / point.foldedFrom
+            const unmeasuredFrac = p.unmeasuredMembers / p.foldedFrom
             const measuredWidth = barWidth * (1 - unmeasuredFrac)
             const hatchWidth = barWidth - measuredWidth
 
             return (
-              <g key={point.key}>
+              <g key={p.key}>
                 {measuredWidth > 0 && (
                   <>
                     <rect
                       x={x}
                       y={baseline - upPx}
                       width={measuredWidth}
-                      height={Math.max(upPx, point.upBytesPerS > 0 ? 1 : 0)}
+                      height={Math.max(upPx, p.upBytesPerS > 0 ? 1 : 0)}
                       fill={alpha(UP_COLOR, opacity)}
                       pointerEvents="none"
                     />
@@ -361,7 +381,7 @@ function MirroredBars({
                       x={x}
                       y={baseline}
                       width={measuredWidth}
-                      height={Math.max(downPx, point.downBytesPerS > 0 ? 1 : 0)}
+                      height={Math.max(downPx, p.downBytesPerS > 0 ? 1 : 0)}
                       fill={alpha(DOWN_COLOR, opacity)}
                       pointerEvents="none"
                     />
@@ -372,7 +392,7 @@ function MirroredBars({
                     x={x + measuredWidth}
                     y={0}
                     width={hatchWidth}
-                    height={CHART_HEIGHT}
+                    height={barBand}
                     fill={hatchFill(absentHatchId)}
                     pointerEvents="none"
                   />
@@ -380,59 +400,54 @@ function MirroredBars({
               </g>
             )
           })}
-          <line x1={0} y1={baseline} x2={plotWidth} y2={baseline} stroke={VX.axisStroke} strokeWidth={1} />
+          <line
+            x1={0}
+            y1={baseline}
+            x2={plotWidth}
+            y2={baseline}
+            stroke={VX.axisStroke}
+            strokeWidth={1}
+          />
           {/* The tick VALUES are ISO bucket starts (the scale's domain); `bucketTickFormat` renders
               each as the time a reader sees — see `lib/axis.ts`. */}
           <AxisBottomDate
             scale={xScale}
-            top={CHART_HEIGHT}
+            top={barBand}
             tickValues={axisTickValues(keys, plotWidth, AXIS_LABEL_PX)}
             tickFormat={bucketTickFormat(bucketSeconds)}
           />
-          {syncedPoint && (
+          {point && (
             <Crosshair
-              x={(xScale(syncedPoint.key) ?? 0) + xScale.bandwidth() / 2}
+              x={(xScale(point.key) ?? 0) + xScale.bandwidth() / 2}
               top={0}
-              bottom={CHART_HEIGHT}
+              bottom={barBand}
             />
           )}
-          <HoverOverlay width={plotWidth} height={CHART_HEIGHT} onMove={handleMouse} onLeave={handleLeave} />
+          <HoverOverlay
+            width={plotWidth}
+            height={barBand}
+            onMove={cursor.onPointerMove}
+            onLeave={cursor.onPointerLeave}
+            onKeyDown={cursor.onKeyDown}
+            onBlur={cursor.onBlur}
+            // `CartesianChart` forwards its own `ariaLabel` to the overlay so the focusable slider
+            // announces the chart rather than a generic "Chart data". A hand-composed plot has to
+            // do it itself, or tabbing into it says nothing about which chart was reached.
+            ariaLabel="Data carried per bucket — download below the baseline, upload above it"
+            valueMax={Math.max(plotPoints.length - 1, 0)}
+            {...(point !== null && {
+              valueNow: plotPoints.indexOf(point),
+              valueText: bucketTickFormat(bucketSeconds)(point.key),
+            })}
+          />
         </g>
       </svg>
-      <ChartTooltip tip={isDirectHover ? tip : null} tooltipRef={tooltipRef} styles={tooltipStyles}>
-        {tip && <PointRows point={tip.data} />}
-      </ChartTooltip>
-      {!isDirectHover && syncedPoint !== null && syncedPoint.downBytesPerS !== null && (
-        <SyncedTip
-          svgRef={svgRef}
-          x={LEFT_GUTTER + (xScale(syncedPoint.key) ?? 0) + xScale.bandwidth() / 2}
-          styles={tooltipStyles}
-        >
-          <TooltipBody>
-            <TooltipRow
-              color={DOWN_COLOR}
-              shape="bar"
-              label="Downloaded"
-              value={fmtRate(syncedPoint.downBytesPerS)}
-            />
-            {/* See `availability-strip.tsx`'s identical caveat row — `syncedPoint.downBytesPerS` is
-                the rate over the span the measured members DID cover, and says nothing about how
-                much of the folded column that was. A 1-of-3-measured fold reports "Downloaded: 220
-                kB/s" here exactly as confidently as a fully-measured one, with no header on this
-                follower chip naming the column to let a reader spot the difference — the direct-hover
-                tooltip's own "Folded from" row already says this; the follower has none. */}
-            {syncedPoint.unmeasuredMembers > 0 && syncedPoint.unmeasuredMembers < syncedPoint.foldedFrom && (
-              <TooltipRow
-                color={VX.neutral}
-                shape="dot"
-                label="Partial"
-                value={`${syncedPoint.foldedFrom - syncedPoint.unmeasuredMembers} of ${syncedPoint.foldedFrom} buckets`}
-              />
-            )}
-          </TooltipBody>
-        </SyncedTip>
-      )}
-    </div>
+      {/* Source-only, like every other chart now — the follower chip this chart used to draw went
+          with `ChartTooltip`; see `availability-strip.tsx`. */}
+      <ChartTooltipFloat anchor={cursor.isSource ? cursor.anchor : null}>
+        {point && <PointRows point={point} />}
+      </ChartTooltipFloat>
+    </>
   )
 }
 
@@ -442,11 +457,26 @@ function PointRows({ point }: { point: PlotPoint }) {
       <TooltipHeader date={fmtDateTime(point.bucketStart)} label="Carried" labelColor={VX.accent} />
       <TooltipBody>
         {point.downBytesPerS === null ? (
-          <TooltipRow color={VX.neutral} shape="bar" label="Not measured" value="no usable interval" />
+          <TooltipRow
+            color={VX.neutral}
+            shape="bar"
+            label="Not measured"
+            value="no usable interval"
+          />
         ) : (
           <>
-            <TooltipRow color={VX.accent} shape="bar" label="Down" value={`${fmtRate(point.downBytesPerS)} · ${fmtBytes(point.downBytes)}`} />
-            <TooltipRow color={VX.line2} shape="bar" label="Up" value={`${fmtRate(point.upBytesPerS)} · ${fmtBytes(point.upBytes)}`} />
+            <TooltipRow
+              color={VX.accent}
+              shape="bar"
+              label="Down"
+              value={`${fmtRate(point.downBytesPerS)} · ${fmtBytes(point.downBytes)}`}
+            />
+            <TooltipRow
+              color={VX.line2}
+              shape="bar"
+              label="Up"
+              value={`${fmtRate(point.upBytesPerS)} · ${fmtBytes(point.upBytes)}`}
+            />
             {/* The basis, always — the rate is bytes over *measured* time, and a bucket that
                 measured 2 of 20 intervals is a different claim from one that measured all 20. */}
             <TooltipRow

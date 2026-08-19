@@ -1,20 +1,18 @@
-import { useCallback, useMemo, useRef } from 'react'
+import { useCallback, useMemo } from 'react'
 import { scaleBand } from '@visx/scale'
 import {
   AxisBottomDate,
-  ChartLegend,
-  ChartTooltip,
+  ChartFrame,
+  ChartTooltipFloat,
   Crosshair,
   HoverOverlay,
-  type LegendEntry,
-  ResponsiveChart,
+  type SeriesStyle,
   TooltipBody,
   TooltipHeader,
   TooltipRow,
   VX,
   alpha,
-  useHoverSync,
-  useTooltipStyles,
+  useChartCursor,
 } from 'basalt-ui/charts'
 import type { ProbeBucketSeconds, VantageBucket } from '../lib/types'
 import type { LinkBucketState } from '../lib/vantage'
@@ -22,10 +20,7 @@ import { linkBucketState } from '../lib/vantage'
 import { densifyBuckets } from '../lib/densify'
 import { fmtDateTime } from '../lib/format'
 import { AXIS_LABEL_PX, axisTickValues, bucketTickFormat } from '../lib/axis'
-import { PendingChart } from './pending'
-import { foldSourceIndex } from './fold'
 import { HatchPattern, hatchFill } from './hatch'
-import { SyncedTip } from './synced-tip'
 
 const STRIP_HEIGHT = 44
 
@@ -45,6 +40,10 @@ const STRIP_HEIGHT = 44
 const PLOT_LEFT = Math.max(56, Math.round(AXIS_LABEL_PX / 2))
 const PLOT_RIGHT = Math.round(AXIS_LABEL_PX / 2)
 const AXIS_HEIGHT = 22
+
+/** The one-row legend band reserved out of `ChartFrame`'s height — see `availability-strip.tsx`'s
+ * identical constant for why the strip's footprint has to grow by one. */
+const LEGEND_BAND = 24
 
 /** The height of the transition marker, as a fraction of the strip. It is drawn as a full-height
  * bar of its own colour rather than a value, so it cannot be read off the intensity ramp. */
@@ -93,7 +92,11 @@ type PlotColumn = Column & { foldedFrom: number; unmeasuredMembers: number }
 export function foldColumns(columns: Column[], cap: number): PlotColumn[] {
   if (cap <= 0) return []
   if (columns.length <= cap)
-    return columns.map((c) => ({ ...c, foldedFrom: 1, unmeasuredMembers: c.state.kind === 'unmeasured' ? 1 : 0 }))
+    return columns.map((c) => ({
+      ...c,
+      foldedFrom: 1,
+      unmeasuredMembers: c.state.kind === 'unmeasured' ? 1 : 0,
+    }))
 
   const groupSize = Math.ceil(columns.length / cap)
   const folded: PlotColumn[] = []
@@ -113,7 +116,7 @@ export function foldColumns(columns: Column[], cap: number): PlotColumn[] {
 }
 
 /** Stable across renders, unlike an inline arrow — see `availability-strip.tsx`'s identical
- * constant for why an unstable `getKey` defeats `useHoverSync`'s own memoization. */
+ * constant for why an unstable `getKey` defeats `useChartCursor`'s own memoization. */
 const getColumnKey = (c: PlotColumn): string => c.key
 
 export function foldStates(states: LinkBucketState[]): LinkBucketState {
@@ -137,7 +140,8 @@ export function foldStates(states: LinkBucketState[]): LinkBucketState {
     // 'unmeasured' contributes nothing to any of the above.
   }
 
-  if (anyTransition || mbits.size > 1) return { kind: 'transition', mbits: [...mbits].toSorted((a, b) => a - b) }
+  if (anyTransition || mbits.size > 1)
+    return { kind: 'transition', mbits: [...mbits].toSorted((a, b) => a - b) }
   if (anySteady) return { kind: 'steady', mbit: [...mbits][0]! }
   if (anyNoVantage) return { kind: 'no-vantage', cycles: noVantageCycles }
   return { kind: 'unmeasured' }
@@ -199,14 +203,6 @@ export function summariseLink(columns: Column[]): LinkSummary {
   }
 }
 
-/** The follower's own value, or `null` to render no follower at all — an absent/no-vantage slot has
- * nothing to say, and a follower reading "—" would assert a measured absence. */
-function followerLinkValue(state: LinkBucketState): string | null {
-  if (state.kind === 'steady') return `${state.mbit} Mbit`
-  if (state.kind === 'transition') return 'Renegotiated'
-  return null
-}
-
 /**
  * Negotiated link speed over the window, one column per bucket.
  *
@@ -263,36 +259,52 @@ export function LinkSpeedStrip({
   }, [columns])
 
   return (
-    // See `availability-strip.tsx`'s identical wrapper for why this is a floor, not a height.
-    <div style={{ minHeight: STRIP_HEIGHT + AXIS_HEIGHT }}>
-      {isPending === true ? (
-        <PendingChart height={STRIP_HEIGHT + AXIS_HEIGHT} />
-      ) : (
-        <>
-          <LinkVerdict summary={summariseLink(columns)} />
-          <ResponsiveChart height={STRIP_HEIGHT + AXIS_HEIGHT}>
-            {({ width }) => (
-              <StripPlot columns={columns} maxMbit={maxMbit} bucketSeconds={bucketSeconds} width={width} />
-            )}
-          </ResponsiveChart>
-          {/* Four fills, none of them named anywhere until now — see `availability-strip.tsx`'s
-              identical legend. The speed swatch is the ramp's top step because that is what a
-              healthy window is drawn in; the ramp itself is relative to the fastest speed the
-              window saw, which the verdict line above states in words. */}
-          <ChartLegend chartId="link-speed-strip" items={FILL_LEGEND} />
-        </>
-      )}
+    // A floor, not a height — see `availability-strip.tsx`'s identical wrapper.
+    <div style={{ minHeight: STRIP_HEIGHT + AXIS_HEIGHT + LEGEND_BAND }}>
+      {isPending !== true && <LinkVerdict summary={summariseLink(columns)} />}
+      <ChartFrame
+        series={FILL_SERIES}
+        chartId="link-speed-strip"
+        height={STRIP_HEIGHT + AXIS_HEIGHT + LEGEND_BAND}
+        isPending={isPending === true}
+        ariaLabel="Negotiated link speed per bucket, with unmeasured buckets hatched and renegotiations marked rather than averaged"
+        // Four fills, not four series — there is nothing to toggle. See `availability-strip.tsx`.
+        legend={{ toggle: false }}
+      >
+        {({ width, height }) => (
+          <StripPlot
+            columns={columns}
+            maxMbit={maxMbit}
+            bucketSeconds={bucketSeconds}
+            width={width}
+            height={height}
+          />
+        )}
+      </ChartFrame>
     </div>
   )
 }
 
-/** The four fills `columnFill` can return. `fillOpacity` mirrors the real alphas so the legend
- * cannot describe a fill the chart does not draw. */
-const FILL_LEGEND: LegendEntry[] = [
-  { key: 'speed', label: 'Negotiated speed', color: VX.line, shape: 'bar', fillOpacity: 0.9 },
-  { key: 'transition', label: 'Renegotiated', color: VX.warnSolid, shape: 'bar', fillOpacity: 1 },
-  { key: 'no-vantage', label: 'No link speed reported', color: VX.neutral, shape: 'bar', fillOpacity: 0.18 },
-  { key: 'absent', label: 'Not measured', color: VX.neutral, shape: 'bar', fillOpacity: 0.5 },
+/**
+ * The four fills `columnFill` can return, as the series array `ChartFrame` derives the legend from.
+ *
+ * `fillOpacity` mirrors the real alphas so the legend cannot describe a fill the chart does not
+ * draw. The speed swatch is the ramp's top step because that is what a healthy window is drawn in;
+ * the ramp itself is relative to the fastest speed the window saw, which the verdict line above
+ * states in words. See `availability-strip.tsx`'s identical array for why this stopped being a
+ * hand-written `LegendEntry[]` handed to `ChartLegend`.
+ */
+const FILL_SERIES: SeriesStyle[] = [
+  { key: 'speed', label: 'Negotiated speed', color: VX.line, mark: 'bar', fillOpacity: 0.9 },
+  { key: 'transition', label: 'Renegotiated', color: VX.warnSolid, mark: 'bar', fillOpacity: 1 },
+  {
+    key: 'no-vantage',
+    label: 'No link speed reported',
+    color: VX.neutral,
+    mark: 'bar',
+    fillOpacity: 0.18,
+  },
+  { key: 'absent', label: 'Not measured', color: VX.neutral, mark: 'bar', fillOpacity: 0.5 },
 ]
 
 /**
@@ -356,15 +368,18 @@ function StripPlot({
   maxMbit,
   bucketSeconds,
   width,
+  height,
 }: {
   columns: Column[]
   maxMbit: number
   bucketSeconds: ProbeBucketSeconds
   width: number
+  /** The plot rect `ChartFrame` handed down — already net of the measured legend band. */
+  height: number
 }) {
-  const tooltipStyles = useTooltipStyles()
   const absentHatchId = 'link-speed-strip-absent'
-  const svgRef = useRef<SVGSVGElement | null>(null)
+  // Derived from the rect, not the constant — see `availability-strip.tsx`'s identical derivation.
+  const stripHeight = Math.max(1, height - AXIS_HEIGHT)
 
   // Width-relative insets — see `availability-strip.tsx`'s identical constants for the argument.
   const plotLeft = Math.min(PLOT_LEFT, Math.round(width * 0.14))
@@ -374,15 +389,17 @@ function StripPlot({
   // `/ 3`, not `/ 2` — see `availability-strip.tsx`'s identical constant for why the wider margin
   // is needed: a `/ 2` cap leaves no room for a partial fold's fill/hatch split to render as two
   // visibly distinct pieces.
-  const plotColumns = useMemo(() => foldColumns(columns, Math.floor(plotWidth / 3)), [columns, plotWidth])
+  const plotColumns = useMemo(
+    () => foldColumns(columns, Math.floor(plotWidth / 3)),
+    [columns, plotWidth],
+  )
   // Memoized — see `availability-strip.tsx`'s identical `keys`/`scale` for why an unmemoized
   // `scaleBand` call defeats the point of the `bandCenter` callback below.
   const keys = useMemo(() => plotColumns.map((c) => c.key), [plotColumns])
-  const scale = useMemo(() => scaleBand<string>({ domain: keys, range: [0, plotWidth] }), [keys, plotWidth])
-  // See `availability-strip.tsx`'s identical `sourceIndex` — resolves a key the latency chart
-  // broadcasts from its full, unfolded space to the folded column that contains it.
-  const sourceIndex = useMemo(() => foldSourceIndex(columns, plotColumns), [columns, plotColumns])
-
+  const scale = useMemo(
+    () => scaleBand<string>({ domain: keys, range: [0, plotWidth] }),
+    [keys, plotWidth],
+  )
   const bandCenter = useCallback(
     (key: string) => {
       const v = scale(key)
@@ -390,25 +407,25 @@ function StripPlot({
     },
     [scale],
   )
-  // See `availability-strip.tsx`'s identical seam.
-  const resolveKey = useCallback((key: string) => sourceIndex.get(key) ?? null, [sourceIndex])
 
   // This is the chart where the shared cursor pays most — its whole subject is *when did the NIC
   // renegotiate*, and correlating a transition column with the latency spike above it used to be a
-  // manual eyeball across two cards. `useHoverSync` replaces the bare `useChartTooltip` this strip
-  // shipped with, the same wiring `availability-strip.tsx` gets.
-  const { tip, tooltipRef, syncedPoint, isDirectHover, handleMouse, handleLeave } = useHoverSync<PlotColumn>({
+  // manual eyeball across two cards. `useChartCursor` needs no provider and no fold seam; see
+  // `availability-strip.tsx`'s identical call for why the source→folded index this file used to
+  // build is gone, and why `resolution: 'leading'` — not the default nearest-key — is what makes a
+  // folded column resolve the buckets it actually swallowed.
+  const cursor = useChartCursor<PlotColumn>({
     data: plotColumns,
     chartId: 'link-speed-strip',
     getKey: getColumnKey,
     xScale: bandCenter,
+    resolution: 'leading',
     marginLeft: plotLeft,
-    resolveKey,
   })
+  const point = cursor.point
 
   if (width < plotLeft + plotRight + 20 || plotColumns.length === 0) return null
 
-  const height = STRIP_HEIGHT
   const step = plotWidth / plotColumns.length
   const barWidth = Math.max(step - 1, 1)
   // See `availability-strip.tsx`'s identical constant — the hatch repeat shrunk to fit the column
@@ -416,14 +433,8 @@ function StripPlot({
   const hatchSize = Math.max(2, Math.min(5, Math.round(barWidth)))
 
   return (
-    <div style={{ position: 'relative' }}>
-      <svg
-        ref={svgRef}
-        width={width}
-        height={STRIP_HEIGHT + AXIS_HEIGHT}
-        role="img"
-        aria-label="Negotiated link speed per bucket, with unmeasured buckets hatched and renegotiations marked rather than averaged"
-      >
+    <>
+      <svg width={width} height={height}>
         <defs>
           <HatchPattern id={absentHatchId} color={VX.neutral} opacity={0.7} size={hatchSize} />
         </defs>
@@ -443,7 +454,7 @@ function StripPlot({
                     x={i * step}
                     y={0}
                     width={measuredWidth}
-                    height={height}
+                    height={stripHeight}
                     rx={1}
                     fill={columnFill(column.state, maxMbit, absentHatchId)}
                     // The overlay now owns hit-testing (below); these rects only paint.
@@ -455,7 +466,7 @@ function StripPlot({
                     x={i * step + measuredWidth}
                     y={0}
                     width={hatchWidth}
-                    height={height}
+                    height={stripHeight}
                     rx={1}
                     fill={hatchFill(absentHatchId)}
                     pointerEvents="none"
@@ -466,7 +477,7 @@ function StripPlot({
                     x={i * step}
                     y={MARKER_INSET}
                     width={measuredWidth}
-                    height={Math.max(2, height - 2 * MARKER_INSET)}
+                    height={Math.max(2, stripHeight - 2 * MARKER_INSET)}
                     rx={1}
                     fill={VX.warnSolid}
                     pointerEvents="none"
@@ -475,62 +486,61 @@ function StripPlot({
               </g>
             )
           })}
-          {syncedPoint && (
+          {point && (
+            /* theme-allow — declared non-single-plot, for the reason `availability-strip.tsx`
+               states at length: a strip has one dimension, and `CartesianChart` would draw a
+               numeric y axis over a chart that measures nothing vertically. */
             <Crosshair
-              x={(scale(syncedPoint.key) ?? 0) + scale.bandwidth() / 2}
+              x={(scale(point.key) ?? 0) + scale.bandwidth() / 2}
               top={0}
-              bottom={STRIP_HEIGHT}
+              bottom={stripHeight}
             />
           )}
-          <HoverOverlay width={plotWidth} height={STRIP_HEIGHT} onMove={handleMouse} onLeave={handleLeave} />
+          <HoverOverlay
+            width={plotWidth}
+            height={stripHeight}
+            onMove={cursor.onPointerMove}
+            onLeave={cursor.onPointerLeave}
+            onKeyDown={cursor.onKeyDown}
+            onBlur={cursor.onBlur}
+            // `CartesianChart` forwards its own `ariaLabel` to the overlay so the focusable slider
+            // announces the chart rather than a generic "Chart data". A hand-composed plot has to
+            // do it itself, or tabbing into it says nothing about which chart was reached.
+            ariaLabel="Negotiated link speed per bucket"
+            valueMax={Math.max(plotColumns.length - 1, 0)}
+            {...(point !== null && {
+              valueNow: plotColumns.indexOf(point),
+              valueText: bucketTickFormat(bucketSeconds)(point.key),
+            })}
+          />
           {/* `axisTickValues` rather than `smartTicks`, for the reason its docblock gives: the latter
             appends the final value unconditionally and the last two labels overlap. The values are
             ISO bucket starts; `bucketTickFormat` renders each as the time a reader sees. */}
           <AxisBottomDate
             scale={scale}
-            top={STRIP_HEIGHT}
+            top={stripHeight}
             tickValues={axisTickValues(keys, plotWidth, AXIS_LABEL_PX)}
             tickFormat={bucketTickFormat(bucketSeconds)}
           />
         </g>
       </svg>
-      <ChartTooltip tip={isDirectHover ? tip : null} tooltipRef={tooltipRef} styles={tooltipStyles}>
-        {tip && (
+      {/* Source-only, like every other chart now — the follower chip this strip used to draw went
+          with `ChartTooltip`; see `availability-strip.tsx`. */}
+      <ChartTooltipFloat anchor={cursor.isSource ? cursor.anchor : null}>
+        {point && (
           <>
-            <TooltipHeader date={fmtDateTime(tip.data.bucketStart)} label="Link speed" labelColor={VX.line} />
+            <TooltipHeader
+              date={fmtDateTime(point.bucketStart)}
+              label="Link speed"
+              labelColor={VX.line}
+            />
             <TooltipBody>
-              <StateRows column={tip.data} />
+              <StateRows column={point} />
             </TooltipBody>
           </>
         )}
-      </ChartTooltip>
-      {!isDirectHover &&
-        syncedPoint !== null &&
-        followerLinkValue(syncedPoint.state) !== null && (
-          <SyncedTip
-            svgRef={svgRef}
-            x={plotLeft + (scale(syncedPoint.key) ?? 0) + scale.bandwidth() / 2}
-            styles={tooltipStyles}
-          >
-            <TooltipBody>
-              <TooltipRow color={VX.line} shape="bar" label="Link" value={followerLinkValue(syncedPoint.state) ?? ''} />
-              {/* See `availability-strip.tsx`'s identical caveat row — `followerLinkValue` reads
-                  `state.kind`, which is set by the measured members alone and says nothing about how
-                  much of the folded span they cover. A 1-of-3-measured fold reports "Link: 1000
-                  Mbit" here exactly as confidently as a fully-measured one, with no header on this
-                  chip naming the column to let a reader spot the difference. */}
-              {syncedPoint.unmeasuredMembers > 0 && syncedPoint.unmeasuredMembers < syncedPoint.foldedFrom && (
-                <TooltipRow
-                  color={VX.neutral}
-                  shape="dot"
-                  label="Partial"
-                  value={`${syncedPoint.foldedFrom - syncedPoint.unmeasuredMembers} of ${syncedPoint.foldedFrom} buckets`}
-                />
-              )}
-            </TooltipBody>
-          </SyncedTip>
-        )}
-    </div>
+      </ChartTooltipFloat>
+    </>
   )
 }
 

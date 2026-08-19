@@ -17,7 +17,13 @@
       // src/components that are now real <ul>/<li> elements.
       "files": ["src/charts/**"],
       "rules": {
-        "jsx-a11y/prefer-tag-over-role": "off"
+        "jsx-a11y/prefer-tag-over-role": "off",
+        // `CartesianChart`'s `tooltip.extraRows` (and `ChartFrame`/`CartesianChart`'s own
+        // `children`) are render CALLBACKS the primitive invokes with a datum — not components it
+        // mounts, so the identity churn this rule exists to prevent cannot happen. The rule reads
+        // any prop-position arrow returning JSX as a component definition and cannot see the call
+        // site. Same exemption, same reason, as the `src/routes/**` override below.
+        "react/no-unstable-nested-components": ["warn", { "allowAsProps": true }]
       }
     },
     {

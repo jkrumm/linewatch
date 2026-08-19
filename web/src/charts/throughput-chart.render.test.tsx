@@ -22,15 +22,19 @@ describe('ThroughputChart isPending', () => {
       />,
     )
     expect(html).toContain('Loading')
-    // `MirroredBars`' own accessible label — proof the chart body did not mount underneath the
-    // pending caption, which is the exact "renders both, one on top of the other" failure mode a
-    // boolean gate that forgot its `else` branch would produce.
-    expect(html).not.toContain('Data carried per bucket')
+    // The legend `ChartFrame` derives from this chart's three marks — proof the chart body did not
+    // mount underneath the pending caption, which is the exact "renders both, one on top of the
+    // other" failure mode a boolean gate that forgot its `else` branch would produce. Asserted on
+    // the legend rather than the accessible label because `ChartFrame` keeps `ariaLabel` on its
+    // container while pending, deliberately: a screen reader should be told what is loading.
+    expect(html).not.toContain('Not measured')
+    expect(html).not.toContain('Download')
   })
 
   test('does not render the pending caption once the query has resolved', () => {
     const html = renderToStaticMarkup(<ThroughputChart buckets={[]} {...WINDOW} isPending={false} />)
     expect(html).not.toContain('Loading')
+    expect(html).toContain('Not measured')
   })
 
   test('an omitted isPending defaults to the resolved (non-pending) path', () => {

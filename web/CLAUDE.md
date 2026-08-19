@@ -1,4 +1,4 @@
-<!-- basalt:begin 1.9.0 -->
+<!-- basalt:begin 1.17.0 -->
 
 ## basalt-ui (managed — do not hand-edit)
 
@@ -8,12 +8,15 @@ or the `basalt-*` rules instead; manual changes here are overwritten on the next
 
 **Stack:** React 19 + Mantine v9, themed by `basalt-ui` (`BasaltProvider` + `createBasaltTheme`).
 Colors come from the three-tier `--vx-*` token system — read `VX.*` / a `defineSeries` token,
-never a raw hex/`rgb()`/`hsl()`. Charts are visx via `basalt-ui/charts` (compose the primitives:
-`ChartCard`, `ChartLegend`, the `ChartTooltip` family, `AxisLeftNumeric`/`AxisBottomDate`); add a
-kind on the third repeat, don't loosen the primitives. `basalt-ui/charts` and `basalt-ui/tokens`
-are Mantine-free internally (a framework invariant, not something your own app code must follow)
-— never import `@visx/*` outside a `charts/` directory (oxlint-enforced). Toolchain is oxlint +
-oxfmt (no ESLint/Biome/Prettier) and `basalt-ui check-theme` guards the palette. Runtime is Bun.
+never a raw hex/`rgb()`/`hsl()`. Charts are visx via `basalt-ui/charts`: every single-plot chart
+composes `CartesianChart` (owns margins, scales, axes, grid, cursor, tooltip — draw only marks);
+legends/tooltip rows are DERIVED from `series`, never hand-authored (`basalt/hand-rolled-plot` +
+`basalt/chart-legend-literal` enforce both); `DualPanel`/`Donut`/`Heatmap` are the declared
+exceptions. Add a kind on the third repeat, don't loosen the primitives. `basalt-ui/charts` and
+`basalt-ui/tokens` are Mantine-free internally (a framework invariant, not something your own app
+code must follow) — never import `@visx/*` outside a `charts/` directory (oxlint-enforced).
+Toolchain is oxlint + oxfmt (no ESLint/Biome/Prettier) and `basalt-ui check-theme` guards the
+palette. Runtime is Bun.
 
 **Before guessing an import, check the installed package's machine docs**:
 `node_modules/basalt-ui/llms.txt` (per-subpath import map), `node_modules/basalt-ui/AGENTS.md`, or

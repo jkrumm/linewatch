@@ -20,12 +20,12 @@ export interface LatencyComparePoint {
   /** ISO-8601 of `bucketStart` — the identity of the slot, carried through from `densifyBuckets`. */
   key: string
   /**
-   * The display label for this bucket, and the chart's categorical x key (`bucketAxisLabel`).
+   * The display label for this bucket (`bucketAxisLabel`).
    *
-   * Separate from `key` because the two answer different questions. `key` is an ISO instant and is
-   * how a slot is identified; `label` is what a reader sees on the axis, and `basalt-ui`'s
-   * `MultiLine` gives no way to format the axis other than through the value `getX` returns. Using
-   * `key` there produced an axis reading `31.07` a dozen times over a 24 h window.
+   * Separate from `key` because the two answer different questions: `key` is the ISO instant that
+   * identifies a slot, `label` is what a reader sees. It is no longer also the chart's x key —
+   * every chart on the page renders its domain through a formatter now (`formatX` / `tickFormat`),
+   * so nothing here doubles as identity and display at once.
    */
   label: string
   bucketStart: number

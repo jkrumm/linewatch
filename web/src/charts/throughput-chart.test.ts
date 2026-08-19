@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test'
 import { foldPoints } from './throughput-chart'
-import { foldSourceIndex } from './fold'
 import type { ThroughputPoint } from '../lib/throughput'
 
 function measured(over: Partial<ThroughputPoint> = {}): ThroughputPoint {
@@ -82,9 +81,9 @@ describe('foldPoints', () => {
     expect(folded).toHaveLength(2)
     expect(folded[0]?.foldedFrom).toBe(3)
     expect(folded[1]?.foldedFrom).toBe(2)
+    // Every source point accounted for exactly once — see `availability-strip.test.ts`'s
+    // identical assertion for why this stopped going through `foldSourceIndex`.
     expect(folded.reduce((sum, f) => sum + f.foldedFrom, 0)).toBe(points.length)
-    const index = foldSourceIndex(points, folded)
-    expect(points.every((p) => index.has(p.key))).toBe(true)
   })
 
   /**

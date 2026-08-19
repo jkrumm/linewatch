@@ -2,7 +2,7 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { z } from 'zod'
 import { Card, Group, SegmentedControl, Stack, Text } from '@mantine/core'
 import { useQueries, useQuery } from '@tanstack/react-query'
-import { ChartHoverSync, TooltipRow, VX } from 'basalt-ui/charts'
+import { ChartCursorScope, TooltipRow, VX } from 'basalt-ui/charts'
 import { Callout } from 'basalt-ui/content'
 import {
   eventsQuery,
@@ -342,422 +342,430 @@ function DashboardPage() {
       )}
 
 
-      {/* One hover provider around the whole chart region, not one per section. Every chart kind in
-          `basalt-ui/charts` calls `useHoverSync`, and outside a provider each one warns and loses
-          its shared cursor — which the latency views need most, since comparing anchors is the only
-          reason they are drawn together. */}
-      <ChartHoverSync>
-        <Stack gap="xl">
-          <Section
-            id="uptime"
-            meta={
-              <Group justify="space-between" align="flex-end" wrap="wrap" gap="sm">
-                <StatStrip
-                  stats={[
-                    {
-                      label: 'Downtime',
-                      // Gated on `allOutageData`, not `outageData` — this figure reads the
-                      // UNFILTERED outage list (see that query's own comment above); the FILTERED
-                      // query's arrival says nothing about whether this value is ready.
-                      value: allOutageData === undefined ? null : fmtMinutes(downtime.seconds),
-                      tone: stripTone(downtimeTone),
-                      hint:
-                        allOutageData === undefined
+      {/* No provider. As of basalt-ui 1.15.0 the cursor lives in a module-level store, so every
+          chart on this page shares one out of the box — `ChartHoverSync` is gone and its successor,
+          `ChartCursorScope`, opts a subtree OUT of sharing rather than into it. The two Speed views
+          below are the only subtrees that want out. */}
+      <Stack gap="xl">
+        <Section
+          id="uptime"
+          meta={
+            <Group justify="space-between" align="flex-end" wrap="wrap" gap="sm">
+              <StatStrip
+                stats={[
+                  {
+                    label: 'Downtime',
+                    // Gated on `allOutageData`, not `outageData` — this figure reads the
+                    // UNFILTERED outage list (see that query's own comment above); the FILTERED
+                    // query's arrival says nothing about whether this value is ready.
+                    value: allOutageData === undefined ? null : fmtMinutes(downtime.seconds),
+                    tone: stripTone(downtimeTone),
+                    hint:
+                      allOutageData === undefined
+                        ? undefined
+                        : downtime.openCount > 0
+                          ? `${downtime.openCount} outage${downtime.openCount === 1 ? ' is' : 's are'} still open — this is a floor, already out of date. Outages straddling the window count only their time inside it.`
+                          : 'Minutes, not a percentage — a home line’s percentage flatters. Outages straddling the window count only their time inside it.',
+                  },
+                  {
+                    label: 'Outages',
+                    value: outageData === undefined ? null : String(outageData.outages.length),
+                    hint:
+                      outageData === undefined
+                        ? undefined
+                        : search.minDuration > 0
+                          ? `Only outages of at least ${fmtMinutes(search.minDuration)}. Shorter ones are recorded, just excluded here by the filter beside this strip.`
+                          : 'Every recorded outage in the window, single-cycle blips included.',
+                  },
+                  {
+                    label: 'Coverage',
+                    value: outageData === undefined ? null : fmtCoveragePct(outageData.summary?.coveragePct ?? null),
+                    // `bad` is the coverage envelope's own third state; the strip has only two
+                    // tints, and its `warn` is the one a reader must not read past.
+                    tone:
+                      outageData?.summary === undefined || outageData.summary === null
+                        ? undefined
+                        : coverageKind(outageData.summary) === 'info'
                           ? undefined
-                          : downtime.openCount > 0
-                            ? `${downtime.openCount} outage${downtime.openCount === 1 ? ' is' : 's are'} still open — this is a floor, already out of date. Outages straddling the window count only their time inside it.`
-                            : 'Minutes, not a percentage — a home line’s percentage flatters. Outages straddling the window count only their time inside it.',
-                    },
-                    {
-                      label: 'Outages',
-                      value: outageData === undefined ? null : String(outageData.outages.length),
-                      hint:
-                        outageData === undefined
-                          ? undefined
-                          : search.minDuration > 0
-                            ? `Only outages of at least ${fmtMinutes(search.minDuration)}. Shorter ones are recorded, just excluded here by the filter beside this strip.`
-                            : 'Every recorded outage in the window, single-cycle blips included.',
-                    },
-                    {
-                      label: 'Coverage',
-                      value: outageData === undefined ? null : fmtCoveragePct(outageData.summary?.coveragePct ?? null),
-                      // `bad` is the coverage envelope's own third state; the strip has only two
-                      // tints, and its `warn` is the one a reader must not read past.
-                      tone:
-                        outageData?.summary === undefined || outageData.summary === null
-                          ? undefined
-                          : coverageKind(outageData.summary) === 'info'
-                            ? undefined
-                            : coverageKind(outageData.summary) === 'bad'
-                              ? 'bad'
-                              : 'warn',
-                      hint: 'The share of the window the collector actually measured. Every figure here is only as true as this number — a window measured a tenth of itself reports almost no downtime.',
-                    },
-                  ]}
-                />
-                <MinDurationFilter
-                  value={search.minDuration}
-                  onChange={(minDuration) => setSearch({ minDuration })}
-                />
-              </Group>
-            }
-            views={[
-              {
-                key: 'timeline',
-                label: 'Timeline',
-                render: () => (
-                  <Stack gap="md">
-                    {/* This section's own word, like every other chart title on the page — see
-                        `speed-chart.tsx`'s docblock for the rule and why it is not redundancy with
-                        the heading (in compact there is no heading, and this is the card's only
-                        label). The anchor it used to name ("· Cloudflare") moved into the tooltip
-                        rather than being dropped: this strip is ONE anchor, not the connection, and
-                        a bare "WAN availability" once claimed the whole WAN while the chart's own
-                        accessible label said "Cloudflare availability" — one anchor, described two
-                        ways on one card. */}
-                    <GuidedChart title="Uptime" copy={AVAILABILITY_COPY}>
-                      <AvailabilityStrip
-                        target="cloudflare"
-                        buckets={[...(bucketsByTarget.get('cloudflare') ?? [])]}
+                          : coverageKind(outageData.summary) === 'bad'
+                            ? 'bad'
+                            : 'warn',
+                    hint: 'The share of the window the collector actually measured. Every figure here is only as true as this number — a window measured a tenth of itself reports almost no downtime.',
+                  },
+                ]}
+              />
+              <MinDurationFilter
+                value={search.minDuration}
+                onChange={(minDuration) => setSearch({ minDuration })}
+              />
+            </Group>
+          }
+          views={[
+            {
+              key: 'timeline',
+              label: 'Timeline',
+              render: () => (
+                <Stack gap="md">
+                  {/* This section's own word, like every other chart title on the page — see
+                      `speed-chart.tsx`'s docblock for the rule and why it is not redundancy with
+                      the heading (in compact there is no heading, and this is the card's only
+                      label). The anchor it used to name ("· Cloudflare") moved into the tooltip
+                      rather than being dropped: this strip is ONE anchor, not the connection, and
+                      a bare "WAN availability" once claimed the whole WAN while the chart's own
+                      accessible label said "Cloudflare availability" — one anchor, described two
+                      ways on one card. */}
+                  <GuidedChart title="Uptime" copy={AVAILABILITY_COPY}>
+                    <AvailabilityStrip
+                      target="cloudflare"
+                      buckets={[...(bucketsByTarget.get('cloudflare') ?? [])]}
+                      from={from}
+                      to={to}
+                      bucketSeconds={bucket}
+                      isPending={seriesPending}
+                    />
+                  </GuidedChart>
+                  <CoverageCallout summary={outageData === undefined ? 'pending' : (outageData.summary ?? null)} />
+                </Stack>
+              ),
+            },
+            {
+              key: 'outages',
+              // Static label. The count is on the strip above; interpolated into the tab it
+              // changed the control's intrinsic width on every data arrival, and Mantine animates
+              // the active indicator's transform — so the switch resized and slid on its own,
+              // several times a minute.
+              label: 'Outages',
+              render: () => (
+                <Card py="xs" px="sm">
+                  <Text size="sm" c="dimmed" mb="md">
+                    Every recorded outage in the window. Single-cycle blips are recorded, not
+                    discarded — only filtered here.
+                  </Text>
+                  <OutageTable outages={outageData?.outages ?? []} isPending={outagesPending} />
+                </Card>
+              ),
+            },
+            {
+              key: 'pattern',
+              label: '30-day pattern',
+              render: () => (
+                // No cursor scope — this used to be wrapped on the theory that `AvailabilityHeatmap`
+                // could broadcast a key the latency band's shared cursor would collide with (see the
+                // 'Every run' view under the Speed section for that actual collision). It draws
+                // `CategoryGrid`, which owns its own per-cell tooltip and joins no cursor at all;
+                // its columns are fixed `HOUR_LABELS` ('00'..'23'), never a run key — there is
+                // no shared key here to protect, and the wrapper was a no-op.
+                <Stack gap={4}>
+                  <Text size="xs" c="dimmed">
+                    Always the last 30 days, by hour of your own day. The range selector doesn’t scope this
+                    block — its shape is a fixed hour × day grid.
+                  </Text>
+                  <AvailabilityHeatmap
+                    buckets={heatmapData?.buckets ?? []}
+                    from={to - HEATMAP_SPAN_MS}
+                    to={to}
+                    isPending={heatmapPending}
+                  />
+                </Stack>
+              ),
+            },
+          ]}
+        />
+
+        <Section
+          id="latency"
+          meta={
+            <StatStrip
+              stats={[
+                {
+                  label: 'Internet',
+                  value: seriesPending ? null : fmtMs(median(points.map((p) => p.wanMs)).value),
+                },
+                {
+                  label: 'Router',
+                  value: seriesPending ? null : fmtMs(median(points.map((p) => p.gatewayMs)).value),
+                },
+                {
+                  label: 'Worst loss',
+                  value: seriesPending ? null : fmtPct(worstBucketLoss(points)),
+                  tone: seriesPending ? undefined : stripTone(worstLossTint(worstBucketLoss(points))),
+                  hint: seriesPending
+                    ? undefined
+                    : 'The worst single bucket in the window, across the gateway and all three anchors — not the average, which a short outage barely moves.',
+                },
+              ]}
+            />
+          }
+          views={[
+            {
+              key: 'internet',
+              label: 'Internet & router',
+              render: () => (
+                // The three anchors folded into one band, with the router's median over it.
+                // Three near-identical stacked bands made the reader compare curves by eye to
+                // answer a question none of them asks alone; the fold answers it, and the
+                // per-anchor view below still holds every anchor in full. See
+                // `foldInternetBuckets` for what each statistic folds by and why.
+                <GuidedChart title="Ping" copy={INTERNET_LATENCY_COPY}>
+                  <LatencyBandChart
+                    label="Internet"
+                    chartKey="internet"
+                    buckets={internetBuckets}
+                    vantage={vantageSeries}
+                    from={from}
+                    to={to}
+                    bucketSeconds={bucket}
+                    isPending={seriesPending}
+                    overlay={{ label: 'Router', buckets: bucketsByTarget.get('gateway') ?? [] }}
+                    renderExtraTooltipRows={(b) => {
+                      const fold = internetByBucket.get(b.bucket)
+                      return fold === undefined ? null : <InternetFoldRows fold={fold} />
+                    }}
+                    // Scoped here, not in the chart: an Outage row with scope 'gateway' drawn
+                    // across the internet band would assert something the row does not say, and
+                    // the chart cannot tell which band it is drawing.
+                    outages={allOutageData?.outages.filter((o) => o.scope === 'wan')}
+                  />
+                </GuidedChart>
+              ),
+            },
+            {
+              key: 'per-anchor',
+              label: `Per target (${TARGETS.length})`,
+              render: () => (
+                // The exhaustive view: every target, in full, with its band and its loss dots.
+                // Kept whole rather than summarised — the fold above answers a different question
+                // and does not replace this one. The hover provider is mounted once around the
+                // whole chart region, so these already share a cursor without their own wrapper.
+                <Stack gap="md">
+                  {TARGETS.map((name) => (
+                    <GuidedChart key={name} title={TARGET_LABEL[name]} copy={LATENCY_BAND_COPY}>
+                      <LatencyBandChart
+                        label={TARGET_LABEL[name]}
+                        chartKey={name}
+                        buckets={[...(bucketsByTarget.get(name) ?? [])]}
+                        vantage={vantageSeries}
                         from={from}
                         to={to}
                         bucketSeconds={bucket}
                         isPending={seriesPending}
+                        outages={allOutageData?.outages.filter((o) =>
+                          name === 'gateway' ? o.scope === 'gateway' : o.scope === 'wan',
+                        )}
                       />
                     </GuidedChart>
-                    <CoverageCallout summary={outageData === undefined ? 'pending' : (outageData.summary ?? null)} />
-                  </Stack>
-                ),
-              },
-              {
-                key: 'outages',
-                // Static label. The count is on the strip above; interpolated into the tab it
-                // changed the control's intrinsic width on every data arrival, and Mantine animates
-                // the active indicator's transform — so the switch resized and slid on its own,
-                // several times a minute.
-                label: 'Outages',
-                render: () => (
-                  <Card py="xs" px="sm">
-                    <Text size="sm" c="dimmed" mb="md">
-                      Every recorded outage in the window. Single-cycle blips are recorded, not
-                      discarded — only filtered here.
-                    </Text>
-                    <OutageTable outages={outageData?.outages ?? []} isPending={outagesPending} />
-                  </Card>
-                ),
-              },
-              {
-                key: 'pattern',
-                label: '30-day pattern',
-                render: () => (
-                  // No hover provider — this used to be wrapped on the theory that `AvailabilityHeatmap`
-                  // could broadcast a key the latency band's shared cursor would collide with (see the
-                  // 'Every run' view under the Speed section for that actual collision). It draws
-                  // `CategoryGrid` on bare `useChartTooltip`, columns are fixed `HOUR_LABELS`
-                  // ('00'..'23'), never `runAxisLabels` — there is no shared key here to protect, and
-                  // the wrapper was a no-op.
-                  <Stack gap={4}>
-                    <Text size="xs" c="dimmed">
-                      Always the last 30 days, by hour of your own day. The range selector doesn’t scope this
-                      block — its shape is a fixed hour × day grid.
-                    </Text>
-                    <AvailabilityHeatmap
-                      buckets={heatmapData?.buckets ?? []}
-                      from={to - HEATMAP_SPAN_MS}
-                      to={to}
-                      isPending={heatmapPending}
-                    />
-                  </Stack>
-                ),
-              },
-            ]}
-          />
+                  ))}
+                </Stack>
+              ),
+            },
+          ]}
+        />
 
-          <Section
-            id="latency"
-            meta={
-              <StatStrip
-                stats={[
-                  {
-                    label: 'Internet',
-                    value: seriesPending ? null : fmtMs(median(points.map((p) => p.wanMs)).value),
-                  },
-                  {
-                    label: 'Router',
-                    value: seriesPending ? null : fmtMs(median(points.map((p) => p.gatewayMs)).value),
-                  },
-                  {
-                    label: 'Worst loss',
-                    value: seriesPending ? null : fmtPct(worstBucketLoss(points)),
-                    tone: seriesPending ? undefined : stripTone(worstLossTint(worstBucketLoss(points))),
-                    hint: seriesPending
-                      ? undefined
-                      : 'The worst single bucket in the window, across the gateway and all three anchors — not the average, which a short outage barely moves.',
-                  },
-                ]}
-              />
-            }
-            views={[
-              {
-                key: 'internet',
-                label: 'Internet & router',
-                render: () => (
-                  // The three anchors folded into one band, with the router's median over it.
-                  // Three near-identical stacked bands made the reader compare curves by eye to
-                  // answer a question none of them asks alone; the fold answers it, and the
-                  // per-anchor view below still holds every anchor in full. See
-                  // `foldInternetBuckets` for what each statistic folds by and why.
-                  <GuidedChart title="Ping" copy={INTERNET_LATENCY_COPY}>
-                    <LatencyBandChart
-                      label="Internet"
-                      chartKey="internet"
-                      buckets={internetBuckets}
-                      vantage={vantageSeries}
-                      from={from}
-                      to={to}
-                      bucketSeconds={bucket}
-                      isPending={seriesPending}
-                      overlay={{ label: 'Router', buckets: bucketsByTarget.get('gateway') ?? [] }}
-                      renderExtraTooltipRows={(b) => {
-                        const fold = internetByBucket.get(b.bucket)
-                        return fold === undefined ? null : <InternetFoldRows fold={fold} />
-                      }}
-                      // Scoped here, not in the chart: an Outage row with scope 'gateway' drawn
-                      // across the internet band would assert something the row does not say, and
-                      // the chart cannot tell which band it is drawing.
-                      outages={allOutageData?.outages.filter((o) => o.scope === 'wan')}
-                    />
-                  </GuidedChart>
-                ),
-              },
-              {
-                key: 'per-anchor',
-                label: `Per target (${TARGETS.length})`,
-                render: () => (
-                  // The exhaustive view: every target, in full, with its band and its loss dots.
-                  // Kept whole rather than summarised — the fold above answers a different question
-                  // and does not replace this one. The hover provider is mounted once around the
-                  // whole chart region, so these already share a cursor without their own wrapper.
+        <Section
+          id="speed"
+          meta={
+            <StatStrip
+              stats={[
+                ...speedStats('Download', speed.download, testsPending),
+                ...speedStats('Upload', speed.upload, testsPending),
+                {
+                  label: 'Runs',
+                  value: testsPending
+                    ? null
+                    : speed.failed > 0
+                      ? `${speed.runs} + ${speed.failed} failed`
+                      : String(speed.runs),
+                  hint: testsPending
+                    ? undefined
+                    : `Successful runs in the last ${rangeLabel} — what the percentiles are taken over. A typical over 3 runs and one over 300 are different claims.`,
+                },
+              ]}
+            />
+          }
+          views={[
+            {
+              key: 'runs',
+              label: 'Every run',
+              render: () => (
+                // Scoped OUT of the page cursor, and the reason is the design rather than a key
+                // collision. This chart's x-axis is runs, not clock time (`SpeedChart`'s own
+                // subtitle says so), so a cursor shared with the time-series charts above would
+                // line up two axes that do not correspond — `BufferbloatChart`'s subtitle
+                // promises the opposite in as many words.
+                //
+                // The direction of the wrapper inverted in basalt-ui 1.15.0 and the code reads
+                // the same because of it: `ChartHoverSync` used to opt a subtree IN (charts
+                // warned and lost their cursor outside one), `ChartCursorScope` opts a subtree
+                // OUT onto a private store. Sharing is the default now, so this is the only kind
+                // of wrapper the page needs and it appears only where isolation is wanted.
+                //
+                // It used to be a collision as well, and that half is gone: the run labels were
+                // the same `DD.MM HH:MM` string space `bucketAxisLabel` produced, so a run landing
+                // on a bucket start (14:05, 14:10) broadcast a key the latency band owned while a
+                // run at 14:07 broadcast nothing — a cursor appearing on some runs and not others,
+                // with no rule a reader could infer. Nothing on the page formats through its domain
+                // value now, so the two key spaces cannot intersect by accident.
+                //
+                // **The isolation stays, and is what keeps that guarantee from being an accident.**
+                // These two charts key on `runAxisKey` (`ts:id`), which `Date.parse` and the
+                // numeric test both reject, so the domain-aware cursor could not resolve them
+                // against a bucketed sibling even without the wrapper — but only because the key
+                // is shaped that way. The wrapper says the thing that is actually true regardless:
+                // this axis is runs, not clock time, and nothing here should ever track a chart
+                // measured on a grid.
+                //
+                // Applies to the two chart bodies on `MultiLine` — this one and `BufferbloatChart`
+                // below (`grep -rn runAxisKey src/charts/`). The 30-day pattern view and the
+                // by-hour heatmap hit-test per cell and never join a cursor at all.
+                <ChartCursorScope>
                   <Stack gap="md">
-                    {TARGETS.map((name) => (
-                      <GuidedChart key={name} title={TARGET_LABEL[name]} copy={LATENCY_BAND_COPY}>
-                        <LatencyBandChart
-                          label={TARGET_LABEL[name]}
-                          chartKey={name}
-                          buckets={[...(bucketsByTarget.get(name) ?? [])]}
-                          vantage={vantageSeries}
-                          from={from}
-                          to={to}
-                          bucketSeconds={bucket}
-                          isPending={seriesPending}
-                          outages={allOutageData?.outages.filter((o) =>
-                            name === 'gateway' ? o.scope === 'gateway' : o.scope === 'wan',
-                          )}
-                        />
-                      </GuidedChart>
-                    ))}
+                    <SpeedChart
+                      tests={tests ?? []}
+                      refLines={throughputRefLines(status?.vantage, router, nowTick)}
+                      isPending={testsPending}
+                    />
+                    <ServerChangeNote tests={tests ?? []} isPending={testsPending} />
                   </Stack>
-                ),
-              },
-            ]}
-          />
+                </ChartCursorScope>
+              ),
+            },
+            {
+              key: 'by-hour',
+              label: 'By hour of day',
+              render: () => (
+                <SpeedHeatmap tests={tests ?? []} from={from} to={to} isPending={testsPending} />
+              ),
+            },
+            {
+              key: 'under-load',
+              label: 'Latency under load',
+              render: () => (
+                // Same isolation as the 'Every run' view above — see that comment.
+                <ChartCursorScope>
+                  <BufferbloatChart tests={tests ?? []} isPending={testsPending} />
+                </ChartCursorScope>
+              ),
+            },
+          ]}
+        />
 
-          <Section
-            id="speed"
-            meta={
-              <StatStrip
-                stats={[
-                  ...speedStats('Download', speed.download, testsPending),
-                  ...speedStats('Upload', speed.upload, testsPending),
-                  {
-                    label: 'Runs',
-                    value: testsPending
-                      ? null
-                      : speed.failed > 0
-                        ? `${speed.runs} + ${speed.failed} failed`
-                        : String(speed.runs),
-                    hint: testsPending
-                      ? undefined
-                      : `Successful runs in the last ${rangeLabel} — what the percentiles are taken over. A typical over 3 runs and one over 300 are different claims.`,
-                  },
-                ]}
-              />
-            }
-            views={[
-              {
-                key: 'runs',
-                label: 'Every run',
-                render: () => (
-                  // Its own provider, and the reason is now the design rather than a key collision.
-                  // This chart's x-axis is runs, not clock time (`SpeedChart`'s own subtitle says
-                  // so), so a cursor shared with the time-series charts above would line up two
-                  // axes that do not correspond — `BufferbloatChart`'s subtitle promises the
-                  // opposite in as many words.
-                  //
-                  // It used to be a collision as well, and that half is gone: `runAxisLabels` emits
-                  // the same `DD.MM HH:MM` string space `bucketAxisLabel` produced, so a run landing
-                  // on a bucket start (14:05, 14:10) broadcast a key the latency band owned while a
-                  // run at 14:07 broadcast nothing — a cursor appearing on some runs and not others,
-                  // with no rule a reader could infer. The bucketed charts key on the bucket's ISO
-                  // start now (basalt-ui 1.9.0's `tickFormat` freed the label from being the domain
-                  // value), so the two key spaces can no longer intersect. The isolation stays
-                  // because the axes still mean different things.
-                  //
-                  // Applies to the two chart bodies on `MultiLine`, whose label IS the domain, the
-                  // hover key and the tooltip header at once — this one and `BufferbloatChart`
-                  // below (`grep -rn runAxisLabels src/charts/`). The 30-day pattern view and the
-                  // by-hour heatmap draw fixed `HOUR_LABELS` on bare `useChartTooltip`, so they
-                  // never join a provider at all.
-                  <ChartHoverSync>
-                    <Stack gap="md">
-                      <SpeedChart
-                        tests={tests ?? []}
-                        refLines={throughputRefLines(status?.vantage, router, nowTick)}
-                        isPending={testsPending}
-                      />
-                      <ServerChangeNote tests={tests ?? []} isPending={testsPending} />
-                    </Stack>
-                  </ChartHoverSync>
-                ),
-              },
-              {
-                key: 'by-hour',
-                label: 'By hour of day',
-                render: () => (
-                  <SpeedHeatmap tests={tests ?? []} from={from} to={to} isPending={testsPending} />
-                ),
-              },
-              {
-                key: 'under-load',
-                label: 'Latency under load',
-                render: () => (
-                  // Same isolation as the 'Every run' view above — see that comment.
-                  <ChartHoverSync>
-                    <BufferbloatChart tests={tests ?? []} isPending={testsPending} />
-                  </ChartHoverSync>
-                ),
-              },
-            ]}
-          />
+        <Section
+          id="throughput"
+          meta={
+            <StatStrip
+              stats={[
+                {
+                  label: 'Downloaded',
+                  value: throughputPending ? null : fmtBytes(volume.downBytes),
+                  ...(throughputPending ? {} : volumeCaveat(volume)),
+                },
+                {
+                  label: 'Uploaded',
+                  value: throughputPending ? null : fmtBytes(volume.upBytes),
+                  ...(throughputPending ? {} : volumeCaveat(volume)),
+                },
+                {
+                  // Coverage, not a third volume. These totals sum only the intervals the server
+                  // could place in time, so a window with refusals or gaps reports a floor — and a
+                  // floor presented as a total is the failure this dashboard is built around.
+                  label: 'Buckets measured',
+                  value: throughputPending
+                    ? null
+                    : `${volume.measuredBuckets} / ${volume.measuredBuckets + volume.unmeasuredBuckets}`,
+                  tone: throughputPending ? undefined : volume.unmeasuredBuckets > 0 ? 'warn' : undefined,
+                  hint: throughputPending
+                    ? undefined
+                    : 'Intervals whose bytes the server could place in time, out of the window’s buckets. Unmeasured traffic moved but wasn’t counted.',
+                },
+              ]}
+            />
+          }
+          views={[
+            {
+              key: 'volume',
+              label: 'Volume',
+              render: () => (
+                <GuidedChart title="Throughput" copy={THROUGHPUT_COPY}>
+                  <ThroughputChart
+                    buckets={throughput?.buckets ?? []}
+                    from={from}
+                    to={to}
+                    bucketSeconds={bucket}
+                    isPending={throughputPending}
+                  />
+                </GuidedChart>
+              ),
+            },
+          ]}
+        />
 
-          <Section
-            id="throughput"
-            meta={
-              <StatStrip
-                stats={[
-                  {
-                    label: 'Downloaded',
-                    value: throughputPending ? null : fmtBytes(volume.downBytes),
-                    ...(throughputPending ? {} : volumeCaveat(volume)),
-                  },
-                  {
-                    label: 'Uploaded',
-                    value: throughputPending ? null : fmtBytes(volume.upBytes),
-                    ...(throughputPending ? {} : volumeCaveat(volume)),
-                  },
-                  {
-                    // Coverage, not a third volume. These totals sum only the intervals the server
-                    // could place in time, so a window with refusals or gaps reports a floor — and a
-                    // floor presented as a total is the failure this dashboard is built around.
-                    label: 'Buckets measured',
-                    value: throughputPending
-                      ? null
-                      : `${volume.measuredBuckets} / ${volume.measuredBuckets + volume.unmeasuredBuckets}`,
-                    tone: throughputPending ? undefined : volume.unmeasuredBuckets > 0 ? 'warn' : undefined,
-                    hint: throughputPending
-                      ? undefined
-                      : 'Intervals whose bytes the server could place in time, out of the window’s buckets. Unmeasured traffic moved but wasn’t counted.',
-                  },
-                ]}
-              />
-            }
-            views={[
-              {
-                key: 'volume',
-                label: 'Volume',
-                render: () => (
-                  <GuidedChart title="Throughput" copy={THROUGHPUT_COPY}>
-                    <ThroughputChart
-                      buckets={throughput?.buckets ?? []}
-                      from={from}
-                      to={to}
-                      bucketSeconds={bucket}
-                      isPending={throughputPending}
-                    />
-                  </GuidedChart>
-                ),
-              },
-            ]}
-          />
-
-          {/* Dropped whole in compact — the one section whose content is reference rather than a
-              reading, which is also why it is the only `collapsible` one. A verdict that points
-              here leaves compact first, so the anchor still lands (see `EvidenceLink`). */}
-          {compact ? null : (
-          <Section
-            id="path"
-            meta={<StatStrip stats={pathStats(status?.vantage, nowTick)} />}
-            // The one folded section on the page, and the only one whose evidence is mostly
-            // reference: an interface name, a media type and a gateway that have not changed since
-            // the machine was plugged in, under three view tabs. Its headline figures stay drawn
-            // above the fold, and a verdict linking here opens it — see `Section`'s hash listener.
-            collapsible
-            defaultOpen={false}
-            views={[
-              {
-                key: 'vantage',
-                label: 'This machine',
-                render: () => (
-                  <Stack gap="md">
-                    <VantageCard vantage={status?.vantage} now={nowTick} />
-                    <LinkComparison
-                      router={router}
-                      vantage={status?.vantage}
-                      speedTest={status?.lastSpeedTest}
-                      now={nowTick}
-                    />
-                  </Stack>
-                ),
-              },
-              {
-                key: 'link',
-                label: 'Link speed over time',
-                render: () => (
-                  // No range suffix — the sticky header's range control is the single statement of
-                  // the window (see `PageHeader`'s tooltip). This was the last chart title that
-                  // still interpolated it in, reading "Link speed over time · 24h" directly under a
-                  // view tab that already says "Link speed over time".
-                  <GuidedChart title="Link speed over time" copy={LINK_SPEED_COPY}>
-                    <LinkSpeedStrip
-                      vantage={vantageSeries}
-                      from={from}
-                      to={to}
-                      bucketSeconds={bucket}
-                      isPending={seriesPending}
-                    />
-                  </GuidedChart>
-                ),
-              },
-              {
-                key: 'transitions',
-                label: 'Transitions',
-                render: () => (
-                  <Card py="xs" px="sm">
-                    {/* `linkSamplingSince` decides which empty state is true, and the two say
-                        opposite things — so it is passed through even while events exist. */}
-                    <TransitionTimeline
-                      events={events?.events ?? []}
-                      linkSamplingSince={events?.linkSamplingSince ?? null}
-                      isPending={eventsPending}
-                    />
-                  </Card>
-                ),
-              },
-            ]}
-          />
-          )}
-        </Stack>
-      </ChartHoverSync>
+        {/* Dropped whole in compact — the one section whose content is reference rather than a
+            reading, which is also why it is the only `collapsible` one. A verdict that points
+            here leaves compact first, so the anchor still lands (see `EvidenceLink`). */}
+        {compact ? null : (
+        <Section
+          id="path"
+          meta={<StatStrip stats={pathStats(status?.vantage, nowTick)} />}
+          // The one folded section on the page, and the only one whose evidence is mostly
+          // reference: an interface name, a media type and a gateway that have not changed since
+          // the machine was plugged in, under three view tabs. Its headline figures stay drawn
+          // above the fold, and a verdict linking here opens it — see `Section`'s hash listener.
+          collapsible
+          defaultOpen={false}
+          views={[
+            {
+              key: 'vantage',
+              label: 'This machine',
+              render: () => (
+                <Stack gap="md">
+                  <VantageCard vantage={status?.vantage} now={nowTick} />
+                  <LinkComparison
+                    router={router}
+                    vantage={status?.vantage}
+                    speedTest={status?.lastSpeedTest}
+                    now={nowTick}
+                  />
+                </Stack>
+              ),
+            },
+            {
+              key: 'link',
+              label: 'Link speed over time',
+              render: () => (
+                // No range suffix — the sticky header's range control is the single statement of
+                // the window (see `PageHeader`'s tooltip). This was the last chart title that
+                // still interpolated it in, reading "Link speed over time · 24h" directly under a
+                // view tab that already says "Link speed over time".
+                <GuidedChart title="Link speed over time" copy={LINK_SPEED_COPY}>
+                  <LinkSpeedStrip
+                    vantage={vantageSeries}
+                    from={from}
+                    to={to}
+                    bucketSeconds={bucket}
+                    isPending={seriesPending}
+                  />
+                </GuidedChart>
+              ),
+            },
+            {
+              key: 'transitions',
+              label: 'Transitions',
+              render: () => (
+                <Card py="xs" px="sm">
+                  {/* `linkSamplingSince` decides which empty state is true, and the two say
+                      opposite things — so it is passed through even while events exist. */}
+                  <TransitionTimeline
+                    events={events?.events ?? []}
+                    linkSamplingSince={events?.linkSamplingSince ?? null}
+                    isPending={eventsPending}
+                  />
+                </Card>
+              ),
+            },
+          ]}
+        />
+        )}
+      </Stack>
     </Stack>
   )
 }

@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { VX } from 'basalt-ui/charts'
 import { columnFill, foldColumns } from './availability-strip'
-import { foldSourceIndex } from './fold'
 import type { ProbeBucket } from '../lib/types'
 
 function bucket(over: Partial<ProbeBucket> = {}): ProbeBucket {
@@ -123,10 +122,12 @@ describe('foldColumns', () => {
     expect(folded).toHaveLength(2)
     expect(folded[0]?.foldedFrom).toBe(3)
     expect(folded[1]?.foldedFrom).toBe(2)
-    // The precondition `foldSourceIndex` depends on: every source column accounted for.
+    // Every source column accounted for exactly once. This used to be checked through
+    // `foldSourceIndex`, the app-side key map that let a folded strip resolve a key an unfolded
+    // sibling broadcast; basalt-ui 1.15.0's `useChartCursor` resolves domain-aware and the map is
+    // gone. The invariant it depended on is still worth pinning on its own: a fold that dropped or
+    // double-counted a source column would shorten the window without shortening the axis.
     expect(folded.reduce((sum, f) => sum + f.foldedFrom, 0)).toBe(columns.length)
-    const index = foldSourceIndex(columns, folded)
-    expect(columns.every((c) => index.has(c.key))).toBe(true)
   })
 
   /** The tooltip's own arithmetic: `downCycles` and `count` sum across the fold (additive, like a

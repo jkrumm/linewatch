@@ -1,8 +1,7 @@
-import { ChartCard, ChartLegend, MultiLine, ResponsiveChart, VX } from 'basalt-ui/charts'
+import { ChartCard, ChartLegend, MultiLine, VX, useChartSize } from 'basalt-ui/charts'
 import type { SpeedTest } from '../lib/types'
 import { fmtMbps } from '../lib/format'
-import { AXIS_LABEL_PX, fitTickCount, runAxisLabels } from '../lib/axis'
-import { PendingChart } from './pending'
+import { AXIS_LABEL_PX, fitTickCount, runAxisKey, runTickFormat } from '../lib/axis'
 import { useCardTitle, useCompactMode } from '../lib/compact'
 
 /**
@@ -69,15 +68,14 @@ export function SpeedChart({
    * `tests ?? []` drew an axis with no points on it — which on a run-series chart is the claim
    * "no speed test ran in this window", not "nobody has asked yet".
    *
-   * Branched here rather than handed to `MultiLine`'s own `isPending`, even though the kind takes
-   * one as of basalt-ui 1.9.0. This chart wraps the kind in its OWN `ResponsiveChart` (it has to —
-   * `numTicksX` is derived from a measured plot width, see below), so the kind's `ChartFrame`
-   * never mounts until that outer container has been measured, and a pending state that renders
-   * nothing until a `ResizeObserver` fires is one no server-rendered test can observe. Replacing
-   * the whole wrapper achieves what `ChartFrame`'s own gate would — no plot, no legend, a reserved
-   * footprint — and stays visible to the guard.
+   * Handed straight to `MultiLine` now. It used to be branched here, onto an app-side
+   * `PendingChart`, because the kind sat inside this chart's own `ResponsiveChart` and its
+   * `ChartFrame` therefore never mounted until a `ResizeObserver` had fired — invisible to the
+   * server-rendered guard. `ChartFrame` floors its plot rect at `minWidth` (200px) as of 1.15.0,
+   * so it renders `ChartPending` whether or not anything has been measured, and the app-side
+   * scaffolding is gone.
    *
-   * The ref-line legend below is this app's own rather than `ChartFrame`'s, so it needs
+   * The ref-line legend below is this app's own rather than `ChartFrame`'s, so it still needs
    * suppressing explicitly: a dashed "Host link 1000 Mbit" caption over a plot with no runs on it
    * names a ceiling for measurements that are not on screen.
    */
@@ -88,14 +86,19 @@ export function SpeedChart({
   // other chart on the page ran left to right. A reader comparing a dip here against the latency
   // band above was reading two mirrored axes as though they aligned.
   const ordered = tests.toSorted((a, b) => a.ts - b.ts)
-  // Pre-formatted, because `MultiLine` forwards no `tickFormat` to its x-axis and basalt's own
-  // formatter reduces an ISO string to `DD.MM` — a 24 h window drew `01.08` twenty-four times.
-  // See `runAxisLabels` for how collisions are avoided, which matters more here than on a bucketed
-  // chart: run timestamps are whatever the cron fired at, not a grid.
-  const labels = runAxisLabels(ordered.map((t) => t.ts))
-  const points = ordered.map((test, i) => ({ test, label: labels[i] ?? '' }))
+  // The key is the run's identity, never its label — see `runAxisKey`. For two releases this line
+  // built a pre-formatted, collision-broken label instead, because `MultiLine` forwarded no
+  // formatter and the domain value was the only string that reached the axis.
+  const points = ordered.map((test) => ({ test, key: runAxisKey(test.ts, test.id) }))
   const [compact] = useCompactMode()
   const height = compact ? SPEED_HEIGHT_COMPACT : SPEED_HEIGHT
+  // The container's own width, measured here rather than inside a wrapper the kind renders under.
+  // `ResponsiveChart` is gone (1.15.0 has one responsive path, `ChartFrame`, which every kind
+  // composes internally) and `useChartSize` is the shipped hook for a box outside the chart system
+  // that still needs measuring — which this is, for the one reason below: `xTicks` is a COUNT, and
+  // a count that keeps its labels apart can only be derived from a width.
+  const { ref: sizeRef, width } = useChartSize()
+  const plotWidth = Math.max(1, width - VX.margin.left - VX.margin.right)
 
   return (
     <ChartCard
@@ -112,66 +115,66 @@ export function SpeedChart({
       tooltip="Ookla runs, one point each, drawn at equal spacing regardless of the gap between them. Download and upload share one axis."
     >
       {/* `MultiLine` measures its own width but exposes only a tick *count*, so the count has to be
-          derived from a width measured out here — the same wrapper the latency comparison used for
-          the same reason. Left to its default, every one of a 24 h window's runs got a tick and the
-          axis rendered as one unbroken smear of overlapping timestamps. */}
+          derived from a width measured out here. Left to its default, `smartTicks` spaces ticks by
+          `VX.minPxPerTick` (55) — sized for the bare `DD.MM` its own formatter produces, not for
+          the `DD.MM HH:MM` these run labels carry — and every one of a 24 h window's runs got a
+          tick, rendering the axis as one unbroken smear of overlapping timestamps. */}
       {/* See `availability-strip.tsx`'s identical wrapper for why this is a floor, not a height. */}
-      <div style={{ minHeight: height }}>
-        {isPending === true ? (
-          <PendingChart height={height} />
-        ) : (
-          <ResponsiveChart height={height}>
-            {({ width }) => {
-              // The *plot* width, not the container's: `MultiLine` spends `VX.margin` on its axes, and
-              // sizing the tick count off the outer width overestimates by 60 px. Harmless at 1600 px
-              // and not at 390, where it was the difference between four legible timestamps and five
-              // overlapping ones.
-              const plotWidth = Math.max(1, width - VX.margin.left - VX.margin.right)
-              return (
-                <MultiLine
-                  data={points}
-                  chartId="speed-throughput"
-                  ariaLabel="Download against upload in Mbps, one point per speed-test run"
-                  numTicksX={fitTickCount(
-                    points.length,
-                    Math.max(2, Math.floor(plotWidth / AXIS_LABEL_PX)),
-                    plotWidth,
-                  )}
-                  getX={(p) => p.label}
-                  series={[
-                    {
-                      // Accent blue against `VX.line2`, the MID grey — one pair for these two
-                      // concepts wherever they are drawn, here and in the throughput bars. Not
-                      // `VX.line`: at 11.1:1 against the panel it is the brightest thing available
-                      // and makes the secondary series louder than the accent. Not two greys
-                      // either, which is what this chart's own history warns about.
-                      key: 'download',
-                      label: 'Download',
-                      color: VX.accent,
-                      mark: 'line',
-                      getValue: (p) => p.test.downloadMbps,
-                    },
-                    {
-                      key: 'upload',
-                      label: 'Upload',
-                      color: VX.line2,
-                      mark: 'line',
-                      getValue: (p) => p.test.uploadMbps,
-                    },
-                  ]}
-                  refLines={refLines.map((ref) => ({
-                    value: ref.value,
-                    color: ref.color,
-                    dashed: true,
-                  }))}
-                  yDomain="auto"
-                  formatValue={fmtMbps}
-                  height={height}
-                />
-              )
-            }}
-          </ResponsiveChart>
-        )}
+      <div ref={sizeRef} style={{ minHeight: height }}>
+        <MultiLine
+          data={points}
+          chartId="speed-throughput"
+          ariaLabel="Download against upload in Mbps, one point per speed-test run"
+          isPending={isPending === true}
+          // The *plot* width, not the container's: the kind spends its measured margins on the
+          // axes, and sizing the tick count off the outer width overestimates by ~60 px. Harmless
+          // at 1600 px and not at 390, where it was the difference between four legible timestamps
+          // and five overlapping ones. `VX.margin` is only a FLOOR on a measured margin now, so
+          // this is an estimate rather than the exact gutter — one tick either way, never a
+          // clipped label.
+          xTicks={fitTickCount(
+            points.length,
+            Math.max(2, Math.floor(plotWidth / AXIS_LABEL_PX)),
+            plotWidth,
+          )}
+          getX={(p) => p.key}
+          formatX={runTickFormat}
+          series={[
+            {
+              // Accent blue against `VX.line2`, the MID grey — one pair for these two
+              // concepts wherever they are drawn, here and in the throughput bars. Not
+              // `VX.line`: at 11.1:1 against the panel it is the brightest thing available
+              // and makes the secondary series louder than the accent. Not two greys
+              // either, which is what this chart's own history warns about.
+              key: 'download',
+              label: 'Download',
+              color: VX.accent,
+              mark: 'line',
+              getValue: (p) => p.test.downloadMbps,
+              formatValue: fmtMbps,
+            },
+            {
+              key: 'upload',
+              label: 'Upload',
+              color: VX.line2,
+              mark: 'line',
+              getValue: (p) => p.test.uploadMbps,
+              formatValue: fmtMbps,
+            },
+          ]}
+          refLines={refLines.map((ref) => ({
+            value: ref.value,
+            color: ref.color,
+            dashed: true,
+          }))}
+          // PER-SERIES, not `y.format`. An `AxisConfig.format` is the tick formatter AND the
+          // tooltip's — and the unit belongs to the subtitle here, not to every tick (see the
+          // `subtitle` prop above, and the clipped-axis bug its comment records). Measured margins
+          // would now fit `600 Mbps`, so it would no longer clip; it would just say Mbps five times
+          // over a card that already says it once.
+          y={{ domain: 'auto' }}
+          height={height}
+        />
       </div>
       {/* `MultiLine` draws ref lines but names none of them, and an unlabelled rule across a
           throughput chart is an assertion the reader has to guess at. The labels ride here, in

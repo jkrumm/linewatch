@@ -308,6 +308,15 @@ anyone they disagreed.
   outright, `EvidenceLink` **leaves compact** rather than merely scrolling, and
   `Section` re-scrolls on mount while the hash still names it. A verdict that
   points somewhere has to land somewhere.
+- **The range rides basalt-ui's `createSearchParamStore` (`lib/range.ts`), and it
+  is still URL state.** The store only supplies the fallback *under* the URL, so a
+  link to a reading still carries `?range=`; what it adds is that a bare `/` opens
+  on the range this reader last chose, and that `?range=nonsense` falls back
+  instead of throwing a `ZodError` out of `validateSearch` — `z.enum().default()`
+  only defaults an ABSENT key, so a hand-edited URL used to take the page down.
+  `minDuration` stays on Zod and the two compose by spreading: the store is typed
+  `T extends string` over a closed `values` list and cannot hold an open numeric
+  bound.
 - **A chart's axis label and its scale key are two different things, and as of
   basalt-ui 1.17.0 nothing on this page confuses them.** Every chart renders its
   domain through a formatter: the four bucketed ones keep the bucket's ISO start

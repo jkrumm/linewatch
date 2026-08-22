@@ -44,7 +44,7 @@ import { downtimeTint, measuredFraction, type ThresholdTint, worstBucketLoss, wo
 import { coverageKind, fmtCoveragePct } from '../lib/coverage'
 import { speedWindowStats } from '../lib/speed-stats'
 import { unmappedVerdictIds } from '../lib/verdict-section'
-import { RANGE_LABEL, RANGE_OPTIONS, rangeToBucket, rangeToWindow } from '../lib/range'
+import { RANGE_LABEL, type RangeOption, rangeStore, rangeToBucket, rangeToWindow } from '../lib/range'
 import {
   TARGET_LABEL,
   TARGETS,
@@ -83,12 +83,20 @@ const MIN_DURATION_OPTIONS = [
 const HEATMAP_SPAN_MS = 30 * 86_400_000
 const HEATMAP_BUCKET_SECONDS = AVAILABILITY_BUCKET_SECONDS
 
+/**
+ * The half of the search state Zod still owns.
+ *
+ * `range` moved onto basalt-ui's `createSearchParamStore` (`lib/range.ts`), which gives it a
+ * localStorage fallback under the URL and stops an invalid value throwing. `minDuration` cannot
+ * follow it: the store is typed `T extends string` over a closed `values` list, and this is an open
+ * numeric bound. The two compose by spreading in `validateSearch` below — one route, two param
+ * owners, which is the shape the store's own docblock assumes.
+ */
 const SearchSchema = z.object({
-  range: z.enum(RANGE_OPTIONS).default('24h'),
   minDuration: z.coerce.number().int().min(0).default(0),
 })
 
-type SearchParams = z.infer<typeof SearchSchema>
+type SearchParams = { range: RangeOption } & z.infer<typeof SearchSchema>
 
 /**
  * The whole dashboard, on one page, as one scroll — and now at a height a reader will actually
@@ -118,7 +126,10 @@ type SearchParams = z.infer<typeof SearchSchema>
  * so on itself.
  */
 export const Route = createFileRoute('/')({
-  validateSearch: (raw: Record<string, unknown>) => SearchSchema.parse(raw),
+  validateSearch: (raw: Record<string, unknown>): SearchParams => ({
+    ...rangeStore.validateSearch(raw),
+    ...SearchSchema.parse(raw),
+  }),
   loaderDeps: ({ search }: { search: SearchParams }) => ({
     range: search.range,
     minDuration: search.minDuration,
@@ -146,6 +157,10 @@ function DashboardPage() {
   const [compact] = useCompactMode()
   const search = Route.useSearch()
   const navigate = useNavigate()
+  // Write-only: the URL is what this page READS the range from (`search.range`), and the store is
+  // only the fallback `validateSearch` reaches for when the URL has none. Taking the stored value
+  // here as well would be a second source of truth for a fact the router already resolved.
+  const [, persistRange] = rangeStore.useStore()
 
   /**
    * Two clocks, and conflating them is what made this page jump every thirty seconds.
@@ -296,7 +311,10 @@ function DashboardPage() {
     <Stack gap={compact ? 'sm' : 'lg'}>
       <PageHeader
         range={search.range}
-        onRangeChange={(range) => setSearch({ range })}
+        onRangeChange={(range) => {
+          persistRange(range)
+          setSearch({ range })
+        }}
         version={__APP_VERSION__}
         live={
           status === undefined

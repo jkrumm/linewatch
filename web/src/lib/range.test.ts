@@ -1,5 +1,13 @@
 import { describe, expect, test } from 'bun:test'
-import { PROBE_CYCLE_MS, RANGE_OPTIONS, isRangeOption, rangeToBucket, rangeToWindow, type RangeOption } from './range'
+import {
+  PROBE_CYCLE_MS,
+  RANGE_OPTIONS,
+  isRangeOption,
+  rangeStore,
+  rangeToBucket,
+  rangeToWindow,
+  type RangeOption,
+} from './range'
 
 /** A `now` deliberately off the cycle boundary — 17.123 s into a cycle. */
 const NOW = 1_800_000_017_123
@@ -97,5 +105,20 @@ describe('rangeToBucket', () => {
       expect(points).toBeGreaterThanOrEqual(60)
       expect(points).toBeLessThanOrEqual(432) // 'all' at a daily bucket is 365 points
     }
+  })
+})
+
+describe('rangeStore.validateSearch', () => {
+  test('takes a valid range straight out of the URL', () => {
+    expect(rangeStore.validateSearch({ range: '7d' })).toEqual({ range: '7d' })
+  })
+
+  test('falls back instead of throwing on a range the URL invented', () => {
+    // The behaviour change this store bought. `z.enum(RANGE_OPTIONS).default('24h')` only defaults an
+    // ABSENT key — a present-but-invalid one threw a ZodError out of `validateSearch`, so a
+    // hand-edited or stale URL took the whole dashboard down rather than showing the default window.
+    expect(rangeStore.validateSearch({ range: 'nonsense' })).toEqual({ range: '24h' })
+    expect(rangeStore.validateSearch({ range: 42 })).toEqual({ range: '24h' })
+    expect(rangeStore.validateSearch({})).toEqual({ range: '24h' })
   })
 })

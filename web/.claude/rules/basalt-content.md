@@ -208,6 +208,10 @@ axes AND together — matching the existing multi-facet `filterFn` semantics in
 
 **Filter state is URL state.** Single-select axes (category) use `createSearchParamStore`;
 multi-select axes (tags) use `createMultiSearchParamStore` — both from `basalt-ui/router-tanstack`.
+That holds for the enum-shaped axes an article filter has. **It is not a general URL-state mandate**:
+a route whose `validateSearch` is a real Zod object is hand-written, and `createSearchSchemaStore`
+is planned, not shipped — see `basalt-router.md` → "validateSearch".
+
 Two stores compose on one route by spreading both `validateSearch` results:
 
 ```ts

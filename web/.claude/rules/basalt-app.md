@@ -96,6 +96,25 @@ refuses on a commented config rather than deleting the comments.
 Run `basalt-ui doctor` afterwards to confirm the wiring took. A check that cannot RUN is reported as
 `SKIPPED` and exits non-zero on its own — "All checks passed" is only printable when every check ran.
 
+### The lefthook preset overrides YOU, not the other way round
+
+New in 1.20.1: `doctor`'s `lefthook-preset` check hard-fails when the repo-root lefthook config
+`extends` a path that does not resolve. That state is otherwise invisible — lefthook merges a
+missing target into **zero** commands and exits 0, so `lefthook dump` looks clean and the repo has
+no pre-commit gate with nothing anywhere saying so. It warns on a lefthook.yml wiring its own hooks,
+and is n/a with no lefthook at all. `sync` reports the same seam, since it is the command an upgrade
+actually runs and neither file is one basalt owns.
+
+**An `extends` target WINS on a colliding key.** Declare `pre-commit.commands.oxfmt.run` (or
+`glob:`) in your own file and the preset's value is what runs — yours is discarded silently. Only
+keys the preset does not define merge in. So `env:`, `exclude:`, `skip:` and a differently-named
+command of your own are yours; `run:` and `glob:` on a shipped command are not. The sanctioned seam
+is therefore `BASALT_BIN`: the guard job runs `${BASALT_BIN:-bunx --no-install basalt-ui}`, and the
+shell default is the whole reason the seam exists at all. `init` renders it with the resolved local
+bin. `--no-install` is deliberate — a bare `bunx basalt-ui` in a repo where basalt is not resolvable
+from the root silently downloads a different copy from npm and gates the commit with a version
+nobody pinned.
+
 ## `index.html` and `public/` are scanned
 
 `check-theme` resolves `.html` / `.webmanifest` / `.json` as markup (colour kinds only), and each
@@ -132,6 +151,28 @@ they track the palette automatically. It also injects the `apple-mobile-web-app-
 `mobile-web-app-capable` meta set, a `darkreader-lock` meta (default on), a viewport tag with
 `viewport-fit=cover` (skipped when the consumer's own `index.html` already declares one), and
 site-wide OG/Twitter defaults from `options.seo`.
+
+**Set `colorScheme` to whatever the app passes as `defaultColorScheme`** — `'dark'` (the default),
+`'light'`, `'auto'` (declares `color-scheme: light dark` and picks the pre-boot background off
+`prefers-color-scheme`), or `false` (paint the background, declare no `color-scheme`).
+
+```ts
+plugins: [react(), ...basaltAppPlugin({ name: 'Argo', colorScheme: 'auto' })]
+```
+
+Before 1.20.1 the anti-FOUC rule emitted `html{color-scheme:dark}` **unlayered**, which outranks
+Mantine's own `@layer mantine` declaration regardless of specificity — a light-scheme consumer got
+dark scrollbars, dark `<select>` popups and dark date pickers permanently, with no opt-out. The rule
+is now scoped to `html:not([data-mantine-color-scheme])`, so it expires the instant MantineProvider
+resolves the real scheme. A mismatched `colorScheme` is therefore a flash of the wrong surface, not
+a stuck one.
+
+**The plugin hoists your `<meta charset>`.** Every injected tag defaults to `head-prepend`, which
+landed ~20 tags ahead of the consumer's own encoding declaration — measured at byte 1653 on a
+realistic shell, past the 1024-byte window the HTML spec gives it, with no consumer-side fix
+available. The plugin now re-emits the declaration as its own first head-prepend tag (46 bytes after
+the fix) and runs `order: 'pre'` so nothing else can land ahead of it. The legacy `http-equiv` form
+is detected and left verbatim.
 
 Icons are **bring-your-own** — basalt-ui takes no `sharp`/image-processing dependency. The plugin
 expects these filenames under `public/` (or `icons.dir` if customized):

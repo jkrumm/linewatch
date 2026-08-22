@@ -43,33 +43,76 @@ The scan reaches slightly beyond `roots`: each root's PARENT contributes its `in
 meta and a webmanifest's `background_color` actually live. `.json` is never blanket-scanned — name a
 design-surface JSON in `basalt.include`, the only route to one.
 
-## `theme-allow` — the 1.20.0 contract
+## `theme-allow` — the 1.20.1 contract
 
-Scope it. `theme-allow <rule-id> — <reason>` waives that ONE kind; the id is a guard kind
-(`raw-surface`, `inline-spacing`, …) or an oxlint plugin rule (`hand-rolled-plot`,
-`raw-scroll-container`, …), with or without the `basalt/` prefix.
+The full grammar, in both engines:
+
+```text
+theme-allow                                  → this node/line, EVERY rule   (reports theme-allow-unscoped)
+theme-allow <id>[, <id>…] [— <why>]          → this node/line, those rules  (unscoped without a why)
+theme-allow-file <id>[, <id>…] — <why>       → the WHOLE FILE, those rules; a bare one waives NOTHING
+"basalt:theme-allow[-file]": "<id>… — <why>" → the same two, for JSON / .webmanifest
+```
+
+An id is a guard kind (`raw-surface`, `inline-spacing`, …) or an oxlint plugin rule
+(`hand-rolled-plot`, `raw-scroll-container`, …), with or without the `basalt/` prefix.
 
 ```tsx
 // theme-allow raw-surface — third-party widget needs a literal corner
 <Widget style={{ borderRadius: 3 }} />
 ```
 
-- **A bare `theme-allow` still waives everything**, so no upgrade takes a build down over comment
-  placement — but it now reports `theme-allow-unscoped` (`warn` for one minor, then `error`).
-  Rescope the ones you have; that is the whole migration.
+- **An annotation must START its comment** — after `//`, `/*`, `<!--`, a block-comment gutter `*`,
+  or nothing but whitespace. Before 1.20.1 any comment that merely _mentioned_ the token parsed as
+  the bare blanket form and switched every rule off on the line below: linewatch documented its own
+  waivers in a docblock and thereby disarmed the file. Prose about the escape hatch no longer waives
+  anything; everything a consumer actually writes still qualifies.
+- **File scope is spelled, not inferred.** `theme-allow-file <id>… — <why>`, anywhere in the file.
+  Plain `theme-allow` is the node/line waiver in both engines. At 1.20.0 the two halves of the
+  contract intersected at exactly one legal shape and that shape was whole-file — naming a rule and
+  giving a reason was read as a file declaration, which is why per-node scoping did not actually
+  ship. **This is the consumer break in 1.20.1**: move each existing file declaration one word.
+- **A bare `theme-allow` still waives everything on its placement** but reports
+  `theme-allow-unscoped` (`warn` for one minor, then `error`). A bare `theme-allow-file` waives
+  nothing at all — whole-file blanket immunity off one unnamed comment is the thing this contract
+  exists to price.
 - **Spell the id right — a typo waives nothing.** A word in the id slot that names no rule is
   recorded as unknown and suppresses nothing; the annotation covers exactly the ids it got right.
-  Only a genuinely bare `theme-allow` is the blanket form. Because the id slot is read strictly, a
-  prose reason has to be introduced by a separator: `theme-allow: <why>` or
-  `theme-allow <id> — <why>`, never `theme-allow <why>`.
+  Because the id slot is read strictly, a prose reason has to be introduced by a separator:
+  `theme-allow: <why>` or `theme-allow <id> — <why>`, never `theme-allow <why>`.
+- **JSON and `.webmanifest` get a member key**, since they have been scanned since 1.20.0 and cannot
+  hold a comment — their findings were unwaivable and the printed remedy prescribed something
+  impossible. `"basalt:theme-allow-file": "raw-hex — a PWA manifest theme_color must be a literal"`
+  carries the same grammar. For a manifest the first remedy is `basaltAppPlugin`, not a waiver: a
+  hand-copied hex drifts from the palette.
 - **Three placements work and both engines agree on all three**: the reported line, a comment-ONLY
   line directly above it (the only form JSX can express — the reported line is usually a multi-line
   opening tag or a `{expr}` child), and in CSS a trailing annotation reaching back over the
   declaration it terminates. The third is what survives the shipped `oxfmt` reflowing a long
   `background-color` so the hex lands ABOVE the comment.
-- **`basalt/hand-rolled-plot` no longer grants whole-file immunity** off whichever comment happened
-  to sit on the first assembly node. Every node is waived on its own; a file-scoped exception needs
-  a written declaration that both names the rule and gives a reason, anywhere in the file.
+- **A comment-only annotation reaches the first CODE line below it**, walking through the rest of
+  its own comment block. A wrapped reason, or a docblock's `*/`, used to absorb the waiver so the
+  natural shape silently waived nothing — argo hit that three times in one upgrade. A blank line
+  still ends the block; that is how you say "this comment is not about the next statement".
+- **`basalt/hand-rolled-plot` grants whole-file immunity only through `theme-allow-file`.** Every
+  assembly node is otherwise waived on its own.
+
+### Audit them: `basalt-ui check-theme --audit-allows`
+
+Reports instead of scanning. For every annotation and every `basalt.exemptRules` entry it re-runs
+the guard with that one occurrence neutralized, so the verdict comes from the scan rather than from
+parsing the waiver's text:
+
+```text
+src/shell/x.tsx:42    suppresses raw-surface@43
+src/theme/y.ts:18     SUPPRESSES NOTHING — dead, delete it
+src/charts/z.tsx:7    scoped to hand-rolled-plot — not a check-theme kind, so this audit cannot judge it
+raw-hex: "site.webmanifest"  suppresses findings in public/site.webmanifest — <the recorded reason>
+```
+
+It closes with a `live / dead / outside reach / unaccountable` tally and **exits 1 on a dead
+waiver**, so it wires into CI. A waiver that stopped covering anything is not harmless: it silently
+covers the next real finding on that line. Basalt's own source had one; it is deleted.
 
 ### New in 1.20.0 — five guard kinds, all `warn` for one minor
 
@@ -91,9 +134,23 @@ Two new oxlint rules ship at `warn` alongside them: **`basalt/shadow-basalt-expo
 Round 4 swept seven consumer repos: every gate green, and ~15 independently re-rolled copies of
 components basalt already ships (`StatCard` in 4 of 4 apps, `EmptyState`, a 266-line hand-rolled
 `AppShell`). A fork written by a token-fluent author uses exactly the right tokens, so no palette
-guard can ever see it. **`basalt/shadow-basalt-export` is the cheap detector** — it warns when a
-local component's name collides with a live basalt export, read from the real shipped barrel. The
-habit it stands in for: check whether basalt already ships the thing before building it.
+guard can ever see it. **`basalt/shadow-basalt-export` is a cheap detector, not a safety net** — the
+rule says so in its own message: it is a **tripwire, not coverage**, and silence is not evidence that
+nothing is forked.
+
+- **Exact name match only** — the one limit that is structural. Round 5 confirmed the miss rate:
+  linewatch's forks are named `Cell` and `Box`, rb's is `Stat`. Rename the fork and the rule goes
+  quiet, which is what a fork's author naturally does.
+- **Scope: everything importable.** Since 1.20.1 it reads all nine published barrels, not just
+  `dist/index.d.ts` — so the `basalt-ui/charts` layer, which is where forks actually live, is finally
+  covered. Names a barrel merely re-exports from a third party are skipped: `./charts` passes
+  `Bar` / `Line` / `Pie` straight through from `@visx/shape`, and a local `Bar` is not a fork of
+  anything basalt wrote.
+
+So the renamed majority goes unreported. **Detection does not substitute for expressiveness**: a
+composite that cannot express a common case gets routed around by compliant-looking code, and a
+name-collision rule only catches the authors who did not bother to rename. The habit it stands in
+for is the actual control: check whether basalt already ships the thing before building it.
 
 ## Filled surfaces — the fill band
 

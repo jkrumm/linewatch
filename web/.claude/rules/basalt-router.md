@@ -65,11 +65,58 @@ function ResourcePage() {
 
 ## validateSearch
 
+**Scope of the `createSearchParamStore` mandate — read this before reaching for the store.**
+`createSearchParamStore` covers ONE param whose values are a string enum
+(`{ key, param, values, fallback }`); `createMultiSearchParamStore` is the multi-select of the same
+shape. Where that fits — a range picker, a tab, a single filter — it is **mandatory**: use it, don't
+hand-roll persistence.
+
+Where it doesn't fit, it doesn't apply. A route whose `validateSearch` is a real Zod object (10+
+keys, nested shapes, cross-field defaults) cannot be expressed through the store at all — three
+consumers hit that wall. **Hand-write `validateSearch` there**, per the rules below. There is no
+schema-backed store: `createSearchSchemaStore` is planned and **not shipped** — do not write code
+against it.
+
 - Always parse with the schema-function form: `(raw) => SearchSchema.parse(raw)`.
 - Default values live in the schema (`.default()`), not in the component.
 - Access via `const search = Route.useSearch()`.
 - Update via `navigate({ search: { window: 'all', from: undefined, to: undefined } })` — prefer plain
   objects over reducers to avoid `| undefined` assignability errors when the schema has defaults.
+
+### Wire the reader, or the store does nothing (1.20.1)
+
+`validateSearch` is only half the store. It restores the value when you arrive with **no** param —
+it cannot do anything about a nav link that declares the param itself, and a link written
+`search: { window: '30d' }` at module scope pins the fallback on every click. That is not
+hypothetical: the reference consumer adopted the store in three features, hand-rolled the
+persistence in all three, and its reader had **zero** call sites. "Remember my window" had never
+once worked, with every individual piece looking correct.
+
+`store.linkSearch` is the fix, and it is on the object the factory already returns:
+
+```ts
+const dashboardRange = createSearchParamStore({
+  key: 'dashboard-range',
+  param: 'range',
+  values: ['1d', '7d', '30d'] as const,
+  fallback: '30d',
+})
+// → { validateSearch, useStore, readStored, linkSearch }
+
+link: linkOptions({ to: '/dashboard', search: dashboardRange.linkSearch })
+```
+
+**Pass it by reference, never call it.** It is the click-time thunk
+(`() => ({ [param]: readStored() ?? fallback })`); `<Link>` re-evaluates it on every click, so
+arriving from outside the sub-tree restores the last selection. A value computed once at module
+scope goes stale immediately. Hand-rolling the thunk over `readStored()` still works and is what
+you need when the link carries other params too.
+
+In dev, `validateSearch` warns once per store when the URL pins the fallback, a different value is
+persisted, and neither public reader has ever been called — the one combination that has exactly
+this cause. Silent in production, silent on a deliberate deep link.
+`createMultiSearchParamStore` gets `linkSearch` but no warning: an empty array in the URL is
+indistinguishable from an absent param, so a literal link there still restores correctly.
 
 ## loaderDeps
 
@@ -163,6 +210,7 @@ closing a cycle.
 ```tsx
 import { linkOptions } from '@tanstack/react-router'
 import { defineNav, navGroup } from 'basalt-ui/router-tanstack'
+import { garminWindow } from './search-params' // a createSearchParamStore
 
 const ICON = 18
 
@@ -175,7 +223,9 @@ export const NAV = defineNav({
         short: 'Garmin', // bar/menu label — keep it ≤ 10 chars
         mobile: 'tab', // give this destination its own slot on the mobile bar
         icon: <IconHeartbeat size={ICON} />,
-        link: linkOptions({ to: '/garmin-health', search: { window: '30d' } }),
+        // NOT `search: { window: '30d' }` — a module-scope literal pins the fallback on
+        // every click and silently overrides the store. Pass the reader by reference.
+        link: linkOptions({ to: '/garmin-health', search: garminWindow.linkSearch }),
       },
       {
         id: 'reading',
@@ -203,9 +253,11 @@ Rules that are not stylistic:
   `label`, `short`, `icon`, `mobile`, `disabled` and `exact` ride outside it. A flat shape
   (`{ id, label, to }`) validates `to` by ASSIGNABILITY, which does no excess-property checking, so
   a typo'd metadata key would compile silently. A top-level `to:` is a compile error by design.
-- **`search` may be a thunk** — `search: () => ({ date: format(new Date(), 'yyyy-MM-dd') })`
-  compiles without `as const` and re-evaluates at click time, so "today" never goes stale in a
-  long-lived tab.
+- **`search` may be a thunk, and for a store-backed param it MUST be** —
+  `search: () => ({ date: format(new Date(), 'yyyy-MM-dd') })` compiles without `as const` and
+  re-evaluates at click time, so "today" never goes stale in a long-lived tab. A param backed by
+  `createSearchParamStore` takes the store's own `linkSearch` (see "validateSearch" above); a
+  literal there is the one shape that defeats the store.
 - **Nesting is `children`**, and nested destinations are indexed by id just like top-level ones.
 - **`NavItemMeta`**'s `mobile` field places the destination on the bar: `'tab'` (own slot),
   `'more'` (the default — reachable through the More overlay) or `'hidden'`. A group claims a slot
@@ -237,7 +289,7 @@ unreadable in a 56px tab.
 `router.navigate()` or `redirect()` instead of restating the route and its default search:
 
 ```ts
-throw redirect(navTarget(NAV, 'garmin')) // exactly { to: '/garmin-health', search: { window: '30d' } }
+throw redirect(navTarget(NAV, 'garmin')) // exactly { to: '/garmin-health', search: garminWindow.linkSearch }
 ```
 
 **`flattenNav`** walks the definition depth-first (parent, then children), tagging each destination

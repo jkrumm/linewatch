@@ -57,12 +57,14 @@ radial/matrix shape, is not optional — two `basalt` oxlint plugin rules
   `AxisRightNumeric`, `AxisBottomDate`, `HoverOverlay`, `Crosshair`) in a file that does not
   compose `CartesianChart`. **Since 1.20.0 every assembly node is reported and waived on its own**
   — one comment no longer grants the whole file permanent immunity, which is how a 604-line chart
-  file went unpoliced. A genuinely non-single-plot shape (multi-pane, radial, matrix) declares
-  itself with a written file declaration — a `theme-allow` that both names the rule and gives a
-  reason, anywhere in the file (`theme-allow hand-rolled-plot — two panes over one x scale`);
-  `DualPanel` carries the repo's only one. The file that DEFINES `CartesianChart` is exempt
-  definitionally (detected by declaration, not by path), since a rule saying "compose X" cannot
-  fire inside X.
+  file went unpoliced. To waive ONE node, put `theme-allow hand-rolled-plot — <why>` on it (or on a
+  comment-only line above it). A genuinely non-single-plot shape (multi-pane, radial, matrix)
+  declares the whole file with `theme-allow-file hand-rolled-plot — two panes over one x scale`,
+  anywhere in it; `DualPanel` carries the repo's only one. **`theme-allow-file` is the 1.20.1
+  spelling** — at 1.20.0 a node-scoped annotation was silently promoted to a file declaration, so
+  per-node scoping was not expressible; move the one word. The file that DEFINES `CartesianChart` is
+  exempt definitionally (detected by declaration, not by path), since a rule saying "compose X"
+  cannot fire inside X.
 - **`basalt/chart-legend-literal`** — a hand-written array literal passed to `ChartLegend`'s
   `items`; **since 1.20.0 also a `.map()` over a non-`series` array**, because deriving from AN
   array is not deriving from THE series. The legend must come from the same `series` the chart
@@ -93,12 +95,13 @@ ships no map kind.
 - **Want `@visx/geo` anyway?** Install it yourself — basalt doesn't pin it — and keep it under a
   `charts/` segment like every other visx import, same as any bespoke chart.
 - **Style map chrome with `--vx-*` tokens** (`VX.*`/`alpha()`) so it matches the rest of the app.
-- **The guard trap:** `check-theme`'s `inline-spacing` kind is a per-line regex over raw source, not
-  an AST pass — it flags any `padding:`/`gap:`/`margin:` followed by a number in _any_ object
-  literal, in any file. A map's pixel geometry (`fitBounds({ padding: 48 })`, marker offsets) trips
-  it even though it isn't spacing, and hoisting the value to a module-scope const doesn't help — the
-  regex sees the line, not the binding. Scope a `theme-allow inline-spacing — map geometry` comment
-  to it; that's the sanctioned answer, not a bug to file.
+- **The guard trap, narrowed at 1.20.1:** `check-theme`'s `inline-spacing` kind is a per-line regex
+  over raw source, not an AST pass. A **unitless** number now only reports inside a style-object
+  context (a `style=`/`sx=`/`css=` attribute, or a const whose name or type says styles), so a map's
+  pixel geometry — `fitBounds({ padding: 48 })`, marker offsets — no longer trips it: an options bag
+  is not CSS. A value carrying a unit is CSS wherever it was written and still reports. Where it
+  does fire on genuine map chrome, scope a `theme-allow inline-spacing — map geometry` comment to
+  it; that's the sanctioned answer, not a bug to file.
 
 ## Every chart has
 

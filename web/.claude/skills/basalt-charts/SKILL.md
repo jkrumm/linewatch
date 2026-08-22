@@ -210,9 +210,11 @@ import { ChartCursorScope } from 'basalt-ui/charts'
   `AxisLeftNumeric` / `AxisRightNumeric` / `AxisBottomDate` (escape via `theme-allow`).
 - **No hand-rolled plot assembly.** `basalt/hand-rolled-plot` fails the build on a chart-assembly
   primitive (`AxisLeftNumeric`, `AxisRightNumeric`, `AxisBottomDate`, `HoverOverlay`, `Crosshair`)
-  rendered in a file that doesn't compose `CartesianChart`. Escape: a `theme-allow` comment on the
-  first such site — how a genuinely non-single-plot shape (`DualPanel`, `Heatmap`, `Donut`) declares
-  itself. The file that defines `CartesianChart` is exempt definitionally.
+  rendered in a file that doesn't compose `CartesianChart`, per NODE. Escape:
+  `theme-allow hand-rolled-plot — <why>` on the one node, or `theme-allow-file hand-rolled-plot —
+<why>` anywhere in the file — how a genuinely non-single-plot shape (`DualPanel`, `Heatmap`,
+  `Donut`) declares itself. `-file` is the 1.20.1 spelling and it is required. The file that defines
+  `CartesianChart` is exempt definitionally.
 - **No hand-authored legends.** `basalt/chart-legend-literal` fails the build on a hand-written
   array literal passed to `ChartLegend`'s `items` — derive it from the same `series` the chart draws
   (`deriveLegend`, or let `ChartFrame`/`CartesianChart` do it) so it can't name a series the plot no

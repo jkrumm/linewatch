@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { foldColumns, foldStates, summariseLink } from './link-speed-strip'
+import { foldBands } from 'basalt-ui/charts'
+import { type Column, foldStates, mergeColumns, summariseLink } from './link-speed-strip'
 import type { LinkBucketState } from '../lib/vantage'
 
 const STEADY_1000: LinkBucketState = { kind: 'steady', mbit: 1000 }
@@ -9,9 +10,20 @@ const NO_VANTAGE_7: LinkBucketState = { kind: 'no-vantage', cycles: 7 }
 const UNMEASURED: LinkBucketState = { kind: 'unmeasured' }
 const TRANSITION: LinkBucketState = { kind: 'transition', mbits: [100, 1000] }
 
-function column(key: string, state: LinkBucketState) {
-  return { key, bucketStart: Number(key), state }
+/** A slot as `LinkSpeedStrip` constructs it — `foldedFrom`/`unmeasuredMembers` ride on the datum
+ * from construction, because `getBand` never sees the fold's own bookkeeping. */
+function column(key: string, state: LinkBucketState): Column {
+  return {
+    key,
+    bucketStart: Number(key),
+    state,
+    foldedFrom: 1,
+    unmeasuredMembers: state.kind === 'unmeasured' ? 1 : 0,
+  }
 }
+
+/** The grouping half is basalt's; only the merge is ours. */
+const fold = (columns: Column[], cap: number) => foldBands(columns, cap, mergeColumns)
 
 /**
  * The verdict line above the strip. It exists because this chart's normal state is a flat band
@@ -56,13 +68,19 @@ describe('summariseLink', () => {
 
 describe('foldStates', () => {
   test('any member already a transition widens the mbit set and stays a transition', () => {
-    expect(foldStates([TRANSITION, STEADY_1000])).toEqual({ kind: 'transition', mbits: [100, 1000] })
+    expect(foldStates([TRANSITION, STEADY_1000])).toEqual({
+      kind: 'transition',
+      mbits: [100, 1000],
+    })
   })
 
   /** The renegotiation is inside the folded span even though no single source bucket straddled it —
    * two DISAGREEING steady readings must not average to a third speed nobody ever ran at. */
   test('all steady but disagreeing on mbit is also a transition, not an average', () => {
-    expect(foldStates([STEADY_1000, STEADY_100])).toEqual({ kind: 'transition', mbits: [100, 1000] })
+    expect(foldStates([STEADY_1000, STEADY_100])).toEqual({
+      kind: 'transition',
+      mbits: [100, 1000],
+    })
   })
 
   test('all steady and agreeing folds to steady at that one speed', () => {
@@ -72,7 +90,10 @@ describe('foldStates', () => {
   /** `no-vantage` cycles sum across the fold — `unmeasured` members contribute nothing, since they
    * were never cycled at all, and must not be counted as cycles that ran but reported no speed. */
   test('any no-vantage member (with no steady/transition) folds to no-vantage, summing cycles', () => {
-    expect(foldStates([NO_VANTAGE_5, NO_VANTAGE_7, UNMEASURED])).toEqual({ kind: 'no-vantage', cycles: 12 })
+    expect(foldStates([NO_VANTAGE_5, NO_VANTAGE_7, UNMEASURED])).toEqual({
+      kind: 'no-vantage',
+      cycles: 12,
+    })
   })
 
   test('every member unmeasured folds to unmeasured', () => {
@@ -80,9 +101,9 @@ describe('foldStates', () => {
   })
 })
 
-describe('foldColumns', () => {
+describe('mergeColumns, through foldBands', () => {
   test('[steady, unmeasured, unmeasured] carries unmeasuredMembers 2, not a collapse to fully-measured', () => {
-    const [folded] = foldColumns(
+    const [folded] = fold(
       [column('0', STEADY_1000), column('1', UNMEASURED), column('2', UNMEASURED)],
       1,
     )
@@ -94,20 +115,29 @@ describe('foldColumns', () => {
   })
 
   test('[unmeasured, unmeasured, unmeasured] is wholly unmeasured', () => {
-    const [folded] = foldColumns([column('0', UNMEASURED), column('1', UNMEASURED), column('2', UNMEASURED)], 1)
+    const [folded] = fold(
+      [column('0', UNMEASURED), column('1', UNMEASURED), column('2', UNMEASURED)],
+      1,
+    )
     expect(folded?.foldedFrom).toBe(3)
     expect(folded?.unmeasuredMembers).toBe(3)
     expect(folded?.state).toEqual({ kind: 'unmeasured' })
   })
 
   test('[steady, steady, steady] carries unmeasuredMembers 0', () => {
-    const [folded] = foldColumns([column('0', STEADY_1000), column('1', STEADY_1000), column('2', STEADY_1000)], 1)
+    const [folded] = fold(
+      [column('0', STEADY_1000), column('1', STEADY_1000), column('2', STEADY_1000)],
+      1,
+    )
     expect(folded?.unmeasuredMembers).toBe(0)
   })
 
   /** The mirror lie: a mostly-measured fold must not report itself wholly unmeasured. */
   test('a 2-of-3-measured fold does not report itself wholly unmeasured', () => {
-    const [folded] = foldColumns([column('0', STEADY_1000), column('1', STEADY_1000), column('2', UNMEASURED)], 1)
+    const [folded] = fold(
+      [column('0', STEADY_1000), column('1', STEADY_1000), column('2', UNMEASURED)],
+      1,
+    )
     expect(folded?.unmeasuredMembers).toBe(1)
     expect(folded?.state).toEqual({ kind: 'steady', mbit: 1000 })
   })
@@ -120,7 +150,7 @@ describe('foldColumns', () => {
       column('3', STEADY_1000),
       column('4', STEADY_1000),
     ]
-    const folded = foldColumns(columns, 2)
+    const folded = fold(columns, 2)
     expect(folded).toHaveLength(2)
     expect(folded[0]?.foldedFrom).toBe(3)
     expect(folded[1]?.foldedFrom).toBe(2)
@@ -130,6 +160,6 @@ describe('foldColumns', () => {
   })
 
   test('a non-positive cap folds nothing', () => {
-    expect(foldColumns([column('0', STEADY_1000)], 0)).toEqual([])
+    expect(fold([column('0', STEADY_1000)], 0)).toEqual([])
   })
 })

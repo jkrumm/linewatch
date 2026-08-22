@@ -1,7 +1,15 @@
 import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ChartTooltipFloat, Group, TooltipBody, TooltipHeader, VX, alpha } from 'basalt-ui/charts'
-import { HatchPattern, hatchFill } from './hatch'
+import {
+  ChartTooltipFloat,
+  Group,
+  HatchPattern,
+  TooltipBody,
+  TooltipHeader,
+  VX,
+  alpha,
+  hatchFill,
+} from 'basalt-ui/charts'
 
 /**
  * What a cell is, which is the whole reason this grid is bespoke rather than basalt-ui's shipped
@@ -102,7 +110,10 @@ export function CategoryGrid({
   // matrix has none of. `ChartTooltipFloat` takes a plain viewport anchor and owns the measuring,
   // flipping and clamping that `useChartTooltip` used to do here — so what is left is two pieces of
   // state, which is less than the hook cost.
-  const [hovered, setHovered] = useState<{ cell: GridCell; anchor: { x: number; y: number } } | null>(null)
+  const [hovered, setHovered] = useState<{
+    cell: GridCell
+    anchor: { x: number; y: number }
+  } | null>(null)
   const hide = useCallback(() => setHovered(null), [])
   const show = useCallback(
     (cell: GridCell, event: ReactPointerEvent<SVGRectElement>) =>

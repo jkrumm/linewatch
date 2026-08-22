@@ -6,28 +6,40 @@ import type { ProbeBucketSeconds } from './types'
  * `DD.MM HH:MM` measures ~72px at the 11px axis font, and basalt's own `smartTicks` spaces ticks by
  * `VX.minPxPerTick`, which is 55 — sized for the bare `DD.MM` its formatter used to produce. Left at
  * 55 the richer label overlaps its neighbour at every single tick, which is measurably worse than
- * the repeated-date axis it replaced. This is that constant, corrected for the label actually drawn.
+ * the repeated-date axis it replaced. This is that constant, corrected for the label actually drawn,
+ * and it is now `axisTickValues`'s default alone: the strips' plot insets are the framework's
+ * measured gutters as of 1.23.0, and nothing derives a tick COUNT from a width any more.
  */
 export const AXIS_LABEL_PX = 96
 
 /**
  * Which of a chart's category values get a tick, given the axis width.
  *
- * The values are DOMAIN values, not labels — on the four bucketed charts that is the bucket's ISO
- * start, which `AxisBottomDate` renders through `bucketTickFormat`. `minPxPerTick` still measures
- * the *drawn* label, which is why it stays `AXIS_LABEL_PX` and not the width of an ISO string:
- * spacing is a question about what the reader sees, not about what the scale holds.
+ * **Every chart on this page passes this, and passes it the same way**: as `xTickValues`, the seam
+ * basalt-ui 1.23.0 added to `CartesianChart`, `MultiLine` and both band kinds. Its shape is that
+ * seam's shape — `(keys, plotWidth) => keys` — so it is handed straight to the prop rather than
+ * wrapped, and the width is the chart's OWN resolved plot rect rather than an estimate.
  *
- * Deliberately not `smartTicks`: that helper appends the final value unconditionally, so the last
- * two ticks land wherever the step happens to leave them — on a 24 h window that printed
- * `01.08 15:10` and `01.08 15:20` on top of each other at the right edge. Here the final value is
- * included only when it clears the previous tick by a full label width, because a legible axis that
- * omits its last gridline is strictly better than one whose last two labels are unreadable.
+ * The values are DOMAIN values, not labels — on the bucketed charts that is the bucket's ISO start,
+ * rendered through `bucketTickFormat`. `minPxPerTick` still measures the *drawn* label, which is
+ * why it stays `AXIS_LABEL_PX` and not the width of an ISO string: spacing is a question about what
+ * the reader sees, not about what the scale holds.
+ *
+ * Deliberately not `smartTicks`, and not a tick COUNT either: both append the final value
+ * unconditionally, so the last two ticks land wherever the step happens to leave them — on a 24 h
+ * window that printed `01.08 15:10` and `01.08 15:20` on top of each other at the right edge, at
+ * every count rather than at an unlucky one. Here the final value is included only when it clears
+ * the previous tick by a full label width, because a legible axis that omits its last gridline is
+ * strictly better than one whose last two labels are unreadable.
  *
  * Evenly spaced from the start otherwise, so the ticks stay on round-ish positions rather than
  * drifting to fit the end.
  */
-export function axisTickValues<T>(values: readonly T[], widthPx: number, minPxPerTick = AXIS_LABEL_PX): T[] {
+export function axisTickValues<T>(
+  values: readonly T[],
+  widthPx: number,
+  minPxPerTick = AXIS_LABEL_PX,
+): T[] {
   if (values.length === 0) return []
   const maxTicks = Math.max(2, Math.floor(widthPx / minPxPerTick))
   if (values.length <= maxTicks) return [...values]
@@ -47,47 +59,6 @@ export function axisTickValues<T>(values: readonly T[], widthPx: number, minPxPe
 }
 
 /**
- * A tick count for `xTicks` whose final label will not crowd its neighbour.
- *
- * `CartesianChart` (and every kind that composes it) picks ticks with basalt's
- * `smartTicksEvery(values, count)` when `xTicks` is set: every `ceil(n / count)`-th value, **plus
- * the last one unconditionally**. When the step does not land on the final index that appended tick
- * sits a partial step from its neighbour — measured on a 24 h window, `01.08 14:05` and
- * `01.08 15:20` printed on top of each other at the right edge. A COUNT is the only lever those
- * charts expose, which is why `speed-chart`, `bufferbloat-chart` and `latency-band-chart` measure
- * their own container: a count that keeps labels apart can only be derived from a width. The three
- * charts that compose `AxisBottomDate` themselves pass tick VALUES (`axisTickValues`) instead.
- *
- * The test is in **pixels, not divisibility**. Requiring the step to divide the axis evenly sounds
- * tidier but frequently has no solution at all — at 100 values no count from 2 to 11 divides 99 —
- * and it answers the wrong question anyway: a final gap of 9 steps where the others are 10 is
- * perfectly legible, while one of 1 is not. So this accepts the densest count whose final gap still
- * clears a label width, and only then falls back.
- *
- * The fallback is `maxTicks`: a single crowded label at the right edge is a better outcome than an
- * axis thinned to three ticks to avoid it.
- */
-export function fitTickCount(
-  valueCount: number,
-  maxTicks: number,
-  widthPx: number,
-  minPxPerTick = AXIS_LABEL_PX,
-): number {
-  const ceiling = Math.max(2, maxTicks)
-  if (valueCount <= ceiling) return ceiling
-
-  const pxPerValue = widthPx / valueCount
-  for (let count = ceiling; count >= 2; count--) {
-    const step = Math.ceil(valueCount / count)
-    // `% step === 0` means the step already lands on the final index, so the append is a no-op and
-    // the final gap is a full step.
-    const finalGap = (valueCount - 1) % step === 0 ? step : (valueCount - 1) % step
-    if (finalGap * pxPerValue >= minPxPerTick) return count
-  }
-  return ceiling
-}
-
-/**
  * The time label for one bucket on a chart's x-axis.
  *
  * `basalt-ui`'s `fmtAxisDate` renders every category as `DD.MM` — it matches the date out of an
@@ -96,9 +67,9 @@ export function fitTickCount(
  * the reader nothing about where they are in the window.
  *
  * **This is a formatter now, not a key.** The four bucketed charts keep the bucket's ISO start as
- * their scale domain and pass this in to render it — the latency band through
- * `CartesianChart`'s `formatX`, both strips and the throughput bars through `AxisBottomDate`'s
- * `tickFormat`, which they still compose themselves. Before either existed there was no supported
+ * their scale domain and pass this in to render it — all four through `formatX`, on
+ * `CartesianChart` and on the two band kinds alike, since none of them composes its own axis any
+ * more. Before that seam existed there was no supported
  * exit: `fmtAxisDate` returns a non-ISO string unchanged, so a *pre-formatted* label was the only
  * thing that reached the axis, which forced the label to double as the scale's domain value and,
  * through it, as the cross-chart hover key. Two unrelated jobs on one string. Separating them also
@@ -126,24 +97,24 @@ export function fitTickCount(
  * a column and a remembered moment an offset calculation done in the reader's head.
  *
  * **The shape stays fixed rather than following the host locale, and that is not an oversight.**
- * `AXIS_LABEL_PX` above is a measured width that the tick spacing, the strips' plot insets and
- * `fitTickCount` all read; a locale-shaped label is of no predictable width, so handing this to
- * `Intl` would silently invalidate every one of them. The zone is what a reader needs from a tick.
+ * `AXIS_LABEL_PX` above is a measured width that `axisTickValues` reads on every chart on the
+ * page; a locale-shaped label is of no predictable width, so handing this to `Intl` would silently
+ * invalidate it. The zone is what a reader needs from a tick.
  * The punctuation is not.
  */
 export function bucketAxisLabel(ts: number, bucketSeconds: ProbeBucketSeconds): string {
   const d = new Date(ts)
   const dd = String(d.getDate()).padStart(2, '0')
   const mm = String(d.getMonth() + 1).padStart(2, '0')
-  if (bucketSeconds >= 86_400) return `${dd}.${mm}.${String(d.getFullYear() % 100).padStart(2, '0')}`
+  if (bucketSeconds >= 86_400)
+    return `${dd}.${mm}.${String(d.getFullYear() % 100).padStart(2, '0')}`
   const hh = String(d.getHours()).padStart(2, '0')
   const mi = String(d.getMinutes()).padStart(2, '0')
   return `${dd}.${mm} ${hh}:${mi}`
 }
 
 /**
- * `AxisBottomDate`'s `tickFormat` for a bucketed chart whose scale domain is the bucket's ISO
- * start.
+ * `formatX` for a bucketed chart whose scale domain is the bucket's ISO start.
  *
  * A pure function of the domain value, deliberately — the alternative is a `Map<key, label>` built
  * alongside the points, which is one more structure to keep in step with a fold, a densify and a
@@ -197,4 +168,3 @@ export function runAxisKey(ts: number): string {
 export function runTickFormat(key: string): string {
   return bucketAxisLabel(Date.parse(key), 60)
 }
-

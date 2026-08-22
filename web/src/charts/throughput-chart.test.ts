@@ -1,8 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { foldPoints } from './throughput-chart'
+import { foldBands } from 'basalt-ui/charts'
+import { type PlotPoint, mergePoints } from './throughput-chart'
 import type { ThroughputPoint } from '../lib/throughput'
 
-function measured(over: Partial<ThroughputPoint> = {}): ThroughputPoint {
+function measured(over: Partial<ThroughputPoint> = {}): PlotPoint {
   return {
     key: '0',
     bucketStart: 0,
@@ -13,11 +14,13 @@ function measured(over: Partial<ThroughputPoint> = {}): ThroughputPoint {
     spanMs: 60_000,
     intervals: 1,
     skipped: 0,
+    foldedFrom: 1,
+    unmeasuredMembers: 0,
     ...over,
   }
 }
 
-function absent(key: string): ThroughputPoint {
+function absent(key: string): PlotPoint {
   return {
     key,
     bucketStart: Number(key),
@@ -28,14 +31,19 @@ function absent(key: string): ThroughputPoint {
     spanMs: 0,
     intervals: 0,
     skipped: 0,
+    foldedFrom: 1,
+    unmeasuredMembers: 1,
   }
 }
 
-function keyed(p: ThroughputPoint, key: string): ThroughputPoint {
+function keyed(p: PlotPoint, key: string): PlotPoint {
   return { ...p, key, bucketStart: Number(key) }
 }
 
-describe('foldPoints', () => {
+/** The grouping half is basalt's `foldBands`; only the merge is ours. */
+const fold = (points: PlotPoint[], cap: number) => foldBands(points, cap, mergePoints)
+
+describe('mergePoints, through foldBands', () => {
   /**
    * `spanMs > 0` after summing only requires ONE measured member — a `[measured, absent, absent]`
    * group sums to a positive `spanMs` and a real, non-null rate. That rate is not itself wrong (it
@@ -44,14 +52,14 @@ describe('foldPoints', () => {
    * rather than drawing a bar that implies the whole width agreed with it.
    */
   test('[measured, absent, absent] carries unmeasuredMembers 2 and keeps the real partial rate', () => {
-    const [folded] = foldPoints([keyed(measured(), '0'), absent('1'), absent('2')], 1)
+    const [folded] = fold([keyed(measured(), '0'), absent('1'), absent('2')], 1)
     expect(folded?.foldedFrom).toBe(3)
     expect(folded?.unmeasuredMembers).toBe(2)
     expect(folded?.downBytesPerS).not.toBeNull()
   })
 
   test('[absent, absent, absent] is wholly unmeasured', () => {
-    const [folded] = foldPoints([absent('0'), absent('1'), absent('2')], 1)
+    const [folded] = fold([absent('0'), absent('1'), absent('2')], 1)
     expect(folded?.foldedFrom).toBe(3)
     expect(folded?.unmeasuredMembers).toBe(3)
     expect(folded?.downBytesPerS).toBeNull()
@@ -59,7 +67,7 @@ describe('foldPoints', () => {
   })
 
   test('[measured, measured, measured] carries unmeasuredMembers 0', () => {
-    const [folded] = foldPoints(
+    const [folded] = fold(
       [keyed(measured(), '0'), keyed(measured(), '1'), keyed(measured(), '2')],
       1,
     )
@@ -69,7 +77,7 @@ describe('foldPoints', () => {
 
   /** The mirror lie: a mostly-measured fold must not report itself wholly unmeasured either. */
   test('a 2-of-3-measured fold does not report itself wholly unmeasured', () => {
-    const [folded] = foldPoints([keyed(measured(), '0'), keyed(measured(), '1'), absent('2')], 1)
+    const [folded] = fold([keyed(measured(), '0'), keyed(measured(), '1'), absent('2')], 1)
     expect(folded?.unmeasuredMembers).toBe(1)
     expect(folded?.downBytesPerS).not.toBeNull()
   })
@@ -77,7 +85,7 @@ describe('foldPoints', () => {
   test('a remainder group (source length not divisible by the group size) still folds every point', () => {
     const points = ['0', '1', '2', '3', '4'].map((l) => keyed(measured(), l))
     // cap 2 -> groupSize ceil(5/2) = 3 -> groups of 3 and 2 (the remainder).
-    const folded = foldPoints(points, 2)
+    const folded = fold(points, 2)
     expect(folded).toHaveLength(2)
     expect(folded[0]?.foldedFrom).toBe(3)
     expect(folded[1]?.foldedFrom).toBe(2)
@@ -94,16 +102,30 @@ describe('foldPoints', () => {
    */
   test('bytes, spanMs, intervals and skipped sum; the rate is recomputed, not averaged', () => {
     const a = keyed(
-      measured({ downBytes: 60_000, upBytes: 6_000, spanMs: 60_000, intervals: 1, skipped: 0, downBytesPerS: 1000 }),
+      measured({
+        downBytes: 60_000,
+        upBytes: 6_000,
+        spanMs: 60_000,
+        intervals: 1,
+        skipped: 0,
+        downBytesPerS: 1000,
+      }),
       '0',
     )
     // A much faster but much shorter interval — averaging the two per-point rates would land near
     // (1000 + 10000) / 2 = 5500, which is not the rate either interval actually ran at.
     const b = keyed(
-      measured({ downBytes: 10_000, upBytes: 1_000, spanMs: 1_000, intervals: 1, skipped: 1, downBytesPerS: 10_000 }),
+      measured({
+        downBytes: 10_000,
+        upBytes: 1_000,
+        spanMs: 1_000,
+        intervals: 1,
+        skipped: 1,
+        downBytesPerS: 10_000,
+      }),
       '1',
     )
-    const [folded] = foldPoints([a, b], 1)
+    const [folded] = fold([a, b], 1)
     expect(folded?.downBytes).toBe(70_000)
     expect(folded?.upBytes).toBe(7_000)
     expect(folded?.spanMs).toBe(61_000)
@@ -115,14 +137,10 @@ describe('foldPoints', () => {
 
   test('a point count at or under the cap passes through unfolded, one source per point', () => {
     const points = [keyed(measured(), '0'), absent('1')]
-    const folded = foldPoints(points, 5)
-    expect(folded).toEqual([
-      { ...points[0], foldedFrom: 1, unmeasuredMembers: 0 },
-      { ...points[1], foldedFrom: 1, unmeasuredMembers: 1 },
-    ])
+    expect(fold(points, 5)).toEqual(points)
   })
 
   test('a non-positive cap folds nothing', () => {
-    expect(foldPoints([keyed(measured(), '0')], 0)).toEqual([])
+    expect(fold([keyed(measured(), '0')], 0)).toEqual([])
   })
 })

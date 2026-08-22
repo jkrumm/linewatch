@@ -117,8 +117,14 @@ anyone they disagreed.
   `status-bar.render.test.tsx` pins it. A rail nothing announces is the exact defect
   `StatCard.tone` was adopted to remove; re-introducing it silently is the failure mode
   here, not the hand-rolling. One card idiom still holds — the bar is one card.
-- **After a `basalt-ui` upgrade, run `bunx basalt-ui sync`** — `sync --check` gates the
-  drift in CI and pre-commit, and `basalt-ui doctor` diagnoses the install.
+- **After a `basalt-ui` upgrade, run `./node_modules/.bin/basalt-ui sync`** — `sync --check`
+  gates the drift in CI and pre-commit, and `basalt-ui doctor` diagnoses the install.
+  **Never `bunx basalt-ui`**: it fetches its own copy from npm and reuses the cached one without
+  re-resolving, so a hook, a CI job or an agent can enforce a version this repo does not have
+  installed. The hook and the workflow both call the local bin for that reason. Since 1.23.0 the
+  CLI also resolves the package from the **repo root** — a root with no `workspaces` field used to
+  scan zero files and report `tokens-only` at the root while `web/` was fully wired — so
+  `./web/node_modules/.bin/basalt-ui doctor` from the git root now answers for `web/`.
 - **The doctrine lives in `web/.claude/rules/basalt-*.md`**, placed by `init` and
   refreshed by `sync`. They are managed files: don't hand-edit them, and don't
   restate them here. `web/DESIGN.md` is this app's own thin delta on top (its series
@@ -136,7 +142,7 @@ anyone they disagreed.
   annotation reaches the first **code** line below it — inside a `{cond && (…)}` that
   means a `//` line comment, since a `{/* */}` there is a syntax error. Nothing here
   uses `theme-allow-file`: every waiver is node-scoped, deliberately.
-  `bunx basalt-ui check-theme --audit-allows` proves what each one still suppresses
+  `./node_modules/.bin/basalt-ui check-theme --audit-allows` proves what each one still suppresses
   and exits 1 on a dead waiver. The two scoped oxlint overrides in `web/.oxlintrc.json`
   each carry their reason inline; that file is JSONC, so a new one must too.
 - **The dashboard's `<head>` is `basaltAppPlugin`'s, not `index.html`'s.** The
@@ -151,18 +157,17 @@ anyone they disagreed.
   build on an axis, overlay or crosshair primitive in a file that does not compose
   it, because that primitive already owns the measured margins, both y scales, the
   axes, the grid, the page-shared cursor, the crosshair and the tooltip.
-  `latency-band-chart.tsx` is the one chart here that fits: it now declares six
-  series and draws four marks, and everything else went. **Three charts legitimately
-  do not fit, and each waives per assembly node** (11 in total across `StripPlot` ×2
-  and `MirroredBars`), with the argument in the assembling component's docblock —
-  per-node rather than `theme-allow-file` so the properly-composed `ChartFrame`
-  export in each of those same files stays policed: both strips have no y
-  dimension at all (a numeric left axis over a
-  one-dimensional band would be drawing an axis for nothing), and `throughput-chart`
-  is two panes — download and upload are scaled *independently* against one
-  baseline, which one linear scale cannot express. Those three compose `ChartFrame`
-  + `useChartCursor` + `ChartTooltipFloat`, the same machinery differently
-  assembled, exactly as basalt's own `DualPanel` does.
+  `latency-band-chart.tsx` is the one chart here that fits: it declares six series
+  and draws four marks, and everything else went. **Every chart on this page is now
+  on a shipped kind, and the 11 `hand-rolled-plot` waivers are gone with them.**
+  Three of them assembled their own plot for three releases — two strips with no y
+  dimension at all, and a throughput chart whose two panes are scaled
+  *independently* against one baseline, neither of which `CartesianChart` can
+  express. basalt-ui 1.23.0 ships both shapes as kinds (`BandStrip`,
+  `MirroredBars`), designed against these call sites, so the argument is now the
+  framework's and the waivers retired rather than being re-justified. **Do not
+  hand-compose a plot again**: if a shape does not fit, the answer is a kind
+  upstream, not a waiver here.
 - **`ChartTooltipFloat` portals to `document.body`, and is safe anywhere.** Its
   predecessor `ChartTooltip` was a plain `<div>`: rendered inside `<svg>`, React
   created it in the SVG namespace, so it mounted, took its props, threw nothing —
@@ -178,8 +183,11 @@ anyone they disagreed.
   draw `ctx.visible` — so a swatch cannot name a colour its mark does not have.
   `basalt/chart-legend-literal` reports (at `warn`) any `ChartLegend` items array
   that is not derived from `series` — including, since 1.20.0, a `.map()` over some
-  other array. The two strips' four-fill legends are `SeriesStyle[]` handed to
-  `ChartFrame` for exactly that reason, and `speed-chart.tsx`'s reference legend —
+  other array. The two strips' four-STATE legends are `BandStripSeries[]` handed to
+  `BandStrip`, which derives the legend, each band's fill AND the one tooltip row
+  from that same array — so a retuned state cannot leave its swatch behind. The
+  throughput chart's three marks are a `ChartSeries[]` doing the same job on
+  `MirroredBars`. `speed-chart.tsx`'s reference legend —
   the one legend on this page that `ChartFrame` cannot own, because `MultiLine`
   draws `refLines` but names none of them — goes through the shipped
   `deriveLegend(refSeries)` over the same array the rules are drawn from. Delete
@@ -189,26 +197,22 @@ anyone they disagreed.
   value chip on every synced sibling (`charts/synced-tip.tsx`) until the 1.15.0
   rebuild made tooltips source-only, and hovering a spike then moved a bare line
   across four charts with numbers on one — the position without the reading.
-  `tooltip.onFollow` (1.18.0) is the shipped answer for the three charts on a kind;
-  the three that compose `ChartFrame` reproduce it through `useFollowerTooltip`
-  (`charts/follower-anchor.ts`), which deliberately copies `CartesianChart`'s
-  arithmetic rather than inventing its own. **One implementation, not three** — the
-  policy was hand-copied into all three charts first, and both halves below are
-  exactly the kind of default that survives being copied wrong. **Two halves are easy to ship broken and both are pinned by
-  `charts/follower-tooltip.test.ts`:**
-  - **`aria-live` belongs to the source alone.** `ChartTooltipFloat` announces by
-    default, so four live regions fired on every cursor move the first time this
-    shipped. `CartesianChart` makes the split itself; a hand-composed chart passes
-    `ariaLive={cursor.isSource}` or silently does not.
+  `tooltip.onFollow` (1.18.0) is the shipped answer and **all six charts take it as
+  a prop now** — the app-side `useFollowerTooltip`/`tooltipAnchor`
+  (`charts/follower-anchor.ts`) that reproduced it for the three hand-composed
+  charts is deleted with them. The `aria-live` half came with it: a kind gives the
+  live region to the cursor SOURCE alone, where four hand-composed charts once fired
+  four live regions on every cursor move.
+  **One half is still ours, and it is pinned by `charts/follower-tooltip.test.ts`:**
   - **A follower off screen renders nothing** (`charts/use-in-viewport.ts`, which
     tracks the NODE — a version keyed on a `RefObject` ran its effect once on mount
-    and never observed a chart whose `<svg>` appears later, which all three
-    hand-composed ones do).
-    `ChartTooltipFloat` keeps a tooltip inside the window, so an unconditional
-    `onFollow: true` does not quietly draw off screen — it draws *clamped into
-    view*, over a tooltip the reader is looking at. Measured: the Throughput chart
-    at y=1501 in an 1100px viewport put its tooltip at y=997, on top of Speed's at
-    y=1015.
+    and never observed an element that appears later).
+    `ChartTooltipFloat` still has **no viewport gate of its own**, and it keeps a
+    tooltip inside the window, so an unconditional `onFollow: true` does not quietly
+    draw off screen — it draws *clamped into view*, over a tooltip the reader is
+    looking at. Measured: the Throughput chart at y=1501 in an 1100px viewport put
+    its tooltip at y=997, on top of Speed's at y=1015. Every chart therefore passes
+    `onFollow: inView`, never `true`.
   Source charts still track the pointer; only the latency band anchors as a source
   (`tooltip.follow: false`), because three charts share its column.
 
@@ -347,9 +351,9 @@ anyone they disagreed.
   basalt-ui 1.17.0 nothing on this page confuses them.** Every chart renders its
   domain through a formatter: the four bucketed ones keep the bucket's ISO start
   as the scale domain (and therefore as the cross-chart cursor key) and draw it
-  with `lib/axis.ts`'s `bucketTickFormat`, through `formatX` on the two kinds that
-  take one and `AxisBottomDate`'s `tickFormat` on the three that compose their own
-  axis; the two run-series charts key on `runAxisKey` (the run's ISO instant) and
+  with `lib/axis.ts`'s `bucketTickFormat`, all four through `formatX` now that no
+  chart here composes its own axis; the two run-series charts key on `runAxisKey`
+  (the run's ISO instant) and
   draw it with `runTickFormat`. Before any of those seams existed, `fmtAxisDate` reduced an ISO
   string to `DD.MM` — a 24 h window drew `01.08` a dozen times — and a
   *pre-formatted* label was the only thing that reached the axis, forcing one
@@ -383,19 +387,17 @@ anyone they disagreed.
   did not share. `tooltip.formatHeader` is the seam; `charts/tooltip-header.test.ts`
   pins both halves. **Re-keying a domain to make a formatter come out right is the
   regression here**, not the wrong date.
-- **A tick COUNT still has to be measured, and three charts measure for it.**
+- **Every chart picks tick VALUES, and none of them measures itself to do it.**
   `smartTicks` spaces x ticks by `VX.minPxPerTick` (55), sized for the bare `DD.MM`
   basalt's own formatter produces; `bucketAxisLabel` draws `DD.MM HH:MM` at ~72px
   on the bucketed charts and `runTickFormat` the same on the run ones, so the
-  default overlaps end to end. `speed-chart`,
-  `bufferbloat-chart` and `latency-band-chart` wrap themselves in a `useChartSize`
-  box and derive `xTicks` from `fitTickCount`. `VX.margin` is only a FLOOR on the
-  measured gutter now, so the plot width they compute slightly over-estimates —
-  absorbed by `AXIS_LABEL_PX`, which is already 96 for a ~72px label. The three
-  charts that compose their own `AxisBottomDate` pick tick VALUES instead, via
-  `axisTickValues`, which is still the better tool where it is available:
-  `smartTicks` appends the final value unconditionally and the last two labels land
-  on top of each other.
+  default overlaps end to end. A tick COUNT cannot fix it either —
+  `smartTicks`/`smartTicksEvery` append the final key unconditionally, so at every
+  count the last two labels print on top of each other at the right edge. All six
+  charts pass `lib/axis.ts`'s `axisTickValues` as `xTickValues` (basalt-ui 1.23.0,
+  on `CartesianChart`, `MultiLine` and both band kinds alike), which is handed the
+  chart's own resolved plot width. That deleted `fitTickCount` and the three
+  `useChartSize` boxes that existed only to estimate a width for it.
 - **`densifyBuckets` tolerates an overlapping window and rejects a wrong grid — two
   causes, one symptom.** A row landing on no slot used to throw either way, and one
   of the two causes is routine: `keepAcrossTimeAdvance` serves the previous window's
@@ -435,13 +437,21 @@ anyone they disagreed.
   container while pending, deliberately, so a screen reader is told what is
   loading.
 - **A fold carries its unmeasured members.** The three bucketed strips downsample
-  to fit a narrow viewport (each strip's own `foldColumns`/`foldPoints`). A fold
-  that calls a group measured
+  to fit a narrow viewport. The GROUPING is basalt's since 1.23.0 (`fold: { merge }`
+  on both band kinds, with `foldBands` exported so a merge is tested against the
+  arithmetic that actually runs); only the merge is ours, deliberately — whether a
+  folded slot's value is a max, a sum or a rate recomputed from summed parts is a
+  question about the measurement. **`foldedFrom`/`unmeasuredMembers` ride on the
+  datum from CONSTRUCTION, not out of the merge**: `getBand`/`getAbsentFraction` are
+  handed a datum and nothing else, so an unfolded slot has to answer the same
+  question a folded one does. That is ~4 lines per chart and it is not optional. A
+  fold that calls a group measured
   because *any* member was measured paints an unmeasured stretch as clean — the
   founding fabrication, and on the `all` range it triggers below ~830px, not just
   on a phone. So every fold carries `unmeasuredMembers`, splits its column
-  proportionally, and scales the tooltip denominator by `foldedFrom` (a summed
-  `count` against a per-bucket `expectedCycles` prints "30 of 10"). The mirror
+  proportionally (`absentFraction` on both kinds), and scales the tooltip
+  denominator by `foldedFrom` (a summed `count` against a per-bucket
+  `expectedCycles` prints "30 of 10"). The mirror
   lie — a two-thirds-measured column drawn wholly unmeasured — is equally
   forbidden. Both are pinned by tests. Folding also changes the chart's hover key
   space, and **that half is no longer ours to patch**: the app used to carry a

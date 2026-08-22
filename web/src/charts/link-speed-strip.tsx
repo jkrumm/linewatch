@@ -1,78 +1,85 @@
 import { useCallback, useMemo } from 'react'
-import { scaleBand } from '@visx/scale'
 import {
-  AxisBottomDate,
-  ChartFrame,
-  ChartTooltipFloat,
-  Crosshair,
-  HoverOverlay,
-  type SeriesStyle,
-  TooltipBody,
-  TooltipHeader,
+  type BandFold,
+  type BandSpan,
+  BandStrip,
+  type BandStripSeries,
+  type ChartMargin,
   TooltipRow,
   VX,
   alpha,
-  useChartCursor,
 } from 'basalt-ui/charts'
-import { useFollowerTooltip } from './follower-anchor'
+import { useInViewport } from './use-in-viewport'
 import type { ProbeBucketSeconds, VantageBucket } from '../lib/types'
 import type { LinkBucketState } from '../lib/vantage'
 import { linkBucketState } from '../lib/vantage'
 import { densifyBuckets } from '../lib/densify'
 import { fmtDateTime } from '../lib/format'
-import { AXIS_LABEL_PX, axisTickValues, bucketTickFormat } from '../lib/axis'
-import { HatchPattern, hatchFill } from './hatch'
+import { axisTickValues, bucketTickFormat } from '../lib/axis'
 
 const STRIP_HEIGHT = 44
 
-/**
- * Room for the time axis this strip used to do without.
- *
- * It drew 289 columns of link state with no x-axis at all, so "the NIC renegotiated" was legible
- * and *when* it renegotiated was only recoverable by hovering the right column — on a chart whose
- * entire subject is a moment in time. The inset is half a label width on each side, because the
- * edge labels are centred on their own ticks and would otherwise be cut by the SVG's edges; the
- * left side takes the wider of that and the plot gutter the charts above use, so the two time axes
- * on this page start at the same x and can be read against each other.
- *
- * These stay the CEILING, not the drawn inset — `StripPlot`'s `plotLeft`/`plotRight` scale them
- * down at narrow widths (see `availability-strip.tsx`, which this file mirrors verbatim).
- */
-const PLOT_LEFT = Math.max(56, Math.round(AXIS_LABEL_PX / 2))
-const PLOT_RIGHT = Math.round(AXIS_LABEL_PX / 2)
-const AXIS_HEIGHT = 22
+/** Room for the time axis, and `VX.margin.bottom` restated — see `availability-strip.tsx`'s
+ * identical constant for why a `BandStrip`'s band height has to be backed out of `height` by hand. */
+const AXIS_HEIGHT = 30
 
-/** The one-row legend band reserved out of `ChartFrame`'s height — see `availability-strip.tsx`'s
- * identical constant for why the strip's footprint has to grow by one. */
+/** The one-row legend band reserved out of the height handed to the kind — see
+ * `availability-strip.tsx`'s identical constant. */
 const LEGEND_BAND = 24
 
-/** The height of the transition marker, as a fraction of the strip. It is drawn as a full-height
- * bar of its own colour rather than a value, so it cannot be read off the intensity ramp. */
+const STRIP_FRAME_HEIGHT = STRIP_HEIGHT + AXIS_HEIGHT + LEGEND_BAND
+
+/** No y axis and nothing drawn above the band row, so the top gutter is dead space — see
+ * `availability-strip.tsx`'s identical override. */
+const STRIP_MARGIN: Partial<ChartMargin> = { top: 0 }
+
+/** The transition marker's inset from the band's top and bottom. It is drawn as its own bar of its
+ * own colour rather than as a value, so it cannot be read off the intensity ramp. */
 const MARKER_INSET = 6
 
-type Column = {
-  /** ISO-8601 of the bucket start: what the tooltip's date formatting reads, the band scale's
-   * domain value, and the broadcast hover key. `AxisBottomDate` takes a `tickFormat` as of
-   * basalt-ui 1.9.0, so the axis label is derived from this at draw time instead of being carried
-   * beside it — the same change `availability-strip.tsx` made, for the reason `lib/axis.ts` gives. */
+/**
+ * One slot of the strip.
+ *
+ * `foldedFrom`/`unmeasuredMembers` are carried from CONSTRUCTION for the reason
+ * `availability-strip.tsx`'s identical fields give: `getBand` never sees the fold's bookkeeping.
+ * `foldStates`'s own `kind` says what the MEASURED members reported, never how much of the span
+ * they cover, and a 1-of-3-measured band must not paint as a fully-confident reading.
+ */
+export type Column = {
+  /** ISO-8601 of the bucket start: the band scale's domain value, the broadcast hover key, and what
+   * `bucketTickFormat` renders into the axis label at draw time. See `lib/axis.ts`. */
   key: string
   bucketStart: number
   state: LinkBucketState
+  foldedFrom: number
+  unmeasuredMembers: number
 }
 
-/** A drawn column, after folding. `foldedFrom` is 1 for a column drawn straight from the response
- * and >1 when it stands in for that many source columns — see `foldStates`. `unmeasuredMembers` is
- * how many of those source columns were `unmeasured` — `foldStates`'s own `kind` says what the
- * MEASURED members reported, never how much of the span they actually cover, and `StripPlot` needs
- * the coverage to avoid painting a 1-of-3-measured column as a fully-confident reading. */
-type PlotColumn = Column & { foldedFrom: number; unmeasuredMembers: number }
+/**
+ * How a group of adjacent slots collapses into the one band drawn in its place — the same
+ * sub-pixel pitch problem `availability-strip.tsx` fixes, and the same MAX-never-mean argument this
+ * file's own guide copy already makes: the mean of 1000 and 100 is 550, a rate the link never ran
+ * at for a moment. That argument holds identically for a *folded* span, which is what `foldStates`
+ * below is built to keep true.
+ */
+export function mergeColumns(group: Column[]): Column {
+  const first = group[0]
+  if (first === undefined) throw new Error('mergeColumns: empty group')
+  return {
+    ...first,
+    state: foldStates(group.map((c) => c.state)),
+    foldedFrom: group.reduce((sum, c) => sum + c.foldedFrom, 0),
+    unmeasuredMembers: group.reduce((sum, c) => sum + c.unmeasuredMembers, 0),
+  }
+}
+
+const FOLD: BandFold<Column> = { merge: mergeColumns }
+
+/** Stable across renders — see `availability-strip.tsx`'s identical constant. */
+const getColumnKey = (c: Column): string => c.key
 
 /**
- * Aggregates columns down to at most `cap` slots — the same sub-pixel pitch problem
- * `availability-strip.tsx` fixes (289 columns over a narrow plot draws every bar at a flat 1px),
- * and the same MAX-never-mean argument this file's own guide copy already makes: the mean of 1000
- * and 100 is 550, a rate the link never ran at for a moment. That argument holds identically for a
- * *folded* span, and the fold rule below is built to keep it true:
+ * The fold rule for a link state:
  *
  *   - any member `transition` -> the folded slot is `transition`, over the union of every distinct
  *     speed any member reported (a fold can only widen the set of speeds seen, never narrow it);
@@ -86,40 +93,9 @@ type PlotColumn = Column & { foldedFrom: number; unmeasuredMembers: number }
  *
  * That last rule is honest about what `kind` MEANS (a speed genuinely was negotiated somewhere in
  * this span) but says nothing about how much of the span it covers — `[1000 Mbit, absent, absent]`
- * folds to `steady` at 1000 Mbit under this rule, correctly, and `StripPlot` used to fill the WHOLE
- * column at that reading, incorrectly: two-thirds of the span reported nothing. `unmeasuredMembers`
- * carries the count needed to hatch that share instead of painting over it.
+ * folds to `steady` at 1000 Mbit under this rule, correctly, and the band would paint at that
+ * reading across its whole width, incorrectly. `unmeasuredMembers` is what hatches that share.
  */
-export function foldColumns(columns: Column[], cap: number): PlotColumn[] {
-  if (cap <= 0) return []
-  if (columns.length <= cap)
-    return columns.map((c) => ({
-      ...c,
-      foldedFrom: 1,
-      unmeasuredMembers: c.state.kind === 'unmeasured' ? 1 : 0,
-    }))
-
-  const groupSize = Math.ceil(columns.length / cap)
-  const folded: PlotColumn[] = []
-  for (let i = 0; i < columns.length; i += groupSize) {
-    const group = columns.slice(i, i + groupSize)
-    const first = group[0]
-    if (first === undefined) continue
-    const unmeasuredMembers = group.filter((c) => c.state.kind === 'unmeasured').length
-    folded.push({
-      ...first,
-      state: foldStates(group.map((c) => c.state)),
-      foldedFrom: group.length,
-      unmeasuredMembers,
-    })
-  }
-  return folded
-}
-
-/** Stable across renders, unlike an inline arrow — see `availability-strip.tsx`'s identical
- * constant for why an unstable `getKey` defeats `useChartCursor`'s own memoization. */
-const getColumnKey = (c: PlotColumn): string => c.key
-
 export function foldStates(states: LinkBucketState[]): LinkBucketState {
   const mbits = new Set<number>()
   let anyTransition = false
@@ -153,11 +129,11 @@ export function foldStates(states: LinkBucketState[]): LinkBucketState {
  * describes the record rather than the drawing.
  *
  * The strip's problem is that its subject is almost always constant. On a healthy gigabit line
- * every column is the same fill, and a reader looking at a flat blue band 288 buckets wide learns
+ * every band is the same fill, and a reader looking at a flat blue band 288 buckets wide learns
  * only that something was measured; the one fact worth having — *did the NIC renegotiate, and
- * what to* — is legible only by hovering columns one at a time looking for a marker that is
- * usually not there. A chart whose normal state carries no information has to state its own
- * conclusion, and the marks then become the evidence for it rather than the whole message.
+ * what to* — is legible only by hovering bands one at a time looking for a marker that is usually
+ * not there. A chart whose normal state carries no information has to state its own conclusion, and
+ * the marks then become the evidence for it rather than the whole message.
  *
  * `transitionBuckets` counts BUCKETS containing a renegotiation, not renegotiations: a bucket
  * reports the distinct speeds it saw and not how many times it changed between them, so any
@@ -176,7 +152,7 @@ export type LinkSummary = {
   transitionBuckets: number
 }
 
-export function summariseLink(columns: Column[]): LinkSummary {
+export function summariseLink(columns: readonly { state: LinkBucketState }[]): LinkSummary {
   const mbits = new Set<number>()
   let measured = 0
   let noVantage = 0
@@ -205,7 +181,83 @@ export function summariseLink(columns: Column[]): LinkSummary {
 }
 
 /**
- * Negotiated link speed over the window, one column per bucket.
+ * Which state a band is in, and the two qualifications the state alone cannot carry.
+ *
+ * A transition gets both: a faint fill so the ramp cannot be misread as a speed, and a `marker` —
+ * a shorter inset bar in the state's own colour — because "the NIC renegotiated here" must not be
+ * readable off an intensity ramp at all. A steady band gets the ramp itself, relative to the
+ * fastest speed the window saw rather than to any absolute rate, because this line's ceiling is a
+ * property of the hardware and not of the chart.
+ *
+ * `maxMbit` is 0 only when no bucket in the window reported a speed, in which case the `steady`
+ * branch is unreachable; the guard keeps the division defined rather than producing NaN.
+ */
+export function bandFor(c: Column, maxMbit: number): BandSpan {
+  const absentFraction = c.unmeasuredMembers / c.foldedFrom
+  const state = c.state
+  if (state.kind === 'unmeasured') return { state: 'absent', absentFraction }
+  // Measured cycles that reported no link speed. Faint and solid rather than hatched: something
+  // was measured here, so it is not absence — it just was not this.
+  if (state.kind === 'no-vantage') return { state: 'no-vantage', absentFraction }
+  if (state.kind === 'transition')
+    return {
+      state: 'transition',
+      absentFraction,
+      fill: alpha(VX.warnSolid, 0.25),
+      marker: { inset: MARKER_INSET },
+    }
+  const intensity = maxMbit > 0 ? state.mbit / maxMbit : 1
+  return { state: 'speed', absentFraction, fill: alpha(VX.line, 0.25 + 0.65 * intensity) }
+}
+
+/**
+ * The four states, which on `BandStrip` are also the legend and the one derived tooltip row.
+ *
+ * `fillOpacity` mirrors the real alphas so the legend cannot describe a fill the chart does not
+ * draw. The speed swatch is the ramp's top step because that is what a healthy window is drawn in;
+ * the ramp itself is relative to the fastest speed the window saw, which the verdict line above
+ * states in words.
+ */
+export const FILL_SERIES: BandStripSeries<Column>[] = [
+  {
+    key: 'speed',
+    label: 'Negotiated speed',
+    color: VX.line,
+    mark: 'bar',
+    fillOpacity: 0.9,
+    formatValue: (c) => (c.state.kind === 'steady' ? `${c.state.mbit} Mbit` : ''),
+  },
+  {
+    key: 'transition',
+    label: 'Renegotiated',
+    color: VX.warnSolid,
+    mark: 'bar',
+    fillOpacity: 1,
+    // Joined with a slash, not an arrow: the bucket reports the distinct speeds it saw, not the
+    // order it saw them in, and an arrow would invent a direction.
+    formatValue: (c) =>
+      c.state.kind === 'transition' ? c.state.mbits.map((m) => `${m} Mbit`).join(' / ') : '',
+  },
+  {
+    key: 'no-vantage',
+    label: 'No link speed reported',
+    color: VX.neutral,
+    mark: 'bar',
+    fillOpacity: 0.18,
+    formatValue: (c) => (c.state.kind === 'no-vantage' ? `${c.state.cycles} cycles` : ''),
+  },
+  {
+    key: 'absent',
+    label: 'Not measured',
+    color: VX.neutral,
+    mark: 'bar',
+    fillOpacity: 0.5,
+    formatValue: () => 'no cycles',
+  },
+]
+
+/**
+ * Negotiated link speed over the window, one band per bucket.
  *
  * The one rule that shapes this chart: **a bucket holding more than one link speed is drawn as a
  * transition marker, not as a value.** `GET /api/probes`'s vantage series reports every distinct
@@ -215,9 +267,7 @@ export function summariseLink(columns: Column[]): LinkSummary {
  *
  * Three more states stay distinct from each other and from a speed: a bucket the range route
  * returned nothing for (hatched — not measured), a bucket whose cycles reported no link speed at
- * all (faint — measured, but not this), and the speeds themselves, whose intensity is relative to
- * the fastest speed in the window rather than to any absolute rate, because this line's ceiling is
- * a property of the hardware and not of the chart.
+ * all (faint — measured, but not this), and the speeds themselves.
  */
 export function LinkSpeedStrip({
   vantage,
@@ -233,7 +283,7 @@ export function LinkSpeedStrip({
   /**
    * True while the probe-buckets query carrying the vantage series is in flight.
    *
-   * `linkBucketState(null)` is `unmeasured`, so an unresolved query hatched every column in the
+   * `linkBucketState(null)` is `unmeasured`, so an unresolved query hatched every band in the
    * window — a positive claim that the collector ran and reported no link speed for any of it,
    * which on this strip reads as the NIC having gone dark rather than as a question nobody had
    * answered. Same guard, same reason, as `availability-strip.tsx`'s.
@@ -242,11 +292,16 @@ export function LinkSpeedStrip({
 }) {
   const columns: Column[] = useMemo(
     () =>
-      densifyBuckets(vantage, { from, to, bucketSeconds }).map((slot) => ({
-        key: slot.key,
-        bucketStart: slot.bucketStart,
-        state: linkBucketState(slot.value),
-      })),
+      densifyBuckets(vantage, { from, to, bucketSeconds }).map((slot) => {
+        const state = linkBucketState(slot.value)
+        return {
+          key: slot.key,
+          bucketStart: slot.bucketStart,
+          state,
+          foldedFrom: 1,
+          unmeasuredMembers: state.kind === 'unmeasured' ? 1 : 0,
+        }
+      }),
     [vantage, from, to, bucketSeconds],
   )
 
@@ -259,54 +314,40 @@ export function LinkSpeedStrip({
     return max
   }, [columns])
 
+  const getBand = useCallback((c: Column) => bandFor(c, maxMbit), [maxMbit])
+  const formatX = useMemo(() => bucketTickFormat(bucketSeconds), [bucketSeconds])
+  const { ref: viewRef, inView } = useInViewport<HTMLDivElement>()
+
   return (
     // A floor, not a height — see `availability-strip.tsx`'s identical wrapper.
-    <div style={{ minHeight: STRIP_HEIGHT + AXIS_HEIGHT + LEGEND_BAND }}>
+    <div ref={viewRef} style={{ minHeight: STRIP_FRAME_HEIGHT }}>
       {isPending !== true && <LinkVerdict summary={summariseLink(columns)} />}
-      <ChartFrame
-        series={FILL_SERIES}
+      <BandStrip
+        data={columns}
         chartId="link-speed-strip"
-        height={STRIP_HEIGHT + AXIS_HEIGHT + LEGEND_BAND}
+        getX={getColumnKey}
+        series={FILL_SERIES}
+        getBand={getBand}
+        fold={FOLD}
+        height={STRIP_FRAME_HEIGHT}
+        margin={STRIP_MARGIN}
+        formatX={formatX}
+        xTickValues={axisTickValues}
+        absentState="absent"
         isPending={isPending === true}
         ariaLabel="Negotiated link speed per bucket, with unmeasured buckets hatched and renegotiations marked rather than averaged"
-        // Four fills, not four series — there is nothing to toggle. See `availability-strip.tsx`.
+        // Four states, not four series — there is nothing to toggle.
         legend={{ toggle: false }}
-      >
-        {({ width, height }) => (
-          <StripPlot
-            columns={columns}
-            maxMbit={maxMbit}
-            bucketSeconds={bucketSeconds}
-            width={width}
-            height={height}
-          />
-        )}
-      </ChartFrame>
+        tooltip={{
+          onFollow: inView,
+          formatHeader: (_key, c) => fmtDateTime(c.bucketStart),
+          label: () => ({ text: 'Link speed', color: VX.line }),
+          extraRows: (c) => <StateRows column={c} />,
+        }}
+      />
     </div>
   )
 }
-
-/**
- * The four fills `columnFill` can return, as the series array `ChartFrame` derives the legend from.
- *
- * `fillOpacity` mirrors the real alphas so the legend cannot describe a fill the chart does not
- * draw. The speed swatch is the ramp's top step because that is what a healthy window is drawn in;
- * the ramp itself is relative to the fastest speed the window saw, which the verdict line above
- * states in words. See `availability-strip.tsx`'s identical array for why this stopped being a
- * hand-written `LegendEntry[]` handed to `ChartLegend`.
- */
-const FILL_SERIES: SeriesStyle[] = [
-  { key: 'speed', label: 'Negotiated speed', color: VX.line, mark: 'bar', fillOpacity: 0.9 },
-  { key: 'transition', label: 'Renegotiated', color: VX.warnSolid, mark: 'bar', fillOpacity: 1 },
-  {
-    key: 'no-vantage',
-    label: 'No link speed reported',
-    color: VX.neutral,
-    mark: 'bar',
-    fillOpacity: 0.18,
-  },
-  { key: 'absent', label: 'Not measured', color: VX.neutral, mark: 'bar', fillOpacity: 0.5 },
-]
 
 /**
  * The window's conclusion, above the evidence for it.
@@ -365,219 +406,12 @@ function LinkVerdict({ summary }: { summary: LinkSummary }) {
 }
 
 /**
- * Non-single-plot, for the reason `availability-strip.tsx` states at length: a strip has one
- * dimension, and `CartesianChart` renders `AxisLeftNumeric` unconditionally, so it would draw a
- * numeric y axis over a chart that measures nothing vertically.
- *
- * Waived per assembly node below, not per file — the exported `LinkSpeedStrip` above composes
- * `ChartFrame` properly and stays policed.
+ * The rows the one derived row cannot carry — see `availability-strip.tsx`'s identical split.
  */
-function StripPlot({
-  columns,
-  maxMbit,
-  bucketSeconds,
-  width,
-  height,
-}: {
-  columns: Column[]
-  maxMbit: number
-  bucketSeconds: ProbeBucketSeconds
-  width: number
-  /** The plot rect `ChartFrame` handed down — already net of the measured legend band. */
-  height: number
-}) {
-  const absentHatchId = 'link-speed-strip-absent'
-  // Derived from the rect, not the constant — see `availability-strip.tsx`'s identical derivation.
-  const stripHeight = Math.max(1, height - AXIS_HEIGHT)
-
-  // Width-relative insets — see `availability-strip.tsx`'s identical constants for the argument.
-  const plotLeft = Math.min(PLOT_LEFT, Math.round(width * 0.14))
-  const plotRight = Math.min(PLOT_RIGHT, Math.round(width * 0.12))
-  const plotWidth = Math.max(0, width - plotLeft - plotRight)
-
-  // `/ 3`, not `/ 2` — see `availability-strip.tsx`'s identical constant for why the wider margin
-  // is needed: a `/ 2` cap leaves no room for a partial fold's fill/hatch split to render as two
-  // visibly distinct pieces.
-  const plotColumns = useMemo(
-    () => foldColumns(columns, Math.floor(plotWidth / 3)),
-    [columns, plotWidth],
-  )
-  // Memoized — see `availability-strip.tsx`'s identical `keys`/`scale` for why an unmemoized
-  // `scaleBand` call defeats the point of the `bandCenter` callback below.
-  const keys = useMemo(() => plotColumns.map((c) => c.key), [plotColumns])
-  const scale = useMemo(
-    () => scaleBand<string>({ domain: keys, range: [0, plotWidth] }),
-    [keys, plotWidth],
-  )
-  const bandCenter = useCallback(
-    (key: string) => {
-      const v = scale(key)
-      return v === undefined ? undefined : v + scale.bandwidth() / 2
-    },
-    [scale],
-  )
-
-  // This is the chart where the shared cursor pays most — its whole subject is *when did the NIC
-  // renegotiate*, and correlating a transition column with the latency spike above it used to be a
-  // manual eyeball across two cards. `useChartCursor` needs no provider and no fold seam; see
-  // `availability-strip.tsx`'s identical call for why the source→folded index this file used to
-  // build is gone, and why `resolution: 'leading'` — not the default nearest-key — is what makes a
-  // folded column resolve the buckets it actually swallowed.
-  const cursor = useChartCursor<PlotColumn>({
-    data: plotColumns,
-    chartId: 'link-speed-strip',
-    getKey: getColumnKey,
-    xScale: bandCenter,
-    resolution: 'leading',
-    marginLeft: plotLeft,
-  })
-  const point = cursor.point
-  // Every follower-tooltip decision lives in `useFollowerTooltip`: where it goes, whether it
-  // appears at all off screen, and which one announces itself.
-  const { svgRef, anchor: tipAnchor, ariaLive } = useFollowerTooltip({
-    isSource: cursor.isSource,
-    ownAnchor: cursor.anchor,
-    marginLeft: plotLeft,
-    crosshairX: point ? (scale(point.key) ?? 0) + scale.bandwidth() / 2 : null,
-  })
-
-  if (width < plotLeft + plotRight + 20 || plotColumns.length === 0) return null
-
-  const step = plotWidth / plotColumns.length
-  const barWidth = Math.max(step - 1, 1)
-  // See `availability-strip.tsx`'s identical constant — the hatch repeat shrunk to fit the column
-  // rather than left at a fixed size a narrow bar cannot show even one full diagonal rule of.
-  const hatchSize = Math.max(2, Math.min(5, Math.round(barWidth)))
-
-  return (
-    <>
-      <svg ref={svgRef} width={width} height={height}>
-        <defs>
-          <HatchPattern id={absentHatchId} color={VX.neutral} opacity={0.7} size={hatchSize} />
-        </defs>
-        <g transform={`translate(${plotLeft}, 0)`}>
-          {plotColumns.map((column, i) => {
-            // See `availability-strip.tsx`'s identical fraction — the share of this column's own
-            // span no member measured, drawn hatched instead of being silently absorbed into
-            // whatever the measured members reported: `[1000 Mbit, absent, absent]` used to paint a
-            // solid 1000 Mbit column, asserting a reading for two absent buckets.
-            const unmeasuredFrac = column.unmeasuredMembers / column.foldedFrom
-            const measuredWidth = barWidth * (1 - unmeasuredFrac)
-            const hatchWidth = barWidth - measuredWidth
-            return (
-              <g key={column.key}>
-                {measuredWidth > 0 && (
-                  <rect
-                    x={i * step}
-                    y={0}
-                    width={measuredWidth}
-                    height={stripHeight}
-                    rx={1}
-                    fill={columnFill(column.state, maxMbit, absentHatchId)}
-                    // The overlay now owns hit-testing (below); these rects only paint.
-                    pointerEvents="none"
-                  />
-                )}
-                {hatchWidth > 0 && (
-                  <rect
-                    x={i * step + measuredWidth}
-                    y={0}
-                    width={hatchWidth}
-                    height={stripHeight}
-                    rx={1}
-                    fill={hatchFill(absentHatchId)}
-                    pointerEvents="none"
-                  />
-                )}
-                {column.state.kind === 'transition' && (
-                  <rect
-                    x={i * step}
-                    y={MARKER_INSET}
-                    width={measuredWidth}
-                    height={Math.max(2, stripHeight - 2 * MARKER_INSET)}
-                    rx={1}
-                    fill={VX.warnSolid}
-                    pointerEvents="none"
-                  />
-                )}
-              </g>
-            )
-          })}
-          {point && (
-            // theme-allow hand-rolled-plot — the shipped crosshair over a hand-composed plot rect
-            <Crosshair
-              x={(scale(point.key) ?? 0) + scale.bandwidth() / 2}
-              top={0}
-              bottom={stripHeight}
-            />
-          )}
-          {/* theme-allow hand-rolled-plot — the shipped overlay driving this plot's own cursor */}
-          <HoverOverlay
-            width={plotWidth}
-            height={stripHeight}
-            onMove={cursor.onPointerMove}
-            onLeave={cursor.onPointerLeave}
-            onKeyDown={cursor.onKeyDown}
-            onBlur={cursor.onBlur}
-            // `CartesianChart` forwards its own `ariaLabel` to the overlay so the focusable slider
-            // announces the chart rather than a generic "Chart data". A hand-composed plot has to
-            // do it itself, or tabbing into it says nothing about which chart was reached.
-            ariaLabel="Negotiated link speed per bucket"
-            valueMax={Math.max(plotColumns.length - 1, 0)}
-            {...(point !== null && {
-              valueNow: plotColumns.indexOf(point),
-              valueText: bucketTickFormat(bucketSeconds)(point.key),
-            })}
-          />
-          {/* `axisTickValues` rather than `smartTicks`, for the reason its docblock gives: the latter
-            appends the final value unconditionally and the last two labels overlap. The values are
-            ISO bucket starts; `bucketTickFormat` renders each as the time a reader sees.
-            theme-allow hand-rolled-plot — the strip's only axis; a y axis would measure nothing */}
-          <AxisBottomDate
-            scale={scale}
-            top={stripHeight}
-            tickValues={axisTickValues(keys, plotWidth, AXIS_LABEL_PX)}
-            tickFormat={bucketTickFormat(bucketSeconds)}
-          />
-        </g>
-      </svg>
-      {/* Source-only, like every other chart now — the follower chip this strip used to draw went
-          with `ChartTooltip`; see `availability-strip.tsx`. */}
-      <ChartTooltipFloat anchor={tipAnchor} ariaLive={ariaLive}>
-        {point && (
-          <>
-            <TooltipHeader
-              date={fmtDateTime(point.bucketStart)}
-              label="Link speed"
-              labelColor={VX.line}
-            />
-            <TooltipBody>
-              <StateRows column={point} />
-            </TooltipBody>
-          </>
-        )}
-      </ChartTooltipFloat>
-    </>
-  )
-}
-
-function columnFill(state: LinkBucketState, maxMbit: number, absentHatchId: string): string {
-  if (state.kind === 'unmeasured') return hatchFill(absentHatchId)
-  // Measured cycles that reported no link speed. Faint and solid rather than hatched: something
-  // was measured here, so it is not absence — it just was not this.
-  if (state.kind === 'no-vantage') return alpha(VX.neutral, 0.18)
-  if (state.kind === 'transition') return alpha(VX.warnSolid, 0.25)
-  // `maxMbit` is 0 only when no bucket in the window reported a speed, in which case this branch
-  // is unreachable; the guard keeps the division defined rather than producing NaN.
-  const intensity = maxMbit > 0 ? state.mbit / maxMbit : 1
-  return alpha(VX.line, 0.25 + 0.65 * intensity)
-}
-
-function StateRows({ column }: { column: PlotColumn }) {
-  const state = column.state
-  // Named whenever more than one source bucket stands behind this column — see `foldColumns`. A
-  // partial fold gets its own clause, matching `availability-strip.tsx`'s identical row: the fill
-  // already hatches the unmeasured share, and the tooltip has to say the same thing in words.
+function StateRows({ column }: { column: Column }) {
+  // Named whenever more than one source bucket stands behind this band. A partial fold gets its own
+  // clause: the band already hatches the unmeasured share, and the tooltip has to say the same
+  // thing in words.
   const foldedRow = column.foldedFrom > 1 && (
     <TooltipRow
       color={VX.neutral}
@@ -591,51 +425,16 @@ function StateRows({ column }: { column: PlotColumn }) {
     />
   )
 
-  if (state.kind === 'unmeasured') {
-    return (
-      <>
-        <TooltipRow color={VX.neutral} shape="bar" label="Not measured" value="no cycles" />
-        {foldedRow}
-      </>
-    )
-  }
-  if (state.kind === 'no-vantage') {
-    return (
-      <>
-        <TooltipRow
-          color={VX.neutral}
-          shape="bar"
-          label="No link speed reported"
-          value={`${state.cycles} cycles`}
-        />
-        {foldedRow}
-      </>
-    )
-  }
-  if (state.kind === 'transition') {
-    return (
-      <>
-        <TooltipRow
-          color={VX.warnSolid}
-          shape="bar"
-          label="Renegotiated in this bucket"
-          // Joined with a slash, not an arrow: the bucket reports the distinct speeds it saw, not
-          // the order it saw them in, and an arrow would invent a direction.
-          value={state.mbits.map((mbit) => `${mbit} Mbit`).join(' / ')}
-        />
+  return (
+    <>
+      {column.state.kind === 'transition' && (
         <TooltipRow
           color={VX.neutral}
           shape="dot"
           label="Not averaged"
           value="the order within the bucket is unrecorded"
         />
-        {foldedRow}
-      </>
-    )
-  }
-  return (
-    <>
-      <TooltipRow color={VX.line} shape="bar" label="Negotiated" value={`${state.mbit} Mbit`} />
+      )}
       {foldedRow}
     </>
   )

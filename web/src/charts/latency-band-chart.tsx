@@ -5,6 +5,7 @@ import {
   CartesianChart,
   type ChartSeries,
   Group,
+  HatchPattern,
   LinePath,
   type PlotContext,
   TooltipRow,
@@ -12,7 +13,7 @@ import {
   alpha,
   curveMonotoneX,
   fmtTooltipDate,
-  useChartSize,
+  hatchFill,
 } from 'basalt-ui/charts'
 import { useInViewport } from './use-in-viewport'
 import type {
@@ -23,10 +24,9 @@ import type {
   VantageBucket,
 } from '../lib/types'
 import { densifyBuckets } from '../lib/densify'
-import { AXIS_LABEL_PX, bucketTickFormat, fitTickCount } from '../lib/axis'
+import { axisTickValues, bucketTickFormat } from '../lib/axis'
 import { PROBE_CYCLE_MS } from '../lib/range'
 import { fmtClock, fmtDuration, fmtMs, fmtPct } from '../lib/format'
-import { HatchPattern, hatchFill } from './hatch'
 
 /** One position on the time axis. `bucket === null` is a bucket the range route returned no row
  * for: unmeasured, which the chart must draw as its own state rather than as a gap the curve
@@ -348,118 +348,107 @@ export function LatencyBandChart({
       : []),
   ]
 
-  // Measured for the x tick COUNT alone — see `speed-chart.tsx`'s identical wrapper. The default
-  // (`smartTicks` at `VX.minPxPerTick`, 55) is sized for the bare `DD.MM` basalt's own formatter
-  // produces, and `bucketTickFormat` draws `DD.MM HH:MM`; left to it, a 24 h window's ticks overlap
-  // end to end. `VX.margin` is only a floor on the measured gutter now, so `plotWidth` slightly
-  // OVER-estimates — absorbed by `AXIS_LABEL_PX`, which is already 96px for a ~72px label.
-  const { ref: sizeRef, width } = useChartSize()
-  // Its own wrapper rather than the measuring div: `useChartSize`'s ref is a CALLBACK ref of
-  // unpinned identity, and merging two callback refs inline would detach and re-observe on
-  // every render. One layout-neutral div is the cheaper answer.
   const { ref: viewRef, inView } = useInViewport<HTMLDivElement>()
-  const plotWidth = Math.max(1, width - VX.margin.left - VX.margin.right)
 
   return (
     <div ref={viewRef}>
-      <div ref={sizeRef}>
-        <CartesianChart
-          data={points}
-          chartId={`latency-${chartKey}`}
-          getX={getPointKey}
-          series={series}
-          // The envelope is part of the domain: `maxMs` is the only stored witness of a sub-cycle
-          // stall (all four targets showing a worst RTT 8×+ their own median at zero loss), and a
-          // domain sized to p95 alone would clip the very spikes it exists to show. The overlay's
-          // values are folded in too — a router faster than the internet's p5 is a real, expected
-          // reading, and sizing the axis off the primary alone would clip that line off the bottom.
+      <CartesianChart
+        data={points}
+        chartId={`latency-${chartKey}`}
+        getX={getPointKey}
+        series={series}
+        // The envelope is part of the domain: `maxMs` is the only stored witness of a sub-cycle
+        // stall (all four targets showing a worst RTT 8×+ their own median at zero loss), and a
+        // domain sized to p95 alone would clip the very spikes it exists to show. The overlay's
+        // values are folded in too — a router faster than the internet's p5 is a real, expected
+        // reading, and sizing the axis off the primary alone would clip that line off the bottom.
+        //
+        // A FUNCTION rather than a tuple, because the function is handed the VISIBLE series: toggle
+        // the band off in the legend and the axis rescales to the overlay instead of leaving a
+        // permanent gap where the hidden series' spikes used to be.
+        y={{
+          domain: (data, visible) => [0, domainMax(data, visible, chartKey, overlayKey)],
+          ticks: 4,
+          format: fmtMs,
+        }}
+        // Tick VALUES, not a count. `smartTicks`/`smartTicksEvery` append the final key
+        // unconditionally, so at every count the last two `DD.MM HH:MM` labels print on top of
+        // each other at the right edge — measured on a 24 h window. `xTickValues` (basalt-ui
+        // 1.23.0) is handed the chart's own resolved plot width, which is what deleted the
+        // `useChartSize` box this chart used to wrap itself in just to derive a count from.
+        xTickValues={axisTickValues}
+        formatX={bucketTickFormat(bucketSeconds)}
+        height={190}
+        // The legend is unconditional, and the reason it used to be suppressed on the single-series
+        // case no longer applies. It is not a caption restating the title any more — it is the only
+        // place on the page that says what the red and amber dots mean. Those thresholds are an
+        // ENCODING, and an encoding cannot live in the tooltip (which states one bucket's value,
+        // not the rule) or in the guide drawer (which is a click away, which is why nobody found it
+        // there).
+        //
+        // **Toggling is off, and not because it would not work.** Every entry here gates the mark
+        // it names (`LatencyMarks` reads all six out of `ctx.visible`) and the y domain is a
+        // function of the visible set, so a click would remove a mark and rescale the axis exactly
+        // as the framework intends. It is off because this legend is a KEY first and a control
+        // second: `ChartFrame` turns any legend of two or more entries into a toggle by default,
+        // which on a chart whose legend explains its encoding invites a reader to hide the finding
+        // they opened the page for. Same rule the compact-mode split already states — a section's
+        // evidence may sit behind a named switch, a conclusion never may.
+        // `getX` is a bucket's LEADING EDGE, so containment — not proximity — is what relates a
+        // broadcast key to a column. It costs this chart nothing (it is unfolded, so every sibling
+        // key it owns matches exactly) and is set anyway: the mode is a statement about what the
+        // domain values MEAN, and a chart that declares it wrong stays wrong the day it folds.
+        cursorResolution="leading"
+        legend={{ toggle: false }}
+        isPending={isPending}
+        // Anchored to the crosshair rather than the pointer. Three charts on this page share one
+        // cursor, and a tooltip that follows the mouse puts the primary band's numbers wherever the
+        // hand happens to be while the strips below show the same instant at a fixed x — anchoring
+        // lines all of them up on the column being read.
+        tooltip={{
+          follow: false,
+          // Renders as a FOLLOWER too, not only as the cursor source. Before basalt-ui 1.15.0 this
+          // directory drew a value chip on every synced sibling (`charts/synced-tip.tsx`); the
+          // rebuild made tooltips source-only, so hovering any one chart moved a bare line across
+          // the page and put numbers on exactly one of them. `onFollow` is the shipped answer and
+          // every chart on this cursor opts in — the whole point of the shared cursor here is
+          // reading four measurements of one instant at once.
+          onFollow: inView,
+          // The header states the calendar day and the badge the clock, because the header's own
+          // formatter drops the time — right for a daily series, useless on a 5-minute grid.
           //
-          // A FUNCTION rather than a tuple, because the function is handed the VISIBLE series: toggle
-          // the band off in the legend and the axis rescales to the overlay instead of leaving a
-          // permanent gap where the hidden series' spikes used to be.
-          y={{
-            domain: (data, visible) => [0, domainMax(data, visible, chartKey, overlayKey)],
-            ticks: 4,
-            format: fmtMs,
-          }}
-          xTicks={fitTickCount(
-            points.length,
-            Math.max(2, Math.floor(plotWidth / AXIS_LABEL_PX)),
-            plotWidth,
-          )}
-          formatX={bucketTickFormat(bucketSeconds)}
-          height={190}
-          // The legend is unconditional, and the reason it used to be suppressed on the single-series
-          // case no longer applies. It is not a caption restating the title any more — it is the only
-          // place on the page that says what the red and amber dots mean. Those thresholds are an
-          // ENCODING, and an encoding cannot live in the tooltip (which states one bucket's value,
-          // not the rule) or in the guide drawer (which is a click away, which is why nobody found it
-          // there).
-          //
-          // **Toggling is off, and not because it would not work.** Every entry here gates the mark
-          // it names (`LatencyMarks` reads all six out of `ctx.visible`) and the y domain is a
-          // function of the visible set, so a click would remove a mark and rescale the axis exactly
-          // as the framework intends. It is off because this legend is a KEY first and a control
-          // second: `ChartFrame` turns any legend of two or more entries into a toggle by default,
-          // which on a chart whose legend explains its encoding invites a reader to hide the finding
-          // they opened the page for. Same rule the compact-mode split already states — a section's
-          // evidence may sit behind a named switch, a conclusion never may.
-          // `getX` is a bucket's LEADING EDGE, so containment — not proximity — is what relates a
-          // broadcast key to a column. It costs this chart nothing (it is unfolded, so every sibling
-          // key it owns matches exactly) and is set anyway: the mode is a statement about what the
-          // domain values MEAN, and a chart that declares it wrong stays wrong the day it folds.
-          cursorResolution="leading"
-          legend={{ toggle: false }}
-          isPending={isPending}
-          // Anchored to the crosshair rather than the pointer. Three charts on this page share one
-          // cursor, and a tooltip that follows the mouse puts the primary band's numbers wherever the
-          // hand happens to be while the strips below show the same instant at a fixed x — anchoring
-          // lines all of them up on the column being read.
-          tooltip={{
-            follow: false,
-            // Renders as a FOLLOWER too, not only as the cursor source. Before basalt-ui 1.15.0 this
-            // directory drew a value chip on every synced sibling (`charts/synced-tip.tsx`); the
-            // rebuild made tooltips source-only, so hovering any one chart moved a bare line across
-            // the page and put numbers on exactly one of them. `onFollow` is the shipped answer and
-            // every chart on this cursor opts in — the whole point of the shared cursor here is
-            // reading four measurements of one instant at once.
-            onFollow: inView,
-            // The header states the calendar day and the badge the clock, because the header's own
-            // formatter drops the time — right for a daily series, useless on a 5-minute grid.
-            //
-            // Both read `bucketStart`, never the domain key. Handing `fmtTooltipDate` a `Date`
-            // takes its local-getter branch rather than its parse-a-string one, which is exactly the
-            // day the axis and the badge name; formatting off the instant means the key never has to
-            // be written in a particular zone to make the header come out right.
-            formatHeader: (_key, p) => fmtTooltipDate(new Date(p.bucketStart)),
-            label: (p) => ({ text: fmtClock(p.bucketStart), color: VX.legendText }),
-            extraRows: (p) => (
-              <>
-                <BucketRows point={p} expectedCycles={expectedCycles} primaryColor={primaryColor} />
-                <OutageRow point={p} outages={outages ?? []} bucketMs={bucketMs} windowTo={to} />
-                {p.bucket !== null && renderExtraTooltipRows?.(p.bucket)}
-                <VantageRows point={p} />
-              </>
-            ),
-          }}
-          ariaLabel={
-            overlay
-              ? `${label} latency with ${overlay.label} overlaid — median with p5 to p95 band, worst-ping envelope, and unmeasured periods marked${hasOutages ? ', with outages flagged' : ''}`
-              : `${label} latency — median with p5 to p95 band, worst-ping envelope, and unmeasured periods marked${hasOutages ? ', with outages flagged' : ''}`
-          }
-        >
-          {(ctx) => (
-            <LatencyMarks
-              ctx={ctx}
-              chartKey={chartKey}
-              overlayKey={overlayKey}
-              bucketMs={bucketMs}
-              outages={outages}
-              windowTo={to}
-            />
-          )}
-        </CartesianChart>
-      </div>
+          // Both read `bucketStart`, never the domain key. Handing `fmtTooltipDate` a `Date`
+          // takes its local-getter branch rather than its parse-a-string one, which is exactly the
+          // day the axis and the badge name; formatting off the instant means the key never has to
+          // be written in a particular zone to make the header come out right.
+          formatHeader: (_key, p) => fmtTooltipDate(new Date(p.bucketStart)),
+          label: (p) => ({ text: fmtClock(p.bucketStart), color: VX.legendText }),
+          extraRows: (p) => (
+            <>
+              <BucketRows point={p} expectedCycles={expectedCycles} primaryColor={primaryColor} />
+              <OutageRow point={p} outages={outages ?? []} bucketMs={bucketMs} windowTo={to} />
+              {p.bucket !== null && renderExtraTooltipRows?.(p.bucket)}
+              <VantageRows point={p} />
+            </>
+          ),
+        }}
+        ariaLabel={
+          overlay
+            ? `${label} latency with ${overlay.label} overlaid — median with p5 to p95 band, worst-ping envelope, and unmeasured periods marked${hasOutages ? ', with outages flagged' : ''}`
+            : `${label} latency — median with p5 to p95 band, worst-ping envelope, and unmeasured periods marked${hasOutages ? ', with outages flagged' : ''}`
+        }
+      >
+        {(ctx) => (
+          <LatencyMarks
+            ctx={ctx}
+            chartKey={chartKey}
+            overlayKey={overlayKey}
+            bucketMs={bucketMs}
+            outages={outages}
+            windowTo={to}
+          />
+        )}
+      </CartesianChart>
     </div>
   )
 }

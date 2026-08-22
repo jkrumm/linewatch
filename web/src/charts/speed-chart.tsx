@@ -5,12 +5,11 @@ import {
   type SeriesStyle,
   VX,
   deriveLegend,
-  useChartSize,
 } from 'basalt-ui/charts'
 import { useInViewport } from './use-in-viewport'
 import type { SpeedTest } from '../lib/types'
 import { fmtClock, fmtMbps } from '../lib/format'
-import { AXIS_LABEL_PX, fitTickCount, runAxisKey, runTickFormat } from '../lib/axis'
+import { axisTickValues, runAxisKey, runTickFormat } from '../lib/axis'
 import { useCardTitle, useCompactMode } from '../lib/compact'
 
 /**
@@ -116,21 +115,11 @@ export function SpeedChart({
     role: 'reference',
   }))
   const height = compact ? SPEED_HEIGHT_COMPACT : SPEED_HEIGHT
-  // The container's own width, measured here rather than inside a wrapper the kind renders under.
-  // `ResponsiveChart` is gone (1.15.0 has one responsive path, `ChartFrame`, which every kind
-  // composes internally) and `useChartSize` is the shipped hook for a box outside the chart system
-  // that still needs measuring — which this is, for the one reason below: `xTicks` is a COUNT, and
-  // a count that keeps its labels apart can only be derived from a width.
-  const { ref: sizeRef, width } = useChartSize()
-  // Its own wrapper rather than the measuring div: `useChartSize`'s ref is a CALLBACK ref of
-  // unpinned identity, and merging two callback refs inline would detach and re-observe on
-  // every render. One layout-neutral div is the cheaper answer.
   const { ref: viewRef, inView } = useInViewport<HTMLDivElement>()
-  const plotWidth = Math.max(1, width - VX.margin.left - VX.margin.right)
 
   return (
     <ChartCard
-      title={useCardTitle("Speed")}
+      title={useCardTitle('Speed')}
       // The unit lives here, not on the y ticks. Formatting each tick as `600 Mbps` was the
       // obvious fix for a unitless axis and it made things worse: `MultiLine` draws its axis inside
       // basalt's shared 44 px gutter, sized for bare numbers, so every tick rendered as the bare
@@ -145,79 +134,68 @@ export function SpeedChart({
       // not a guess.
       tooltip="Ookla runs, one point each, drawn at equal spacing regardless of the gap between them — so the shared cursor marks the run nearest the moment you are hovering, not the same horizontal position. Download and upload share one axis."
     >
-      {/* `MultiLine` measures its own width but exposes only a tick *count*, so the count has to be
-          derived from a width measured out here. Left to its default, `smartTicks` spaces ticks by
-          `VX.minPxPerTick` (55) — sized for the bare `DD.MM` its own formatter produces, not for
-          the `DD.MM HH:MM` these run labels carry — and every one of a 24 h window's runs got a
-          tick, rendering the axis as one unbroken smear of overlapping timestamps. */}
       {/* See `availability-strip.tsx`'s identical wrapper for why this is a floor, not a height. */}
-      <div ref={viewRef}>
-        <div ref={sizeRef} style={{ minHeight: height }}>
-          <MultiLine
-            data={points}
-            chartId="speed-throughput"
-            ariaLabel="Download against upload in Mbps, one point per speed-test run"
-            isPending={isPending === true}
-            // The *plot* width, not the container's: the kind spends its measured margins on the
-            // axes, and sizing the tick count off the outer width overestimates by ~60 px. Harmless
-            // at 1600 px and not at 390, where it was the difference between four legible timestamps
-            // and five overlapping ones. `VX.margin` is only a FLOOR on a measured margin now, so
-            // this is an estimate rather than the exact gutter — one tick either way, never a
-            // clipped label.
-            xTicks={fitTickCount(
-              points.length,
-              Math.max(2, Math.floor(plotWidth / AXIS_LABEL_PX)),
-              plotWidth,
-            )}
-            getX={(p) => p.key}
-            formatX={runTickFormat}
-            // Numbers on this card while the cursor is on a chart above — see
-            // `latency-band-chart`'s `onFollow` for why every chart on this page opts in.
-            tooltip={{
-              onFollow: inView,
-              // The badge carries the run's clock, which the header format drops. It was tolerable
-              // while this card was the only thing on screen and is not now: the follower tooltip
-              // appears beside three that each name a time to the minute, and a reader comparing
-              // them needs to know this one is a run at 04:10 rather than "sometime on the 19th".
-              label: (p) => ({ text: fmtClock(p.test.ts), color: VX.legendText }),
-            }}
-            series={[
-              {
-                // Accent blue against `VX.line2`, the MID grey — one pair for these two
-                // concepts wherever they are drawn, here and in the throughput bars. Not
-                // `VX.line`: at 11.1:1 against the panel it is the brightest thing available
-                // and makes the secondary series louder than the accent. Not two greys
-                // either, which is what this chart's own history warns about.
-                key: 'download',
-                label: 'Download',
-                color: VX.accent,
-                mark: 'line',
-                getValue: (p) => p.test.downloadMbps,
-                formatValue: fmtMbps,
-              },
-              {
-                key: 'upload',
-                label: 'Upload',
-                color: VX.line2,
-                mark: 'line',
-                getValue: (p) => p.test.uploadMbps,
-                formatValue: fmtMbps,
-              },
-            ]}
-            refLines={refLines.map((ref) => ({
-              value: ref.value,
-              color: ref.color,
-              dashed: true,
-            }))}
-            // PER-SERIES, not `y.format`. An `AxisConfig.format` is the tick formatter AND the
-            // tooltip's — and the unit belongs to the subtitle here, not to every tick (see the
-            // `subtitle` prop above, and the clipped-axis bug its comment records). Measured margins
-            // would now fit `600 Mbps`, so it would no longer clip; it would just say Mbps five times
-            // over a card that already says it once.
-            y={{ domain: 'auto' }}
-            height={height}
-          />
-        </div>
+      <div ref={viewRef} style={{ minHeight: height }}>
+        <MultiLine
+          data={points}
+          chartId="speed-throughput"
+          ariaLabel="Download against upload in Mbps, one point per speed-test run"
+          isPending={isPending === true}
+          // Tick VALUES, not a count — see `latency-band-chart.tsx`'s identical prop. Left to
+          // its default, `smartTicks` spaces ticks by `VX.minPxPerTick` (55), sized for the bare
+          // `DD.MM` its own formatter produces rather than the `DD.MM HH:MM` these run labels
+          // carry, and every run in a 24 h window got a tick — one unbroken smear of overlapping
+          // timestamps. The kind now hands the picker its own resolved plot width, so the
+          // `useChartSize` box this chart wrapped itself in is gone.
+          xTickValues={axisTickValues}
+          getX={(p) => p.key}
+          formatX={runTickFormat}
+          // Numbers on this card while the cursor is on a chart above — see
+          // `latency-band-chart`'s `onFollow` for why every chart on this page opts in.
+          tooltip={{
+            onFollow: inView,
+            // The badge carries the run's clock, which the header format drops. It was tolerable
+            // while this card was the only thing on screen and is not now: the follower tooltip
+            // appears beside three that each name a time to the minute, and a reader comparing
+            // them needs to know this one is a run at 04:10 rather than "sometime on the 19th".
+            label: (p) => ({ text: fmtClock(p.test.ts), color: VX.legendText }),
+          }}
+          series={[
+            {
+              // Accent blue against `VX.line2`, the MID grey — one pair for these two
+              // concepts wherever they are drawn, here and in the throughput bars. Not
+              // `VX.line`: at 11.1:1 against the panel it is the brightest thing available
+              // and makes the secondary series louder than the accent. Not two greys
+              // either, which is what this chart's own history warns about.
+              key: 'download',
+              label: 'Download',
+              color: VX.accent,
+              mark: 'line',
+              getValue: (p) => p.test.downloadMbps,
+              formatValue: fmtMbps,
+            },
+            {
+              key: 'upload',
+              label: 'Upload',
+              color: VX.line2,
+              mark: 'line',
+              getValue: (p) => p.test.uploadMbps,
+              formatValue: fmtMbps,
+            },
+          ]}
+          refLines={refLines.map((ref) => ({
+            value: ref.value,
+            color: ref.color,
+            dashed: true,
+          }))}
+          // PER-SERIES, not `y.format`. An `AxisConfig.format` is the tick formatter AND the
+          // tooltip's — and the unit belongs to the subtitle here, not to every tick (see the
+          // `subtitle` prop above, and the clipped-axis bug its comment records). Measured margins
+          // would now fit `600 Mbps`, so it would no longer clip; it would just say Mbps five times
+          // over a card that already says it once.
+          y={{ domain: 'auto' }}
+          height={height}
+        />
       </div>
       {/* An unlabelled rule across a throughput chart is an assertion the reader has to guess at.
           This legend sits outside `ChartFrame`, so its pending suppression is explicit — see the

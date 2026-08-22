@@ -4,7 +4,6 @@ import {
   axisTickValues,
   bucketAxisLabel,
   bucketTickFormat,
-  fitTickCount,
   runAxisKey,
   runTickFormat,
 } from './axis'
@@ -76,7 +75,9 @@ describe('bucketAxisLabel', () => {
     // its DD.MM, so a January start made this assertion pass against a label that collided in
     // production. The window has to straddle a year boundary for this test to mean anything.
     const start = Date.UTC(2025, 7, 1)
-    const labels = Array.from({ length: count }, (_, i) => bucketAxisLabel(start + i * bucketSeconds * 1000, bucketSeconds))
+    const labels = Array.from({ length: count }, (_, i) =>
+      bucketAxisLabel(start + i * bucketSeconds * 1000, bucketSeconds),
+    )
     expect(new Set(labels).size).toBe(count)
   })
 
@@ -149,46 +150,6 @@ describe('axisTickValues', () => {
     const ticks = axisTickValues(range(200), 800)
     expect(ticks).toEqual(ticks.toSorted((a, b) => a - b))
     expect(new Set(ticks).size).toBe(ticks.length)
-  })
-})
-
-describe('fitTickCount', () => {
-  /** Mirrors basalt's `smartTicksEvery`, which is what `MultiLine` uses internally. */
-  function smartTicksEvery(n: number, count: number): number[] {
-    const all = Array.from({ length: n }, (_, i) => i)
-    if (n <= count) return all
-    const step = Math.ceil(n / count)
-    return all.filter((i) => i % step === 0 || i === n - 1)
-  }
-
-  const WIDTH = 1130
-
-  /**
-   * The measured failure: 288 buckets at 11 ticks left the appended final index a partial step from
-   * its neighbour, printing `01.08 14:05` and `01.08 15:20` on top of each other at the right edge.
-   */
-  test.each([288, 287, 200, 169, 100, 61, 47])('the final label clears its neighbour — %i values', (n) => {
-    const ticks = smartTicksEvery(n, fitTickCount(n, 11, WIDTH))
-    const gapPx = (ticks[ticks.length - 1]! - ticks[ticks.length - 2]!) * (WIDTH / n)
-    expect(gapPx).toBeGreaterThanOrEqual(AXIS_LABEL_PX)
-  })
-
-  test('stays within the requested ceiling and never drops below two', () => {
-    for (let n = 3; n < 400; n++) {
-      const count = fitTickCount(n, 11, WIDTH)
-      expect(count).toBeLessThanOrEqual(11)
-      expect(count).toBeGreaterThanOrEqual(2)
-    }
-  })
-
-  test('a series that already fits keeps the ceiling', () => {
-    expect(fitTickCount(5, 11, WIDTH)).toBe(11)
-  })
-
-  /** No count can help on a very narrow axis; thinning to two ticks would be worse than one
-   * crowded label, so the ceiling is returned rather than the axis being gutted. */
-  test('falls back to the ceiling when nothing clears', () => {
-    expect(fitTickCount(300, 11, 120)).toBe(11)
   })
 })
 

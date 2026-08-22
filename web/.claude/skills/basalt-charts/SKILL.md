@@ -16,9 +16,9 @@ everything below assumes — composing `CartesianChart` (single-plot) or `ChartF
 Before writing chart code, decide which of three paths you are on:
 
 1. **Reuse a shipped kind.** basalt-ui ships `ZonedLine`, `Bars`, `StackedArea`, `MultiLine`,
-   `DualPanel`, `Heatmap`, `Donut`. If the shape matches, use it — props are declarative (`data`,
-   `chartId`, `getX`, `series`/`positiveBars`, one `AxisConfig` per axis, zones/thresholds/refLines
-   as plain arrays). Done.
+   `DualPanel`, `Heatmap`, `Donut`, `BandStrip`, `MirroredBars`. If the shape matches, use it —
+   props are declarative (`data`, `chartId`, `getX`, `series`/`positiveBars`, one `AxisConfig` per
+   axis, zones/thresholds/refLines as plain arrays). Done.
    - **`ZonedLine`** — a single-series line with zone bands, thresholds, x-zones, refLines.
    - **`Bars`** — 1+ stacked positive/negative bar series, optional line overlays, dual-axis config.
    - **`StackedArea`** — opaque stacked bands, auto cumulative-top y-domain.
@@ -33,6 +33,13 @@ Before writing chart code, decide which of three paths you are on:
    - **`Heatmap`** — category×category intensity grid (`color-mix` alpha), per-cell tooltip,
      optional gradient legend strip. Replaces bespoke time-of-day.
    - **`Donut`** — proportional donut, optional `centerContent` overlay.
+   - **`BandStrip`** — 1-D categorical bands, no y dimension: one rect per slot,
+     `getBand(d) => { state, fill?, absentFraction?, marker? }`. `series` is the state set and
+     drives legend, fill and the one derived tooltip row. Replaces a bespoke state/availability
+     strip.
+   - **`MirroredBars`** — two BAR panes over one x scale and one baseline, each in its own domain
+     (`up`/`down` take `{ key, max?, autoMaxFloor?, ticks?, format }`). Not `DualPanel`, whose top
+     pane is a LINE and whose bottom takes one SIGNED accessor.
 2. **Extract a new kind (second instance of a pattern).** When you are about to build the _second_
    chart of a shape that has no shipped kind, extract a kind. Don't extract on the first; don't
    wait past the third. A new kind lives in the consumer's chart kinds dir (or, if generic enough
@@ -42,6 +49,12 @@ Before writing chart code, decide which of three paths you are on:
 3. **Stay bespoke (genuinely unique).** A one-off shape (e.g. a dual-panel MACD, or two series on
    genuinely different scales that don't fit any kind's config surface) composes `CartesianChart`
    or `ChartFrame` directly in the page's chart file — not in `kinds/`.
+
+**Extracting a kind? Prove it by porting.** A kind is proven by moving a real consumer's call
+sites onto it and reporting what it could NOT express — not by a demo page, which is written
+against the API that already exists. The two band kinds were built that way (linewatch, 1884 → 957
+source lines, 11 `hand-rolled-plot` waivers retired, two live `NaN`-geometry bugs found). Ship the
+"still cannot express" list with the kind.
 
 > Anti-pattern: a single `<Chart type="..." config={...} />` god-component that switches by kind.
 > That is the Recharts trap. Prefer N small kinds. **If a chart doesn't fit the primitives, add a
@@ -109,8 +122,9 @@ Theme tuning of these series happens in the theme lab — pass them as `groups` 
 ## Compose the primitives (never hand-roll)
 
 Every chart — kind or bespoke — composes `CartesianChart` for a single plot rect, or `ChartFrame`
-directly for a multi-pane / non-cartesian shape (`DualPanel`'s two panes, `Heatmap`'s grid,
-`Donut`'s ring). Either way the contract is the same: the primitive owns margin, scales, grid,
+directly for a multi-pane / non-cartesian shape — five of them ship: `DualPanel`'s two panes,
+`MirroredBars`' two bar panes, `BandStrip`'s missing y dimension, `Heatmap`'s grid, `Donut`'s ring.
+Either way the contract is the same: the primitive owns margin, scales, grid,
 axes, legend, the shared cursor, and the tooltip; you supply `series` and draw ONLY marks. This is
 mandatory, not a convention — `basalt/hand-rolled-plot` fails the build on a bypass (see "Respect
 the boundary" below); it is easier to compose it than to work around it.
@@ -212,9 +226,10 @@ import { ChartCursorScope } from 'basalt-ui/charts'
   primitive (`AxisLeftNumeric`, `AxisRightNumeric`, `AxisBottomDate`, `HoverOverlay`, `Crosshair`)
   rendered in a file that doesn't compose `CartesianChart`, per NODE. Escape:
   `theme-allow hand-rolled-plot — <why>` on the one node, or `theme-allow-file hand-rolled-plot —
-<why>` anywhere in the file — how a genuinely non-single-plot shape (`DualPanel`, `Heatmap`,
-  `Donut`) declares itself. `-file` is the 1.21.0 spelling and it is required. The file that defines
-  `CartesianChart` is exempt definitionally.
+<why>` anywhere in the file — how a genuinely non-single-plot shape (`DualPanel`, `MirroredBars`,
+  `BandStrip`; `Heatmap` and `Donut` render no assembly primitive and need none) declares itself.
+  `-file` is the 1.21.0 spelling and it is required. The file that defines `CartesianChart` is
+  exempt definitionally.
 - **No hand-authored legends.** `basalt/chart-legend-literal` fails the build on a hand-written
   array literal passed to `ChartLegend`'s `items` — derive it from the same `series` the chart draws
   (`deriveLegend`, or let `ChartFrame`/`CartesianChart` do it) so it can't name a series the plot no

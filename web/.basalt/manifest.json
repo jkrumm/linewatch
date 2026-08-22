@@ -2,8 +2,8 @@
   "version": 1,
   "files": {
     ".claude/rules/basalt-mantine.md": "ff976020c27d4526ffed62b3e477e2db043b475e6ec268f2efe44c2a1a75f168",
-    ".claude/rules/basalt-charts.md": "81ce0bc6d6b4cb23b48cffaa16e7ba7277b9edb1073c2f6ea02e9e599e9f6397",
-    ".claude/rules/basalt-tokens.md": "dd9a9ccf048e75055bde95551cc06d26f7d9aac1e8cac4e4f794fa08c26b98b4",
+    ".claude/rules/basalt-charts.md": "0550ef4e4d0db6aadfadb0cabe07666055e605ee85a524be01ab509d6931d925",
+    ".claude/rules/basalt-tokens.md": "38917af523a86cd2fbafa1a8fd8f44199502f2b2110d263da69e1e484f9909c1",
     ".claude/rules/basalt-query.md": "cacd92c4c9c40721e3854abc8e734f557c0447c51c4b619e84e2e42d12fe2cdc",
     ".claude/rules/basalt-router.md": "404c6a63c402af57db48a80a3c0635df320c032c58711904757b939eff435ef6",
     ".claude/rules/basalt-forms.md": "9ff2049605cf5e24dca8970700fdf7a1f38a627c987e2c4bf4d160096cace60c",
@@ -13,10 +13,10 @@
     ".claude/rules/basalt-agent.md": "66d864f2bb5723d276eb57e7846ccba453c01eda7a3837d2d389ba9925e9a650",
     ".claude/rules/basalt-content.md": "ae7d5e0fdc3f080be3fb4258095322abc37843abc45bbc66fba26a3e91d018c9",
     ".claude/rules/basalt-state.md": "3a9ccb0c83f8a4e74bf6303a94db20e76792f6cab8ad4ce105c77587606bff4c",
-    ".claude/rules/basalt-app.md": "7f8defad43a0a5e824efd36721f74820dde288cd4beddc240fba10cfc6c73cee",
+    ".claude/rules/basalt-app.md": "dc82c577240e0ec1e43a30f3b0119c34e1051e7a2c6203c461dd03bef79e6645",
     ".claude/skills/basalt-app/SKILL.md": "789ed34787b1373c04be6a9fae7fae58463b7f65f7c06b75956bc7a8469e384b",
     ".claude/skills/basalt-design/SKILL.md": "00e058be90d1fa06532c9f15506c34b6ba2cacf045b3173cb86fba3c886dfdfd",
-    ".claude/skills/basalt-charts/SKILL.md": "2b3b9b353d2ba4add0317873685fbc2557b705032c67f5fab1ed305d93f2e7bd",
+    ".claude/skills/basalt-charts/SKILL.md": "b753e2389c386c74ccc10dc6d6c2044bfcf4dd3543b1b2705221a0453168e971",
     "CLAUDE.md": "da8208a56943154af1bc382b435f947d65cbc27ec99db7b50ed70bd7479ab6b7",
     "DESIGN.md": "5bbf20edb4483682e5ff5564c446e3b8335947917545af708b671957286256b1",
     ".oxfmtrc.json": "45c6ab68a6bc0e5dd6bb8b4106c71fe4af6f3e68309f112c0df382bce57e8cdb",
@@ -26,7 +26,7 @@
     "src/query-client.ts": "5efb420731453ee1e0279a4501bf6536b066b595f14886ba3d7329336eae09c1",
     "src/routes/__root.tsx": "439fb91cf26ee51eb56ae6415556970d323dae6049d10415970709b79c0373e0"
   },
-  "basaltVersion": "1.22.0",
+  "basaltVersion": "1.23.0",
   "spacingScale": {
     "xs": 11,
     "sm": 13,

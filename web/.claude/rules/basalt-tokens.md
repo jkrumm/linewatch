@@ -96,6 +96,22 @@ An id is a guard kind (`raw-surface`, `inline-spacing`, …) or an oxlint plugin
   still ends the block; that is how you say "this comment is not about the next statement".
 - **`basalt/hand-rolled-plot` grants whole-file immunity only through `theme-allow-file`.** Every
   assembly node is otherwise waived on its own.
+- **Eight shapes are asserted NOT to waive, in both halves.** They are pinned as unsupported rather
+  than merely left out, so "unsupported" and "silently broken" stop reading the same. Don't write
+  them:
+
+  | Shape                                                                                                                              | Why it does not waive                                                                                               |
+  | ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+  | a blank line between the annotation and the code — after `//`, after `{/* */}`, or after a `{/*` whose closer sits on its own line | a blank line is how you say "this comment is not about the next statement"                                          |
+  | the token mid-sentence in a line comment, a docblock gutter, or a JSX expression comment                                           | prose that MENTIONS the token is not an annotation — the reason it must START its comment                           |
+  | the token inside a string literal                                                                                                  | same                                                                                                                |
+  | above a multi-line OPENING tag, when the finding sits on a later attribute line                                                    | a waiver reaches the first line below its comment, not an arbitrary line further down — put it beside the attribute |
+
+  The whole grid — four axes, comment style × token position × where the closer falls × what
+  follows — is pinned row for row in `src/guard/check-source.test.ts` (37 supported + these 8) and
+  `configs/oxlint-plugin.test.ts` (32 + 8; five of the guard's rows are CSS/HTML/JSON dialects
+  oxlint never sees). Zero disagreements between the two, and no waiver tally moved in any of the
+  seven consumer repos.
 
 ### Audit them: `basalt-ui check-theme --audit-allows`
 
@@ -141,7 +157,7 @@ nothing is forked.
 - **Exact name match only** — the one limit that is structural. Round 5 confirmed the miss rate:
   linewatch's forks are named `Cell` and `Box`, rb's is `Stat`. Rename the fork and the rule goes
   quiet, which is what a fork's author naturally does.
-- **Scope: basalt consumers only, and component-shaped declarations only.** Since 1.21.1 the rule
+- **Scope: basalt consumers only, and component-shaped declarations only.** Since 1.22.0 the rule
   gates on `isBasaltScopedFile` like every other rule in the file, and needs a function, an arrow, a
   `memo`/`forwardRef` wrapper or a class extending one. A plain data class sharing a name with a
   shipped export is a collision, not a fork — it fired on a `SlugTracker` class in a React-free

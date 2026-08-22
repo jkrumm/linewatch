@@ -58,11 +58,13 @@ radial/matrix shape, is not optional — two `basalt` oxlint plugin rules
   compose `CartesianChart`. **Since 1.20.0 every assembly node is reported and waived on its own**
   — one comment no longer grants the whole file permanent immunity, which is how a 604-line chart
   file went unpoliced. To waive ONE node, put `theme-allow hand-rolled-plot — <why>` on it (or on a
-  comment-only line above it). A genuinely non-single-plot shape (multi-pane, radial, matrix)
-  declares the whole file with `theme-allow-file hand-rolled-plot — two panes over one x scale`,
-  anywhere in it; `DualPanel` carries the repo's only one. **`theme-allow-file` is the 1.21.0
-  spelling** — at 1.20.0 a node-scoped annotation was silently promoted to a file declaration, so
-  per-node scoping was not expressible; move the one word. The file that DEFINES `CartesianChart` is
+  comment-only line above it). A genuinely non-single-plot shape (multi-pane, radial, matrix, or a
+  strip with no y dimension) declares the whole file with `theme-allow-file hand-rolled-plot —
+<why>`, anywhere in it; basalt's own tree carries three, on `DualPanel`, `BandStrip` and
+  `MirroredBars`. `Donut` and `Heatmap` are non-single-plot too and carry none — they render no
+  assembly primitive, so the rule never fires and there is nothing to waive.
+  **`theme-allow-file` is the 1.21.0 spelling** — at 1.20.0 a node-scoped annotation was silently
+  promoted to a file declaration, so per-node scoping was not expressible; move the one word. The file that DEFINES `CartesianChart` is
   exempt definitionally (detected by declaration, not by path), since a rule saying "compose X"
   cannot fire inside X.
 - **`basalt/chart-legend-literal`** — a hand-written array literal passed to `ChartLegend`'s
@@ -160,6 +162,13 @@ ships no map kind.
    onto one domain value, silently dropping one from the plot (see #6 below for why that's the
    cursor's problem too). `Heatmap` is deliberately excluded: its existing `colLabel`/`rowLabel`
    already are that seam, and a second prop over one concern would fork them.
+   **Which x ticks get painted is a separate seam**, `xTickValues?: (keys, xMax) => readonly
+string[]`, on `CartesianChart` and forwarded by `Bars`/`MultiLine`/`StackedArea`/`ZonedLine`
+   plus both band kinds. Resolution order is explicit VALUES → explicit COUNT (`xTicks`, unchanged)
+   → as many as fit (`smartTicks`); omit both and nothing moves. Reach for it on a dense time axis,
+   because **a count cannot express one**: `smartTicks`/`smartTicksEvery` append the final key
+   unconditionally, so any count that does not land exactly on the last index paints two labels on
+   top of each other at the right edge — at every count, not at an unlucky one.
    **The x axis is CATEGORICAL, and this is not inferable from the API.** `CartesianChart` builds
    its x scale as `scalePoint<string>`, so N points are N evenly spaced positions whatever the
    values behind the keys — there is no linear or time x scale. Correct and invisible for a domain
@@ -332,6 +341,24 @@ per-series `getValue` accessors on `ChartSeries<T>`):
   wrapper.
 - **`Donut`** — proportional donut with an optional center-content overlay. Composes `ChartFrame`
   directly (radial, not cartesian).
+- **`BandStrip`** — 1-D categorical bands over a shared x axis, **no y dimension at all**: one rect
+  per slot, `getBand(d) => { state, fill?, absentFraction?, marker? }`. `series` IS the state set —
+  it drives the legend, each band's fill and the one derived tooltip row, so a strip cannot name a
+  state it does not draw. `absentFraction` paints the share of a folded slot nothing measured as a
+  hatch; `marker` carries a fact that must not be readable off the `fill` ramp. `cursorResolution`
+  defaults `'leading'` here (a band IS a bucket), not `'nearest'`. Composes `ChartFrame` directly —
+  `CartesianChart` renders `AxisLeftNumeric` unconditionally, so this shape could never use it.
+- **`MirroredBars`** — two BAR panes over one x scale, mirrored around one baseline, each pane in
+  its own domain. `up`/`down` take `{ key, max?, autoMaxFloor?, ticks?, format }`; `upFraction`
+  (default 0.35) is the up pane's share of the band height, which is where the shared baseline sits;
+  `getAbsentFraction` hatches an unmeasured slot and `getBarOpacity` dims one. A sibling of
+  `DualPanel`, not an extension: `DualPanel`'s top pane is a LINE pane and its bottom takes one
+  SIGNED `getBar` over a symmetric domain. Two independent magnitudes are not one signed quantity.
+  Composes `ChartFrame` directly.
+
+Both band kinds fold their domain by width (`fold: { minBandPx?, merge }`), and `foldBands` is
+exported so a consumer can test their merge against the grouping that will actually run.
+`HatchPattern` / `hatchFill` / `hatchSizeFor` ship the absence fill.
 
 `ZonedLine` and `MultiLine` also accept `xZones?: XZoneSpec[]` — the vertical counterpart to a
 kind's horizontal zone bands, for marking a time window rather than a value range. Each
@@ -476,6 +503,14 @@ margin. Passing `y2` to get a dual-axis chart no longer needs a manual margin nu
 
 The escape hatch is `margin={{ left: n }}` (`Partial<ChartMargin>`) on `CartesianChart` — a per-side
 override applied LAST, after measurement, so it always wins.
+
+**A band plot has one extra law, because a band axis puts its FIRST tick on the plot's left edge.**
+With no left axis to measure, `autoMargin` stops at `VX.margin.left` and half the first x label
+hangs off the canvas — so `BandStrip` floors its left gutter at half the widest x label, mirroring
+what `autoMargin` already does on the right. Both terminal gutters are then capped (14% of width
+left, 12% right): uncapped, half a `DD.MM HH:MM` label is 48px of a 338px chart. `MirroredBars`
+probes real tick labels from both panes, so it takes the plain measured margin and neither the
+floor nor the cap applies.
 
 `chartMargin(opts?)` (`basalt-ui/tokens`, also re-exported from `basalt-ui/charts`) still exists,
 but only matters for a bespoke chart that composes `ChartFrame` directly (not `CartesianChart`) and

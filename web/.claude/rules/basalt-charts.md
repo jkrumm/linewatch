@@ -60,7 +60,7 @@ radial/matrix shape, is not optional — two `basalt` oxlint plugin rules
   file went unpoliced. To waive ONE node, put `theme-allow hand-rolled-plot — <why>` on it (or on a
   comment-only line above it). A genuinely non-single-plot shape (multi-pane, radial, matrix)
   declares the whole file with `theme-allow-file hand-rolled-plot — two panes over one x scale`,
-  anywhere in it; `DualPanel` carries the repo's only one. **`theme-allow-file` is the 1.20.1
+  anywhere in it; `DualPanel` carries the repo's only one. **`theme-allow-file` is the 1.21.0
   spelling** — at 1.20.0 a node-scoped annotation was silently promoted to a file declaration, so
   per-node scoping was not expressible; move the one word. The file that DEFINES `CartesianChart` is
   exempt definitionally (detected by declaration, not by path), since a rule saying "compose X"
@@ -95,7 +95,7 @@ ships no map kind.
 - **Want `@visx/geo` anyway?** Install it yourself — basalt doesn't pin it — and keep it under a
   `charts/` segment like every other visx import, same as any bespoke chart.
 - **Style map chrome with `--vx-*` tokens** (`VX.*`/`alpha()`) so it matches the rest of the app.
-- **The guard trap, narrowed at 1.20.1:** `check-theme`'s `inline-spacing` kind is a per-line regex
+- **The guard trap, narrowed at 1.21.0:** `check-theme`'s `inline-spacing` kind is a per-line regex
   over raw source, not an AST pass. A **unitless** number now only reports inside a style-object
   context (a `style=`/`sx=`/`css=` attribute, or a const whose name or type says styles), so a map's
   pixel geometry — `fitBounds({ padding: 48 })`, marker offsets — no longer trips it: an options bag

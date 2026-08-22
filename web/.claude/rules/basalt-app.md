@@ -98,12 +98,17 @@ Run `basalt-ui doctor` afterwards to confirm the wiring took. A check that canno
 
 ### The lefthook preset overrides YOU, not the other way round
 
-New in 1.20.1: `doctor`'s `lefthook-preset` check hard-fails when the repo-root lefthook config
-`extends` a path that does not resolve. That state is otherwise invisible — lefthook merges a
-missing target into **zero** commands and exits 0, so `lefthook dump` looks clean and the repo has
-no pre-commit gate with nothing anywhere saying so. It warns on a lefthook.yml wiring its own hooks,
-and is n/a with no lefthook at all. `sync` reports the same seam, since it is the command an upgrade
-actually runs and neither file is one basalt owns.
+`doctor`'s `lefthook-preset` check asks whether a pre-commit gate EXISTS — not whether your config
+contains the extends string. Since 1.21.1 it asks `lefthook dump`, which resolves `extends`,
+`include` and per-command `root:`. **Wiring the jobs yourself passes**: linewatch runs all three with
+`root: 'web/'` precisely because `extends` merges commands _without_ their working directory, and the
+old text match warned there and prescribed a change that would have broken it.
+
+A broken `extends` target is still a hard fail — lefthook merges a missing target into **zero**
+commands and exits 0, so `lefthook dump` looks clean and the repo has no gate with nothing saying so.
+A provably absent gate is a warn; a repo where `lefthook dump` could not run gets an advisory warning
+naming what it could not see. n/a with no lefthook at all. `sync` reports the same seam, since it is
+the command an upgrade actually runs and neither file is one basalt owns.
 
 **An `extends` target WINS on a colliding key.** Declare `pre-commit.commands.oxfmt.run` (or
 `glob:`) in your own file and the preset's value is what runs — yours is discarded silently. Only
@@ -160,7 +165,7 @@ site-wide OG/Twitter defaults from `options.seo`.
 plugins: [react(), ...basaltAppPlugin({ name: 'Argo', colorScheme: 'auto' })]
 ```
 
-Before 1.20.1 the anti-FOUC rule emitted `html{color-scheme:dark}` **unlayered**, which outranks
+Before 1.21.0 the anti-FOUC rule emitted `html{color-scheme:dark}` **unlayered**, which outranks
 Mantine's own `@layer mantine` declaration regardless of specificity — a light-scheme consumer got
 dark scrollbars, dark `<select>` popups and dark date pickers permanently, with no opt-out. The rule
 is now scoped to `html:not([data-mantine-color-scheme])`, so it expires the instant MantineProvider
@@ -191,8 +196,9 @@ source image — it lives in the CONSUMER's own devDependencies, not basalt-ui's
 warns (does not fail) when `public/` exists but is missing one of these files.
 
 `basaltAppPlugin` also emits `site.webmanifest` (served in dev too) with explicit `id`/`scope`/
-`start_url` — pass `manifest: false` to skip it, or `icons: false` to skip the icon `<link>` tags
-without touching the manifest.
+`start_url` — pass `manifest: false` to skip it, or `icons: false` to skip the icons. Since 1.21.1
+`icons: false` omits BOTH the head `<link>` tags and the manifest's `icons` member; before that it
+skipped only the head, so a manifest shipped naming two PNGs the app never builds.
 
 ## Service worker (opt-in)
 

@@ -120,9 +120,10 @@ Lint wires as `oxlint . && basalt-ui check-theme` (seeded as the `lint:basalt` s
 guard is the teeth behind the token doctrine. Before writing any composite, check whether basalt
 already ships it: round 4 found ~15 forked copies of shipped components across seven repos, all
 passing every gate, because a fork by a token-fluent author uses exactly the right tokens.
-`basalt/shadow-basalt-export` reads all nine published barrels since 1.20.1 (the charts layer
-included), but it warns only on an **exact** name collision — round 5 found the renamed forks
-(`Cell`, `Box`, `Stat`) sail straight past it. It is a tripwire, not coverage; nothing catches the
+`basalt/shadow-basalt-export` reads all nine published barrels since 1.21.0 (the charts layer
+included), but it warns only on an **exact** name collision, in a basalt-scoped file, on a
+component-shaped declaration — round 5 found the renamed forks (`Cell`, `Box`, `Stat`) sail straight
+past it. It is a tripwire, not coverage; nothing catches the
 rest. Ask before you build; do not wait to be told.
 
 The consumer series file (`<first basalt.root>/lib/series.ts` by default — so `src/lib/series.ts` on

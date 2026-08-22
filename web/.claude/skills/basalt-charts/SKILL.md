@@ -213,7 +213,7 @@ import { ChartCursorScope } from 'basalt-ui/charts'
   rendered in a file that doesn't compose `CartesianChart`, per NODE. Escape:
   `theme-allow hand-rolled-plot — <why>` on the one node, or `theme-allow-file hand-rolled-plot —
 <why>` anywhere in the file — how a genuinely non-single-plot shape (`DualPanel`, `Heatmap`,
-  `Donut`) declares itself. `-file` is the 1.20.1 spelling and it is required. The file that defines
+  `Donut`) declares itself. `-file` is the 1.21.0 spelling and it is required. The file that defines
   `CartesianChart` is exempt definitionally.
 - **No hand-authored legends.** `basalt/chart-legend-literal` fails the build on a hand-written
   array literal passed to `ChartLegend`'s `items` — derive it from the same `series` the chart draws

@@ -25,7 +25,7 @@ Pick the right home for each kind of state — don't dump everything into one st
 - **UI preferences that must survive navigation but aren't URL-worthy** (sidebar collapsed, panel
   layout, draft filters) → `createPersistedState` from `basalt-ui/state` — the framework's own
   versioned localStorage primitive (see below). `BasaltShell` persists its own collapse state
-  through that same primitive since 1.20.1; use `createPersistedState` for app-level preferences.
+  through that same primitive since 1.21.0; use `createPersistedState` for app-level preferences.
   Reach for a third-party store only when complex cross-component state genuinely warrants it (see
   escape hatch below).
 
@@ -67,7 +67,7 @@ const [layout, setLayout] = usePanelLayout()
 Keys are namespaced `basalt:<key>` automatically and never collide with the theme-scheme guard.
 Pass a `schema` (Standard Schema) to validate persisted values and fall back to `initial` on mismatch.
 
-### Mirroring `BasaltShell`'s collapse (changed key at 1.20.1)
+### Mirroring `BasaltShell`'s collapse (changed key at 1.21.0)
 
 `BasaltShell` used `@mantine/hooks`' `useLocalStorage` while `createPersistedState` was the
 documented house API — so a consumer reading the raw key was complying with the shipped component,
@@ -77,11 +77,11 @@ moves the key:
 ```ts
 import { readPersistedValue } from 'basalt-ui/state'
 
-// 1.20.1: localStorage['basalt:<storageKey>'] === '{"v":1,"value":true}'
+// 1.21.0: localStorage['basalt:<storageKey>'] === '{"v":1,"value":true}'
 const collapsed = readPersistedValue('basalt-sidebar-collapsed', 1)
 ```
 
-A one-time migration adopts the raw pre-1.20.1 value, so an upgrade does not silently re-expand
+A one-time migration adopts the raw pre-1.21.0 value, so an upgrade does not silently re-expand
 every sidebar. It is a bridge, not a format — do not write against it.
 
 ## Zustand escape hatch (complex cross-component stores)

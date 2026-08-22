@@ -83,7 +83,7 @@ against it.
 - Update via `navigate({ search: { window: 'all', from: undefined, to: undefined } })` — prefer plain
   objects over reducers to avoid `| undefined` assignability errors when the schema has defaults.
 
-### Wire the reader, or the store does nothing (1.20.1)
+### Wire the reader, or the store does nothing (1.21.0)
 
 `validateSearch` is only half the store. It restores the value when you arrive with **no** param —
 it cannot do anything about a nav link that declares the param itself, and a link written

@@ -1,4 +1,4 @@
-<!-- basalt:begin 1.21.0 -->
+<!-- basalt:begin 1.22.0 -->
 
 ## basalt-ui (managed — do not hand-edit)
 

@@ -43,7 +43,7 @@ The scan reaches slightly beyond `roots`: each root's PARENT contributes its `in
 meta and a webmanifest's `background_color` actually live. `.json` is never blanket-scanned — name a
 design-surface JSON in `basalt.include`, the only route to one.
 
-## `theme-allow` — the 1.20.1 contract
+## `theme-allow` — the 1.21.0 contract
 
 The full grammar, in both engines:
 
@@ -63,7 +63,7 @@ An id is a guard kind (`raw-surface`, `inline-spacing`, …) or an oxlint plugin
 ```
 
 - **An annotation must START its comment** — after `//`, `/*`, `<!--`, a block-comment gutter `*`,
-  or nothing but whitespace. Before 1.20.1 any comment that merely _mentioned_ the token parsed as
+  or nothing but whitespace. Before 1.21.0 any comment that merely _mentioned_ the token parsed as
   the bare blanket form and switched every rule off on the line below: linewatch documented its own
   waivers in a docblock and thereby disarmed the file. Prose about the escape hatch no longer waives
   anything; everything a consumer actually writes still qualifies.
@@ -71,7 +71,7 @@ An id is a guard kind (`raw-surface`, `inline-spacing`, …) or an oxlint plugin
   Plain `theme-allow` is the node/line waiver in both engines. At 1.20.0 the two halves of the
   contract intersected at exactly one legal shape and that shape was whole-file — naming a rule and
   giving a reason was read as a file declaration, which is why per-node scoping did not actually
-  ship. **This is the consumer break in 1.20.1**: move each existing file declaration one word.
+  ship. **This is the consumer break in 1.21.0**: move each existing file declaration one word.
 - **A bare `theme-allow` still waives everything on its placement** but reports
   `theme-allow-unscoped` (`warn` for one minor, then `error`). A bare `theme-allow-file` waives
   nothing at all — whole-file blanket immunity off one unnamed comment is the thing this contract
@@ -141,7 +141,12 @@ nothing is forked.
 - **Exact name match only** — the one limit that is structural. Round 5 confirmed the miss rate:
   linewatch's forks are named `Cell` and `Box`, rb's is `Stat`. Rename the fork and the rule goes
   quiet, which is what a fork's author naturally does.
-- **Scope: everything importable.** Since 1.20.1 it reads all nine published barrels, not just
+- **Scope: basalt consumers only, and component-shaped declarations only.** Since 1.21.1 the rule
+  gates on `isBasaltScopedFile` like every other rule in the file, and needs a function, an arrow, a
+  `memo`/`forwardRef` wrapper or a class extending one. A plain data class sharing a name with a
+  shipped export is a collision, not a fork — it fired on a `SlugTracker` class in a React-free
+  package that cannot import basalt-ui.
+- **Scope: everything importable.** Since 1.21.0 it reads all nine published barrels, not just
   `dist/index.d.ts` — so the `basalt-ui/charts` layer, which is where forks actually live, is finally
   covered. Names a barrel merely re-exports from a third party are skipped: `./charts` passes
   `Bar` / `Line` / `Pie` straight through from `@visx/shape`, and a local `Bar` is not a fork of

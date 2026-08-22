@@ -193,7 +193,11 @@ web-app-manifest-512x512.png
 
 Generate the set with `@vite-pwa/assets-generator` (or realfavicongenerator.net) from a single
 source image — it lives in the CONSUMER's own devDependencies, not basalt-ui's. `basalt-ui doctor`
-warns (does not fail) when `public/` exists but is missing one of these files.
+warns (does not fail) when `public/` exists but is missing one of these files — and it now
+parses `basaltAppPlugin`'s `icons` option out of your vite config first, so it checks the files you
+declared rather than the six it assumes. `icons: false` or an empty array is "nothing to check"; an
+unparseable or absent config falls back to the six defaults. Adopting the array is no longer a way
+to earn a warning.
 
 **If your `public/` does not match those six filenames, name your icons instead.** `icons` takes
 `false | { dir?: string } | readonly BasaltAppIcon[]`, and an array uses the manifest's own field
@@ -217,7 +221,9 @@ One SVG at `sizes: 'any'` is a complete, installable icon set for a single-page 
 shape every non-scaffolded consumer already has. If you keep a hand-written `manifest.webmanifest`
 only because the plugin could not name your icon, delete it: the generated manifest reproduces it
 member for member, including the two hexes derived from `SURFACE.bg` rather than hand-copied, and it
-takes the permanent `theme-allow-file` on that file with it.
+takes the permanent `theme-allow-file` on that file with it. **Delete that app's own
+`<link rel="manifest">` in the same change** — the plugin injects its own, so leaving both ships two
+manifest links pointing at different files, one of them a 404 the moment the hand-written file goes.
 
 `basaltAppPlugin` also emits `site.webmanifest` (served in dev too) with explicit `id`/`scope`/
 `start_url` — pass `manifest: false` to skip it, or `icons: false` to skip the icons. Since 1.22.0

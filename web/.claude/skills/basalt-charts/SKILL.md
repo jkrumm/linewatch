@@ -7,8 +7,10 @@ when_to_use: User wants to add a chart, restyle an existing one structurally, in
 `/basalt-charts` is the how-to for the chart system. `/basalt-design` owns the aesthetic law
 (palette, restraint, the theme-lab loop) and the DESIGN.md precedence — read it for "what color /
 how should this look". This skill answers "how do I wire it" with basalt-ui's `./charts` and
-`./tokens` surfaces. `docs/CHARTS-SPEC.md` is the ground truth for the chart-primitive contract
-everything below assumes — composing `CartesianChart` (single-plot) or `ChartFrame` directly
+`./tokens` surfaces. `.claude/rules/basalt-charts.md` — which you have — is the chart-primitive
+contract everything below assumes (the repo's `docs/CHARTS-SPEC.md` is the long form and is not in
+the package:
+<https://github.com/jkrumm/basalt-ui/blob/master/docs/CHARTS-SPEC.md>) — composing `CartesianChart` (single-plot) or `ChartFrame` directly
 (multi-pane/radial/matrix) is mandatory, mechanically enforced (see "Respect the boundary" below).
 
 ## The decision: kind vs bespoke (Rule of Three)

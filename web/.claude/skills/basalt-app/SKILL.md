@@ -6,17 +6,25 @@ when_to_use: User is adding basalt-ui to a new or existing app, asks how to set 
 
 `/basalt-app` scaffolds a basalt-ui consumer and keeps its shipped doctrine fresh. It wraps the two
 CLI subcommands — `basalt-ui init` (first run) and `basalt-ui sync` (refresh) — and explains the
-wiring they don't do for you (provider, shell, vite). All of it via `bunx basalt-ui` (Bun runtime).
+wiring they don't do for you (provider, shell, vite). Bun runtime.
 
 ## One package, one command, one version
 
 Everything ships in the `basalt-ui` npm package — components, toolchain presets, rules, skills,
 templates. Becoming a consumer is exactly two steps:
 
-```
+```bash
 bun add basalt-ui
-bunx basalt-ui init
+bunx basalt-ui init            # `init` is the ONE command that legitimately predates the install
+./node_modules/.bin/basalt-ui --version   # every command after it: the LOCAL bin
 ```
+
+**After `init`, never `bunx`.** `bunx` does not re-resolve a package it has cached, so it can run
+a months-old CLI against a freshly-pinned install and report a green gate you did not configure —
+which is exactly how one consumer filed a P0 against a 1.20.0 cache while believing it was on
+1.22.0. Use `./node_modules/.bin/basalt-ui` (or a `package.json` script, which `bun run` resolves
+from the same place). `basalt-ui --version` / `-v` prints one bare line and exits 0; that is the
+check, and it costs nothing to run first.
 
 There is no plugin and no marketplace. `init`/`sync` place every file with one of two modes, and
 which mode a file gets answers a single question — **does Claude read it?**
@@ -130,7 +138,7 @@ The consumer series file (`<first basalt.root>/lib/series.ts` by default — so 
 a plain app, `apps/web/src/lib/series.ts` on a monorepo; override via `basalt.seriesModulePath`) is
 the single guard-exempt palette source — see `/basalt-charts`.
 
-## Refresh: `bunx basalt-ui sync`
+## Refresh: `basalt-ui sync`
 
 `sync` re-applies shipped doctrine after a basalt-ui upgrade, three-way against
 `.basalt/manifest.json`:
@@ -158,14 +166,15 @@ both.
 ## Checklist
 
 - Ran `bun add basalt-ui && bunx basalt-ui init` — rules, skills, CLAUDE block, DESIGN.md all
-  present from the one package.
+  present from the one package. Every command after it runs the local bin, not `bunx`.
 - `BasaltProvider` wraps the app; `createBasaltTheme` used for theme deltas; `basalt-ui/styles.css`
   imported.
 - `basaltViteConfig` adopted; `oxlint . && basalt-ui check-theme` is the lint command.
-- `basaltAppPlugin` composed into `plugins` (see the vite.config.ts snippet above); icon files
-  (`favicon.ico`, `favicon.svg`, `favicon-96x96.png`, `apple-touch-icon.png`,
-  `web-app-manifest-192x192.png`, `web-app-manifest-512x512.png`) generated and placed under
-  `public/` — `basalt-ui doctor` warns if any are missing.
+- `basaltAppPlugin` composed into `plugins` (see the vite.config.ts snippet above); either the six
+  default icon files (`favicon.ico`, `favicon.svg`, `favicon-96x96.png`, `apple-touch-icon.png`,
+  `web-app-manifest-192x192.png`, `web-app-manifest-512x512.png`) under `public/`, or an `icons`
+  array naming the ones you actually have. `doctor` reads the option out of your vite config, so an
+  app that names one SVG is not told to generate five PNGs it does not want.
 - `site.webmanifest` is emitted by `basaltAppPlugin` — no manual manifest file needed unless
   `manifest: false` was passed.
 - A thin `DESIGN.md` (deltas) + the thirteen `basalt-*` rules + the managed CLAUDE block are present.
@@ -179,14 +188,18 @@ both.
 - `init`, `sync`, and `check-theme` are all **real**. `sync` reconciles via a sha256 three-way diff
   (`--check` is a CI drift gate, `--force` overwrites local edits); `check-theme` is the palette
   guard; `doctor` checks resolution, version, guard scan, oxlint preset, spacing-scale drift and
-  cross-package `ai` major parity. All via `bunx basalt-ui …`.
-- **Not a React app?** `bunx basalt-ui tokens:css --out src/tokens.css` emits the `--vx-*` layer with
+  cross-package `ai` major parity. All via the local bin. An unrecognized flag exits 1 naming it
+  (`doctor --json` used to run doctor and exit 0), and an unknown command says so above the usage
+  block.
+- **Not a React app?** `bunx basalt-ui tokens:css --out src/tokens.css` (no install to resolve, so
+  `bunx` is right here) emits the `--vx-*` layer with
   no package in your dependency tree, `--selector-class dark` for the Tailwind `<html class="dark">`
   convention, and `fonts:css` emits the shipped `--basalt-font-*` stacks. Both carry the two-line
   `@generated basalt-ui` header the guard skips on — that header verbatim, and then only the LINES
   that are basalt custom properties, selectors, `}` or self-closing comments, so the marker pasted
   into a `.tsx` suppresses nothing and a declaration added to such a file is still reported — and
-  both take `--check` as a CI drift gate. See `docs/FRAMEWORK-FREE.md` in the basalt-ui repo.
+  both take `--check` as a CI drift gate — which compares everything but the header's provenance
+  line, so a basalt-ui version bump alone never forces a no-op commit. See <https://github.com/jkrumm/basalt-ui/blob/master/docs/FRAMEWORK-FREE.md> (not in the package).
 - The framework ships **no** icon or notification dep — pass icons as `ReactNode` and wire toasts
   yourself (e.g. `ThemeLabControls`' `copyIcon` / `onCopy`).
 - The framework DOES ship `motion` (motion.dev, formerly framer-motion) as a bundled dependency —

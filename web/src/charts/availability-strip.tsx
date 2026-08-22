@@ -172,8 +172,16 @@ export function getBand(c: Column): BandSpan {
   }
 }
 
-/** The reading behind whichever measured state a band is in — the derived row's value. */
-const lossValue = (c: Column) => (c.bucket === null ? '' : fmtPct(c.bucket.lossPct, 2))
+/**
+ * The reading behind whichever measured state a band is in — the derived row's value.
+ *
+ * `null`, not `''`, for a band with no bucket: `BandStripSeries.formatValue` reads it as an ABSENT
+ * reading and prints an em dash, where `''` printed a label with a blank value — indistinguishable
+ * from a state whose name is the whole reading. Unreachable by construction (`getBand` routes a
+ * null bucket to `absent`, which formats itself), so this is the honest answer to a branch that
+ * should never fire rather than a state the strip draws.
+ */
+const lossValue = (c: Column) => (c.bucket === null ? null : fmtPct(c.bucket.lossPct, 2))
 
 /**
  * The strip's states, which on `BandStrip` are also its legend and its one derived tooltip row.

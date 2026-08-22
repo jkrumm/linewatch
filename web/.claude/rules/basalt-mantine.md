@@ -30,15 +30,15 @@ renders.
 
 - Use `createBasaltTheme(overrides?)` for the theme — it merges your overrides over `baseTheme`
   (last-wins), so you can retune any field without forking. Don't hand-build `createTheme`.
-- The theme reskins **every** Mantine accent to the modern-zinc identity (`docs/DESIGN-SPEC.md` in
-  the basalt-ui repo) —
+- The theme reskins **every** Mantine accent to the modern-zinc identity (long form:
+  <https://github.com/jkrumm/basalt-ui/blob/master/docs/DESIGN-SPEC.md>, not shipped in the package) —
   **cool-neutral zinc** ramps on both light and dark — plus a **single saturated sky-blue accent**
   — split by role: as INK (links, active-nav icon, chart lines, focus ring) `#0077bd` light /
   `#8ec5ff` dark; as a FILLED SURFACE `#0077bd` in BOTH schemes with a white label — and binds
   Mantine's surface vars AND its color families to the same `--vx-*` tokens
   the charts use (`cssVariablesResolver`, pre-wired in `BasaltProvider`), so chrome and charts share
   one scheme-reactive identity. (Blueprint / Basalt zinc-charcoal are the historical hue-tuning
-  ancestors; `docs/DESIGN-SPEC.md` in the basalt-ui repo supersedes both.) Don't add a second
+  ancestors; DESIGN-SPEC supersedes both.) Don't add a second
   `cssVariablesResolver`.
 - Color scheme: read/write via `useMantineColorScheme()`. **Never** read the color scheme from
   localStorage directly, and never `localStorage.getItem('theme')` — see basalt-state.md.
@@ -220,7 +220,7 @@ shape doctrine lives here; the spacing/radius/type **tokens** are in basalt-toke
   Mechanically enforced by `basalt-ui check-theme`'s `raw-surface` guard. Outer spacing comes from the
   parent `Stack`/`SimpleGrid` gap, not an intrinsic card margin.
 - **Depth = a whisper shadow with a 1px ring baked in, not a plain hairline** (see
-  `docs/DESIGN-SPEC.md` in the basalt-ui repo, doctrine inversion #1 — this supersedes the old
+  <https://github.com/jkrumm/basalt-ui/blob/master/docs/DESIGN-SPEC.md>, doctrine inversion #1 — this supersedes the old
   "never a drop shadow" rule). **Three depth tiers, split control-vs-panel-vs-floating:**
   - **`shadow-card` — panels.** A surface that HOLDS content: `Card`, `Paper`, `Notification`,
     `ChartCard`, `SettingsSection`. Its light-mode ring is an **outset** 1px hairline; dark is a

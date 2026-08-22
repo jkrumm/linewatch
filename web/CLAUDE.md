@@ -1,4 +1,4 @@
-<!-- basalt:begin 1.23.0 -->
+<!-- basalt:begin 1.23.1 -->
 
 ## basalt-ui (managed — do not hand-edit)
 
@@ -12,8 +12,9 @@ Colors come from the three-tier `--vx-*` token system — read `VX.*` / a `defin
 never a raw hex/`rgb()`/`hsl()`. Charts are visx via `basalt-ui/charts`: every single-plot chart
 composes `CartesianChart` (owns margins, scales, axes, grid, cursor, tooltip — draw only marks);
 legends/tooltip rows are DERIVED from `series`, never hand-authored (`basalt/hand-rolled-plot` +
-`basalt/chart-legend-literal` enforce both); `DualPanel`/`Donut`/`Heatmap` are the declared
-exceptions. Add a kind on the third repeat, don't loosen the primitives. `basalt-ui/charts` and
+`basalt/chart-legend-literal` enforce both); `DualPanel`/`BandStrip`/`MirroredBars` declare
+themselves exceptions, and `Donut`/`Heatmap` render no plot-assembly element so the rule never
+fires on them. Add a kind on the third repeat, don't loosen the primitives. `basalt-ui/charts` and
 `basalt-ui/tokens` are Mantine-free internally (a framework invariant, not something your own app
 code must follow) — never import `@visx/*` outside a `charts/` directory (oxlint-enforced).
 Toolchain is oxlint + oxfmt (no ESLint/Biome/Prettier) and `basalt-ui check-theme` guards the

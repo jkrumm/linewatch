@@ -10,7 +10,8 @@ paths:
 # Basalt Tokens — Color, Spacing, Radius, Type
 
 basalt-ui ships one color/type/spacing/radius identity shared by the Mantine chrome and the visx
-charts. The **identity is modern zinc** (see `docs/DESIGN-SPEC.md` in the basalt-ui repo) —
+charts. The **identity is modern zinc** (long form: <https://github.com/jkrumm/basalt-ui/blob/master/docs/DESIGN-SPEC.md>, which does not ship in the
+package) —
 **cool-neutral zinc surfaces**
 (Tailwind zinc family) on both light and dark, low-contrast panel lift on a slightly darker page,
 depth via a whisper shadow + 1px ring (`shadow-card` on panels, `shadow-raised` on interactive
@@ -21,8 +22,7 @@ lines, focus ring) it is `#0077bd` light / `#8ec5ff` dark; as a FILLED SURFACE i
 `#0077bd` in BOTH schemes with a WHITE label (`--vx-accent-fill`, never `--vx-accent`). Neutrals do ~90% of the
 surface (60/30/10, pushed toward 90/10); the accent only points — primary CTA, focus, links, small
 status pops — never floods. (Blueprint/Basalt zinc-charcoal are the historical hue-tuning
-ancestors; `docs/DESIGN-SPEC.md` in the basalt-ui repo supersedes both — see its "Doctrine
-inversions" section.) This
+ancestors; DESIGN-SPEC supersedes both — see its "Doctrine inversions" section.) This
 rule is the operational checklist; it is enforced mechanically by **`basalt-ui check-theme`**
 (wire it into `lint`: `oxlint . && basalt-ui check-theme`; `init` seeds that as `lint:basalt`). A
 violation fails the build. Escape hatch: a scoped `theme-allow <rule-id> — <reason>` comment
@@ -120,13 +120,26 @@ the guard with that one occurrence neutralized, so the verdict comes from the sc
 parsing the waiver's text:
 
 ```text
+theme-allow annotations (3):
 src/shell/x.tsx:42    suppresses raw-surface@43
 src/theme/y.ts:18     SUPPRESSES NOTHING — dead, delete it
-src/charts/z.tsx:7    scoped to hand-rolled-plot — not a check-theme kind, so this audit cannot judge it
+src/charts/z.tsx:7    suppresses hand-rolled-plot@8 (oxlint)
+
+basalt.exemptRules entries (1):
 raw-hex: "site.webmanifest"  suppresses findings in public/site.webmanifest — <the recorded reason>
+
+3 live, 1 dead, 0 unjudgeable, 0 unaccountable (reported as theme-allow-unscoped by a normal run).
+Scope: the N file(s) check-theme scans — everything under basalt.roots (…), plus each root's
+sibling index.html and public/ tree, plus anything named in basalt.include (none). …
 ```
 
-It closes with a `live / dead / outside reach / unaccountable` tally and **exits 1 on a dead
+**Two sections, not one list** — annotations first, then `basalt.exemptRules`, each with its own
+count. A plugin-rule annotation is judged too (since 1.22.0, by re-running oxlint over one
+neutralized sibling file), so `unjudgeable` now means only "names no rule at all" or "oxlint could
+not be run here" — never "not a check-theme kind". The scope line is part of the report: `0 dead`
+is not `0 dead anywhere`.
+
+It closes with a `live / dead / unjudgeable / unaccountable` tally and **exits 1 on a dead
 waiver**, so it wires into CI. A waiver that stopped covering anything is not harmless: it silently
 covers the next real finding on that line. Basalt's own source had one; it is deleted.
 

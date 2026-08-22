@@ -14,8 +14,10 @@ primitives so we can build exactly the chart we want; the trade-off is that ever
 structure unless we compose shared building blocks. **`CartesianChart` plus a small kind set are
 the contract, not optional polish** — composing `CartesianChart` (single-plot) or `ChartFrame`
 directly (multi-pane/radial/matrix) is mandatory for every chart, mechanically enforced by
-`basalt/hand-rolled-plot` (see "Mechanical enforcement" below). `docs/CHARTS-SPEC.md` is the ground
-truth this doc reflects.
+`basalt/hand-rolled-plot` (see "Mechanical enforcement" below). **This file is the contract you
+receive** — the basalt-ui repo's `docs/CHARTS-SPEC.md` is the same argument at length, and it does
+not ship in the package. Read it at
+<https://github.com/jkrumm/basalt-ui/blob/master/docs/CHARTS-SPEC.md> or not at all.
 
 ## The boundary (lint-enforced)
 
@@ -348,6 +350,8 @@ per-series `getValue` accessors on `ChartSeries<T>`):
   hatch; `marker` carries a fact that must not be readable off the `fill` ramp. `cursorResolution`
   defaults `'leading'` here (a band IS a bucket), not `'nearest'`. Composes `ChartFrame` directly —
   `CartesianChart` renders `AxisLeftNumeric` unconditionally, so this shape could never use it.
+  `BandStripSeries.formatValue` is `(d) => string | null` — `null` renders an em dash, an absent
+  READING, which `''` cannot say (`''` is a state whose label is the whole row).
 - **`MirroredBars`** — two BAR panes over one x scale, mirrored around one baseline, each pane in
   its own domain. `up`/`down` take `{ key, max?, autoMaxFloor?, ticks?, format }`; `upFraction`
   (default 0.35) is the up pane's share of the band height, which is where the shared baseline sits;
@@ -359,6 +363,29 @@ per-series `getValue` accessors on `ChartSeries<T>`):
 Both band kinds fold their domain by width (`fold: { minBandPx?, merge }`), and `foldBands` is
 exported so a consumer can test their merge against the grouping that will actually run.
 `HatchPattern` / `hatchFill` / `hatchSizeFor` ship the absence fill.
+
+**`merge` does not run on a sub-cap dataset.** `foldBands` returns `[...data]` unchanged when
+`data.length <= cap`, which on a wide viewport is the common case — so any bookkeeping the merge
+adds (how many source buckets a slot folded, how many were unmeasured) is absent exactly where you
+are least likely to look for it. Put that bookkeeping on the datum at CONSTRUCTION and have `merge`
+sum it; do not compute it from `group.length` inside the merge. Summing is also the composable
+form, and it keeps "every source bucket accounted for exactly once" true by construction.
+
+**A band state naming no `series` entry throws in dev.** `series` IS the state set, so an
+unresolvable `state` has no legend entry, no colour and no tooltip row — and the old behaviour,
+skipping the band, drew a coverage GAP, which on a measured/not-measured strip is a false claim
+about the data rather than an "unknown". Where the key comes from decides the treatment:
+
+| Key comes off                                                 | Dev                                      | Production                                                             |
+| ------------------------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------- |
+| the DATUM — `BandSpan.state`, `marker.state`                  | throws, naming the key and the valid set | dashed neutral outline band + an `Unknown state` / `<key>` tooltip row |
+| a PROP — `absentState`, `MirroredBars`' `up.key` / `down.key` | throws                                   | throws                                                                 |
+
+A feed that grows a state basalt has never seen must degrade rather than take a dashboard down; a
+typo, which is the same input, still fails loudly wherever it is written. The dashed neutral outline
+is used by no legend entry and no state fill, so it can never be mistaken for data. Pane keys are
+props, never data-driven — an unresolvable `up.key` used to hide the pane AND its axis, which reads
+as "that half measured zero".
 
 `ZonedLine` and `MultiLine` also accept `xZones?: XZoneSpec[]` — the vertical counterpart to a
 kind's horizontal zone bands, for marking a time window rather than a value range. Each
@@ -511,6 +538,15 @@ what `autoMargin` already does on the right. Both terminal gutters are then capp
 left, 12% right): uncapped, half a `DD.MM HH:MM` label is 48px of a 338px chart. `MirroredBars`
 probes real tick labels from both panes, so it takes the plain measured margin and neither the
 floor nor the cap applies.
+
+**The height law is the number you actually have to compute.** A band row is
+`height − legend − margin.top − margin.bottom`: `ChartFrame` reserves the measured legend band out
+of the plot rect first, then the kind takes the margins out of what is left. There is no
+`bandHeight` prop — to get a 44px band, hand the frame `44 + margins + legend`. `margin={{ top: 0 }}`
+reclaims the whole top gutter, which a 1-D strip draws nothing in; the bottom is not reclaimable,
+`autoMargin` floors it at `VX.margin.bottom`. Derive the constants from `VX.margin` rather than
+restating them — a consumer that copies `30` into three chart files has three silent-drift sites the
+moment the density scale is retuned.
 
 `chartMargin(opts?)` (`basalt-ui/tokens`, also re-exported from `basalt-ui/charts`) still exists,
 but only matters for a bespoke chart that composes `ChartFrame` directly (not `CartesianChart`) and

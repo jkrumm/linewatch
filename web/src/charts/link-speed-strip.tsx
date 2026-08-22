@@ -225,7 +225,7 @@ export const FILL_SERIES: BandStripSeries<Column>[] = [
     color: VX.line,
     mark: 'bar',
     fillOpacity: 0.9,
-    formatValue: (c) => (c.state.kind === 'steady' ? `${c.state.mbit} Mbit` : ''),
+    formatValue: (c) => (c.state.kind === 'steady' ? `${c.state.mbit} Mbit` : null),
   },
   {
     key: 'transition',
@@ -236,7 +236,7 @@ export const FILL_SERIES: BandStripSeries<Column>[] = [
     // Joined with a slash, not an arrow: the bucket reports the distinct speeds it saw, not the
     // order it saw them in, and an arrow would invent a direction.
     formatValue: (c) =>
-      c.state.kind === 'transition' ? c.state.mbits.map((m) => `${m} Mbit`).join(' / ') : '',
+      c.state.kind === 'transition' ? c.state.mbits.map((m) => `${m} Mbit`).join(' / ') : null,
   },
   {
     key: 'no-vantage',
@@ -244,7 +244,7 @@ export const FILL_SERIES: BandStripSeries<Column>[] = [
     color: VX.neutral,
     mark: 'bar',
     fillOpacity: 0.18,
-    formatValue: (c) => (c.state.kind === 'no-vantage' ? `${c.state.cycles} cycles` : ''),
+    formatValue: (c) => (c.state.kind === 'no-vantage' ? `${c.state.cycles} cycles` : null),
   },
   {
     key: 'absent',

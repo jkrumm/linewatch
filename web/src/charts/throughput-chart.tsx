@@ -222,6 +222,18 @@ export function ThroughputChart({
   )
 }
 
+/**
+ * theme-allow hand-rolled-plot — declared non-single-plot. This is two panes, not one:
+ * download and upload are scaled INDEPENDENTLY against a shared baseline (see the component docblock), so the
+ * chart has two y scales stacked vertically rather than one plot rect with one or two numeric axes.
+ * `CartesianChart` cannot express that; `DualPanel` is the shipped kind of the same shape and
+ * composes `ChartFrame` for the same reason. Everything below the marks is the shipped primitive,
+ * assembled not re-implemented.
+ *
+ * Written at the top of the assembly rather than on a node: since 1.20.0 a named `theme-allow` with
+ * a reason declares the whole FILE wherever it sits, so a node-level placement would misstate its
+ * scope. Delete this when `DualPanel` gains `bottomMark: 'bars'` + independent pane domains.
+ */
 function MirroredBars({
   points,
   bucketSeconds,
@@ -320,14 +332,7 @@ function MirroredBars({
         <g transform={`translate(${LEFT_GUTTER}, 0)`}>
           {/* One axis per half, each in its own scale's units, because the halves are scaled
               independently — a single shared axis would be wrong for at least one of them. Both sit
-              inside this group so their ticks extend left into the gutter rather than off-canvas.
-
-              theme-allow — declared non-single-plot. This is two panes, not one: download and
-              upload are scaled INDEPENDENTLY against a shared baseline (see the component
-              docblock), so the chart has two y scales stacked vertically rather than one plot rect
-              with one or two numeric axes. `CartesianChart` cannot express that; `DualPanel` is the
-              shipped kind of the same shape and composes `ChartFrame` for the same reason.
-              Everything below the marks is the shipped primitive, assembled not re-implemented. */}
+              inside this group so their ticks extend left into the gutter rather than off-canvas. */}
           <AxisLeftNumeric
             scale={scaleLinear<number>({ domain: [maxUp, 0], range: [0, upHeight] })}
             numTicks={2}

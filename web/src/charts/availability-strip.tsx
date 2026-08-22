@@ -287,6 +287,19 @@ const FILL_SERIES: SeriesStyle[] = [
   { key: 'absent', label: 'Not measured', color: VX.neutral, mark: 'bar', fillOpacity: 0.5 },
 ]
 
+/**
+ * theme-allow hand-rolled-plot — a strip has ONE dimension: columns over time, no y scale, no
+ * numeric axis, no grid. `CartesianChart` renders `AxisLeftNumeric` unconditionally
+ * (`basalt-ui/dist/charts/primitives/CartesianChart.js`), so composing it here would draw a y axis
+ * over a chart that measures nothing vertically. This is the multi-pane/radial/matrix escape the
+ * rule describes: everything below the marks — the cursor, the crosshair, the overlay, the bottom
+ * axis, the tooltip — is the shipped primitive, assembled rather than re-implemented.
+ *
+ * The waiver is written HERE, at the top of the assembly, rather than on one node inside the JSX.
+ * Since 1.20.0 a `theme-allow` that names a rule AND gives a reason is a FILE declaration whatever
+ * line it sits on, so a node-level placement would only disguise its true scope. Delete this the
+ * day basalt ships a 1-D band kind.
+ */
 function StripPlot({
   target,
   columns,
@@ -451,13 +464,6 @@ function StripPlot({
             )
           })}
           {point && (
-            /* theme-allow — declared non-single-plot. A strip has ONE dimension: columns over time,
-               no y scale, no numeric axis, no grid. `CartesianChart` owns a plot rect with one or
-               two numeric y axes and renders `AxisLeftNumeric` unconditionally, so composing it
-               here would draw a y axis over a chart that measures nothing vertically. This is the
-               multi-pane/radial/matrix escape `basalt/hand-rolled-plot` describes, and everything
-               below the marks — the cursor, the crosshair, the overlay, the bottom axis, the
-               tooltip — is the shipped primitive, assembled rather than re-implemented. */
             <Crosshair
               x={(scale(point.key) ?? 0) + scale.bandwidth() / 2}
               top={0}

@@ -352,8 +352,8 @@ function LinkVerdict({ summary }: { summary: LinkSummary }) {
         display: 'flex',
         flexWrap: 'wrap',
         alignItems: 'baseline',
-        gap: 6, // theme-allow: micro-spacing, no Mantine prop reachable from a chart file
-        paddingBottom: 6, // theme-allow: same
+        gap: 6, // theme-allow inline-spacing — micro-spacing, no Mantine prop reachable here
+        paddingBottom: 6, // theme-allow inline-spacing — same 6px, same reason
       }}
     >
       <span style={{ color: VX.ink, fontSize: VX.text.sm, fontWeight: 600 }}>{headline}</span>
@@ -364,6 +364,13 @@ function LinkVerdict({ summary }: { summary: LinkSummary }) {
   )
 }
 
+/**
+ * theme-allow hand-rolled-plot — declared non-single-plot, for the reason
+ * `availability-strip.tsx` states at length: a strip has one dimension, and `CartesianChart`
+ * renders `AxisLeftNumeric` unconditionally, so it would draw a numeric y axis over a chart that
+ * measures nothing vertically. Same file-level placement as that file, for the same reason: since 1.20.0 a named
+ * `theme-allow` with a reason declares the whole FILE wherever it is written.
+ */
 function StripPlot({
   columns,
   maxMbit,
@@ -496,9 +503,6 @@ function StripPlot({
             )
           })}
           {point && (
-            /* theme-allow — declared non-single-plot, for the reason `availability-strip.tsx`
-               states at length: a strip has one dimension, and `CartesianChart` would draw a
-               numeric y axis over a chart that measures nothing vertically. */
             <Crosshair
               x={(scale(point.key) ?? 0) + scale.bandwidth() / 2}
               top={0}

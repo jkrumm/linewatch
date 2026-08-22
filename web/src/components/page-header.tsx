@@ -212,7 +212,8 @@ function LiveChip({ live }: { live: HeaderLive | null }) {
       <Box
         w={8}
         h={8}
-        style={{ /* theme-allow: circular dot, not a card/panel corner */ borderRadius: '50%', background: state.color, flexShrink: 0 }}
+        // theme-allow raw-surface — a circular dot, not a card corner: no radius token is 50%
+        style={{ borderRadius: '50%', background: state.color, flexShrink: 0 }}
       />
       <Text size="sm" fw={600} c={state.color} style={{ whiteSpace: 'nowrap' }}>
         {state.word}

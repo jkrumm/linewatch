@@ -7,6 +7,11 @@
 # `extends` merges commands without their working directory, so the preset's `bunx oxlint` would run
 # at the repo root, where there is no .oxlintrc.json and no oxlint binary. The `root` key is per
 # command, which is why the commands are spelled out.
+#
+# **The basalt commands invoke the LOCAL bin, never `bunx`.** `bunx basalt-ui` fetches its own copy
+# from npm and caches it without re-resolving, so a hook can enforce a version this repo does not
+# have installed — measured elsewhere as a consumer running a 1.20.0 CLI while building against
+# 1.22.0 and reporting a bug that did not exist. `./node_modules/.bin/basalt-ui` is the pinned one.
 pre-commit:
   parallel: true
   commands:
@@ -22,10 +27,10 @@ pre-commit:
     # skip the guard entirely — and a guard that only runs when someone remembers it is not a guard.
     theme-guard:
       root: 'web/'
-      run: bunx basalt-ui check-theme
+      run: ./node_modules/.bin/basalt-ui check-theme
 
     # Catches the other drift direction: a basalt-ui upgrade that never ran `basalt-ui sync`, leaving
     # the placed rules and skills describing a version the app no longer has installed.
     basalt-sync:
       root: 'web/'
-      run: bunx basalt-ui sync --check
+      run: ./node_modules/.bin/basalt-ui sync --check

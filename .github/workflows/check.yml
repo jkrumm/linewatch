@@ -4,11 +4,14 @@
 # adopting basalt was meant to end.
 #
 # Two packages, two installs: the API + collector at the repo root, the dashboard in web/.
-#   - `bunx basalt-ui check-theme` is the palette guard (raw color literals, off-identity accents,
-#     the card idiom, chart framing).
-#   - `bunx basalt-ui sync --check` fails when the basalt-managed files (rules, skills, the CLAUDE
+#   - `basalt-ui check-theme` (through `bun run lint`) is the palette guard (raw color literals,
+#     off-identity accents, the card idiom, chart framing).
+#   - `basalt-ui sync --check` fails when the basalt-managed files (rules, skills, the CLAUDE
 #     block) have drifted from the installed basalt-ui version — i.e. when someone upgrades the
 #     package and forgets `basalt-ui sync`.
+#
+# Both go through the LOCAL bin. `bunx basalt-ui` resolves a copy from npm and caches it without
+# re-resolving, so CI can enforce a version the lockfile does not contain.
 #
 # `oxfmt --check` is deliberately NOT wired in yet. oxfmt reflows to a ~100-column print width and
 # would rewrite 40 of the dashboard's 68 files on first run; that is a real change to make, but it
@@ -56,6 +59,6 @@ jobs:
           bun-version: latest
       - run: bun install --frozen-lockfile
       - run: bun run lint
-      - run: bunx basalt-ui sync --check
+      - run: ./node_modules/.bin/basalt-ui sync --check
       - run: bun run typecheck
       - run: bun test

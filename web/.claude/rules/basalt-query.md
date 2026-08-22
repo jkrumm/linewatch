@@ -99,8 +99,8 @@ function Library() {
 
 **Rendering only the empty branch is the bug this retires.** A consumer's library showed
 `No images` on a **500**, and a share detail showed `Share not found` on a dropped connection —
-"nothing here" is what an app renders when nobody wrote the other three branches. One import
-replaced 204 hand-rolled lines across 10 call sites there.
+"nothing here" is what an app renders when nobody wrote the other three branches. Swapping the
+import replaced 204 hand-rolled lines across 10 call sites there, with no prop or JSX change.
 
 Precedence, in evaluation order:
 

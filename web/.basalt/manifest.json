@@ -4,12 +4,12 @@
     ".claude/rules/basalt-mantine.md": "3fffaeae41d967aa518f003062b92e241448b8f36df5e5e60aeffd81524a92e3",
     ".claude/rules/basalt-charts.md": "103e35a84e5d9bb8c618532300b8ac7430e17f26b19914bd3a5af6742a407160",
     ".claude/rules/basalt-tokens.md": "9d5e0464fdee720cfffd602fa3ea6429c204de8fd2c75cfbe289d0cfbbf6d06c",
-    ".claude/rules/basalt-query.md": "17040b6da21d62a245af6e55fd8224f2b492181981b4d4d57cd07c73bada86be",
+    ".claude/rules/basalt-query.md": "fc2ea0d4072561107fa3c67e96f41c1bba011991e6f5c1e87c93e7e85905705e",
     ".claude/rules/basalt-router.md": "404c6a63c402af57db48a80a3c0635df320c032c58711904757b939eff435ef6",
     ".claude/rules/basalt-forms.md": "9ff2049605cf5e24dca8970700fdf7a1f38a627c987e2c4bf4d160096cace60c",
     ".claude/rules/basalt-notifications.md": "cd2b74e283e219b2937f06f3e64d4ef119c52cdb909b7e37f0a37c072ff3bb96",
     ".claude/rules/basalt-commands.md": "d9bbac0a661e3e715acf818fe6e746b1de2794bd07900d86e29c7e8457fba6e0",
-    ".claude/rules/basalt-data.md": "7cef1b041cf4494a37370f8407279637c7122183c4d6e470bfa94a2ec257a617",
+    ".claude/rules/basalt-data.md": "408d927201d7caa73f7f5d9d3b14f3348b2b13af361c7461b5eb344ca49574ee",
     ".claude/rules/basalt-agent.md": "66d864f2bb5723d276eb57e7846ccba453c01eda7a3837d2d389ba9925e9a650",
     ".claude/rules/basalt-content.md": "e90d114f566bf21a8fb7087072326fde9c17b3b43e5bd719a43156ce9eb2b5da",
     ".claude/rules/basalt-state.md": "3a9ccb0c83f8a4e74bf6303a94db20e76792f6cab8ad4ce105c77587606bff4c",
@@ -26,7 +26,7 @@
     "src/query-client.ts": "5efb420731453ee1e0279a4501bf6536b066b595f14886ba3d7329336eae09c1",
     "src/routes/__root.tsx": "439fb91cf26ee51eb56ae6415556970d323dae6049d10415970709b79c0373e0"
   },
-  "basaltVersion": "1.24.0",
+  "basaltVersion": "1.25.0",
   "spacingScale": {
     "xs": 11,
     "sm": 13,

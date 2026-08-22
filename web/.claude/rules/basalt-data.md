@@ -76,6 +76,17 @@ basalt defaults to `true`:
 outside the union **throws** naming the column — a money column never silently left-aligns. Set it
 once on the column def instead of repeating `textAlign: 'right'` on the header and the cell.
 
+**`meta.numeral: false` is needed less often than it looks.** The auto style sets `fontFamily`,
+`fontSize`, `fontWeight`, `fontVariantNumeric` and `color` on the `<td>` whenever the raw value is a
+number — but a child `Text` sets its own `color` and `fontWeight` and wins those, and never sets a
+`fontFamily`. **Only `fontFamily` leaks.** So `c="dimmed"` is not a reason to opt out (and on a
+percentage column the mono figures are what you want); `fw={600}` on an accent figure is, because
+the `<td>`'s monospace still overrides the family the `Text` inherited. One consumer measured this
+across three tables: **3 columns** genuinely needed the opt-out, not the 4 that were assumed. Reach
+for it when the cell renders its own chrome — a coloured `Text`, a `Badge`, a sparkline — and check
+what actually leaked before adding it. `null` is worth a thought too: `typeof null === 'object'`, so
+a `number | null` column goes mono only on its non-null rows, which is worse than uniformly wrong.
+
 ### Controlled sorting and URL sync
 
 `initialSorting` seeds the internal `useState` and `onSortingChange` is called on every sort
@@ -148,8 +159,47 @@ Global search (`enableGlobalFilter`, `globalFilterPlaceholder`, `searchIcon`,
 pinning (`enablePinning`, `initialColumnPinning`). **Don't hand-roll any of these** — read the props
 on the type, they are all there.
 
-Still deferred: row selection, row expansion / sub-rows, and fully controlled (external) sorting —
-`onSortingChange` is the sync seam. Add them when a concrete consumer need arises; keep the API
+### `manualPagination` imposes a contract on the rest of the props
+
+Adopting it makes `data` **one server page** while the bar still reads `Showing 1–25 of 412`. Every
+other client-side control then becomes a claim about 412 rows it can only make about 25 — a sort
+that reorders one page under a header chevron that says it sorted all of them is a plausible, wrong
+answer with nothing on screen to give it away. So each control has to be resolved explicitly; there
+is no safe default, because only the call site knows whether the server does the work.
+
+| With `manualPagination`   | Resolve it with                                                                     |
+| ------------------------- | ----------------------------------------------------------------------------------- |
+| the pagination bar itself | `enablePagination` (without it `manualPagination` is inert) + `rowCount`            |
+| sorting                   | `manualSorting` + sort in the `onSortingChange` request, or `enableSorting={false}` |
+| `enableGlobalFilter`      | `manualFiltering` + filter in the `onGlobalFilterChange` request                    |
+| `facets`                  | `manualFiltering` + `onColumnFiltersChange`                                         |
+
+```tsx
+<BasaltDataTable
+  data={page.rows}
+  columns={columns}
+  enablePagination
+  manualPagination
+  rowCount={page.total}
+  manualSorting
+  onSortingChange={(s) => refetch({ sort: s[0] })}
+  onPaginationChange={(p) => refetch({ page: p })}
+/>
+```
+
+`manualSorting` / `manualFiltering` don't switch the controls off — the headers and inputs stay
+live and keep reporting through their `on*Change` callbacks. They stop the table from _recomputing_
+the answer locally, so what renders is the order and the selection the server sent.
+
+**Unresolved, it is not silent.** A contradiction throws in dev naming every breach at once, and a
+production bundle (where the throw is constant-folded away) degrades to the honest table instead:
+no sort headers, no filter controls, no `of N` it cannot stand behind, plus one `console.error`.
+You will never get the plausible wrong answer, but you also won't get sorting you thought you had —
+so read the throw, don't work around it.
+
+Still deferred: row selection, row expansion / sub-rows, and fully controlled (external) sorting
+STATE — `manualSorting` hands the _work_ to the server, but the table still owns the `SortingState`
+and reports it through `onSortingChange`. Add them when a concrete consumer need arises; keep the API
 additive.
 
 ### The blessed lane vs the raw escape hatch
@@ -196,11 +246,21 @@ takes no view here — it steers raw `overflow: auto`, and `Table.ScrollContaine
 component, not a raw scroll box.)
 
 **Adopt the blessed lane for ownership, not for a line count.** Porting one consumer's three tables
-onto these props made them 341 → **370** lines, 29 longer: eight accessor blocks at 4–6 lines each
-cost more than an eight-`<Table.Td>` row at ~3 when every cell is bespoke. What the port bought was
-the `type="native"` footgun, alignment stated once instead of on both `th` and `td` six times over,
-and sorting/filtering/pagination no longer being yours to maintain. Expect that trade, not a
-shrink.
+onto these props made them 341 → **370–379** lines, **29–38 longer**: a scratch port measured the
+low end, the consumer's own shipped port the high end, because it kept the comment blocks
+justifying each table's `numeral` opt-outs and its `enableSorting` decision. Accessor blocks at
+4–6 lines each cost more than an eight-`<Table.Td>` row at ~3 when every cell is bespoke, and the
+opt-outs are lines the hand-rolled version never had to write. Budget the high end. What the port
+bought was the `type="native"` footgun, alignment stated once instead of on both `th` and `td` —
+**4 literals in one table alone, 6 across the two that had alignment to state** — and
+sorting/filtering/pagination no longer being yours to maintain. Expect that trade, not a shrink.
+
+That consumer deliberately left the third table hand-rolled, and the reason generalises: four of
+its six columns would have needed `enableSorting: false` (three sparkline cells over `number[]`
+accessors, one status enum), and a numeric column rendering its own coloured `Text` would have
+needed a `numeral: false` it did not need before. A table with no sorting, no pagination, no filter
+and no alignment to declare is a layout grid that happens to use `<table>` — adopting the component
+there buys nothing and taxes you to switch off things you never asked for.
 
 ## BasaltVirtualList
 

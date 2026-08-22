@@ -125,16 +125,20 @@ anyone they disagreed.
   dictionary and any deliberate deviation) — it is **not** [`docs/DESIGN.md`](docs/DESIGN.md),
   which is the collector and data design and has nothing to do with the visual system.
 - **A guard finding is fixed at the source, not silenced.** `theme-allow` is for a
-  genuine documented exception, and since basalt-ui 1.20.0 the shape is fixed:
-  `theme-allow <rule-id> — <reason>`. A bare comment still waives everything but
-  reports `theme-allow-unscoped`, and a word in the id slot naming no rule waives
-  **nothing** — so a typo fails closed rather than silently widening. Two consequences
-  worth knowing before writing one: the id is the *reported kind*, not the concept
-  (the status dot in `page-header.tsx` reads `raw-surface`, not `raw-radius`), and for
-  `hand-rolled-plot` a named annotation with a reason declares the whole **file**
-  wherever it sits — there is no node-scoped form. The two scoped oxlint overrides in
-  `web/.oxlintrc.json` each carry their reason inline; that file is JSONC, so a new
-  one must too.
+  genuine documented exception. Since basalt-ui 1.21.0 the scope is explicit:
+  `theme-allow <rule-id> — <reason>` waives **that node/line only**;
+  `theme-allow-file <rule-id> — <reason>` waives the whole file. A bare comment still
+  waives everything but reports `theme-allow-unscoped`, and a word in the id slot
+  naming no rule waives **nothing** — a typo fails closed. Three things to know before
+  writing one: the annotation must **start** its comment (prose merely mentioning it
+  waives nothing), the id is the *reported kind* rather than the concept (the status
+  dot in `page-header.tsx` reads `raw-surface`, not `raw-radius`), and a comment-only
+  annotation reaches the first **code** line below it — inside a `{cond && (…)}` that
+  means a `//` line comment, since a `{/* */}` there is a syntax error. Nothing here
+  uses `theme-allow-file`: every waiver is node-scoped, deliberately.
+  `bunx basalt-ui check-theme --audit-allows` proves what each one still suppresses
+  and exits 1 on a dead waiver. The two scoped oxlint overrides in `web/.oxlintrc.json`
+  each carry their reason inline; that file is JSONC, so a new one must too.
 - **The dashboard's `<head>` is `basaltAppPlugin`'s, not `index.html`'s.** The
   `theme-color` pair used to be two hand-copied hexes in `web/index.html` and had
   already drifted from the palette by a visible amount. `basaltAppPlugin` (in
@@ -149,8 +153,10 @@ anyone they disagreed.
   axes, the grid, the page-shared cursor, the crosshair and the tooltip.
   `latency-band-chart.tsx` is the one chart here that fits: it now declares six
   series and draws four marks, and everything else went. **Three charts legitimately
-  do not fit, and each declares that once, in the docblock of the component that
-  does the assembling** (`StripPlot` ×2, `MirroredBars`): both strips have no y
+  do not fit, and each waives per assembly node** (11 in total across `StripPlot` ×2
+  and `MirroredBars`), with the argument in the assembling component's docblock —
+  per-node rather than `theme-allow-file` so the properly-composed `ChartFrame`
+  export in each of those same files stays policed: both strips have no y
   dimension at all (a numeric left axis over a
   one-dimensional band would be drawing an axis for nothing), and `throughput-chart`
   is two panes — download and upload are scaled *independently* against one

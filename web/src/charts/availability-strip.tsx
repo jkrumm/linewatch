@@ -288,17 +288,17 @@ const FILL_SERIES: SeriesStyle[] = [
 ]
 
 /**
- * theme-allow hand-rolled-plot — a strip has ONE dimension: columns over time, no y scale, no
- * numeric axis, no grid. `CartesianChart` renders `AxisLeftNumeric` unconditionally
+ * A strip has ONE dimension: columns over time, no y scale, no numeric axis, no grid.
+ * `CartesianChart` renders `AxisLeftNumeric` unconditionally
  * (`basalt-ui/dist/charts/primitives/CartesianChart.js`), so composing it here would draw a y axis
- * over a chart that measures nothing vertically. This is the multi-pane/radial/matrix escape the
- * rule describes: everything below the marks — the cursor, the crosshair, the overlay, the bottom
- * axis, the tooltip — is the shipped primitive, assembled rather than re-implemented.
+ * over a chart that measures nothing vertically. This is the multi-pane/radial/matrix escape
+ * `basalt/hand-rolled-plot` describes: everything below the marks — the cursor, the crosshair, the
+ * overlay, the bottom axis, the tooltip — is the shipped primitive, assembled rather than
+ * re-implemented.
  *
- * The waiver is written HERE, at the top of the assembly, rather than on one node inside the JSX.
- * Since 1.20.0 a `theme-allow` that names a rule AND gives a reason is a FILE declaration whatever
- * line it sits on, so a node-level placement would only disguise its true scope. Delete this the
- * day basalt ships a 1-D band kind.
+ * Each assembly node below carries its OWN `theme-allow hand-rolled-plot` rather than one
+ * `theme-allow-file`: the exported `AvailabilityStrip` above composes `ChartFrame` properly, and a
+ * file waiver would stop policing it. Delete them the day basalt ships a 1-D band kind.
  */
 function StripPlot({
   target,
@@ -464,12 +464,14 @@ function StripPlot({
             )
           })}
           {point && (
+            // theme-allow hand-rolled-plot — the shipped crosshair over a hand-composed plot rect
             <Crosshair
               x={(scale(point.key) ?? 0) + scale.bandwidth() / 2}
               top={0}
               bottom={stripHeight}
             />
           )}
+          {/* theme-allow hand-rolled-plot — the shipped overlay driving this plot's own cursor */}
           <HoverOverlay
             width={plotWidth}
             height={stripHeight}
@@ -490,7 +492,8 @@ function StripPlot({
           {/* `axisTickValues` rather than basalt's own `smartTicks`, for the reason its docblock
               gives: `smartTicks` appends the final value unconditionally and the last two labels
               land on top of each other. The tick VALUES are ISO bucket starts (the scale's domain);
-              `bucketTickFormat` turns each into the time a reader sees — see `lib/axis.ts`. */}
+              `bucketTickFormat` turns each into the time a reader sees — see `lib/axis.ts`.
+              theme-allow hand-rolled-plot — the strip's only axis; a y axis would measure nothing */}
           <AxisBottomDate
             scale={scale}
             top={stripHeight}

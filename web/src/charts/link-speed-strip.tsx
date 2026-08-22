@@ -365,11 +365,12 @@ function LinkVerdict({ summary }: { summary: LinkSummary }) {
 }
 
 /**
- * theme-allow hand-rolled-plot — declared non-single-plot, for the reason
- * `availability-strip.tsx` states at length: a strip has one dimension, and `CartesianChart`
- * renders `AxisLeftNumeric` unconditionally, so it would draw a numeric y axis over a chart that
- * measures nothing vertically. Same file-level placement as that file, for the same reason: since 1.20.0 a named
- * `theme-allow` with a reason declares the whole FILE wherever it is written.
+ * Non-single-plot, for the reason `availability-strip.tsx` states at length: a strip has one
+ * dimension, and `CartesianChart` renders `AxisLeftNumeric` unconditionally, so it would draw a
+ * numeric y axis over a chart that measures nothing vertically.
+ *
+ * Waived per assembly node below, not per file — the exported `LinkSpeedStrip` above composes
+ * `ChartFrame` properly and stays policed.
  */
 function StripPlot({
   columns,
@@ -503,12 +504,14 @@ function StripPlot({
             )
           })}
           {point && (
+            // theme-allow hand-rolled-plot — the shipped crosshair over a hand-composed plot rect
             <Crosshair
               x={(scale(point.key) ?? 0) + scale.bandwidth() / 2}
               top={0}
               bottom={stripHeight}
             />
           )}
+          {/* theme-allow hand-rolled-plot — the shipped overlay driving this plot's own cursor */}
           <HoverOverlay
             width={plotWidth}
             height={stripHeight}
@@ -528,7 +531,8 @@ function StripPlot({
           />
           {/* `axisTickValues` rather than `smartTicks`, for the reason its docblock gives: the latter
             appends the final value unconditionally and the last two labels overlap. The values are
-            ISO bucket starts; `bucketTickFormat` renders each as the time a reader sees. */}
+            ISO bucket starts; `bucketTickFormat` renders each as the time a reader sees.
+            theme-allow hand-rolled-plot — the strip's only axis; a y axis would measure nothing */}
           <AxisBottomDate
             scale={scale}
             top={stripHeight}

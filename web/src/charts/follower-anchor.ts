@@ -7,8 +7,9 @@ import { useInViewport } from './use-in-viewport'
  * `CartesianChart` grew this in basalt-ui 1.18.0 as `tooltip.onFollow`: a chart renders its own
  * tooltip when the crosshair came from a SIBLING, anchored to that crosshair because there is no
  * pointer over it to track. The three charts here that compose `ChartFrame` by hand
- * (`availability-strip`, `link-speed-strip`, `throughput-chart` — each with a `theme-allow` saying
- * why) get no prop for it: they own their own `<svg>`, their own `Crosshair` and their own
+ * (`availability-strip`, `link-speed-strip`, `throughput-chart` — each waiving
+ * `basalt/hand-rolled-plot` per assembly node, with the argument in the assembling component's
+ * docblock) get no prop for it: they own their own `<svg>`, their own `Crosshair` and their own
  * `ChartTooltipFloat`, so they have to do the same arithmetic themselves. This is that arithmetic,
  * in one place rather than three, and it deliberately reproduces `CartesianChart`'s — a page where
  * four tooltips appear on one cursor and one of them sits somewhere else is worse than none.

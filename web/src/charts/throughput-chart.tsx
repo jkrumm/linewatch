@@ -223,16 +223,16 @@ export function ThroughputChart({
 }
 
 /**
- * theme-allow hand-rolled-plot — declared non-single-plot. This is two panes, not one:
- * download and upload are scaled INDEPENDENTLY against a shared baseline (see the component docblock), so the
- * chart has two y scales stacked vertically rather than one plot rect with one or two numeric axes.
- * `CartesianChart` cannot express that; `DualPanel` is the shipped kind of the same shape and
- * composes `ChartFrame` for the same reason. Everything below the marks is the shipped primitive,
- * assembled not re-implemented.
+ * Non-single-plot. This is two panes, not one: download and upload are scaled INDEPENDENTLY against
+ * a shared baseline (see the component docblock), so the chart has two y scales stacked vertically
+ * rather than one plot rect with one or two numeric axes. `CartesianChart` cannot express that;
+ * `DualPanel` is the shipped kind of the same shape and composes `ChartFrame` for the same reason.
+ * Everything below the marks is the shipped primitive, assembled not re-implemented.
  *
- * Written at the top of the assembly rather than on a node: since 1.20.0 a named `theme-allow` with
- * a reason declares the whole FILE wherever it sits, so a node-level placement would misstate its
- * scope. Delete this when `DualPanel` gains `bottomMark: 'bars'` + independent pane domains.
+ * Each assembly node below carries its own `theme-allow hand-rolled-plot` rather than one
+ * `theme-allow-file`, so the exported `ThroughputChart` above — which composes `ChartFrame`
+ * properly — stays policed. Delete them when `DualPanel` gains `bottomMark: 'bars'` + independent
+ * pane domains.
  */
 function MirroredBars({
   points,
@@ -332,13 +332,15 @@ function MirroredBars({
         <g transform={`translate(${LEFT_GUTTER}, 0)`}>
           {/* One axis per half, each in its own scale's units, because the halves are scaled
               independently — a single shared axis would be wrong for at least one of them. Both sit
-              inside this group so their ticks extend left into the gutter rather than off-canvas. */}
+              inside this group so their ticks extend left into the gutter rather than off-canvas.
+              theme-allow hand-rolled-plot — the upload pane's own axis, in its own scale */}
           <AxisLeftNumeric
             scale={scaleLinear<number>({ domain: [maxUp, 0], range: [0, upHeight] })}
             numTicks={2}
             tickFormat={(v) => fmtRate(Number(v))}
           />
           <g transform={`translate(0, ${baseline})`}>
+            {/* theme-allow hand-rolled-plot — the download pane's own axis, in its own scale */}
             <AxisLeftNumeric
               scale={scaleLinear<number>({ domain: [0, maxDown], range: [0, downHeight] })}
               numTicks={3}
@@ -423,7 +425,8 @@ function MirroredBars({
             strokeWidth={1}
           />
           {/* The tick VALUES are ISO bucket starts (the scale's domain); `bucketTickFormat` renders
-              each as the time a reader sees — see `lib/axis.ts`. */}
+              each as the time a reader sees — see `lib/axis.ts`.
+              theme-allow hand-rolled-plot — the one x axis the two panes share */}
           <AxisBottomDate
             scale={xScale}
             top={barBand}
@@ -431,12 +434,14 @@ function MirroredBars({
             tickFormat={bucketTickFormat(bucketSeconds)}
           />
           {point && (
+            // theme-allow hand-rolled-plot — the shipped crosshair over a hand-composed plot rect
             <Crosshair
               x={(xScale(point.key) ?? 0) + xScale.bandwidth() / 2}
               top={0}
               bottom={barBand}
             />
           )}
+          {/* theme-allow hand-rolled-plot — the shipped overlay driving this plot's own cursor */}
           <HoverOverlay
             width={plotWidth}
             height={barBand}

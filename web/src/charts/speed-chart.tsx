@@ -1,4 +1,12 @@
-import { ChartCard, ChartLegend, MultiLine, VX, useChartSize } from 'basalt-ui/charts'
+import {
+  ChartCard,
+  ChartLegend,
+  MultiLine,
+  type SeriesStyle,
+  VX,
+  deriveLegend,
+  useChartSize,
+} from 'basalt-ui/charts'
 import { useInViewport } from './use-in-viewport'
 import type { SpeedTest } from '../lib/types'
 import { fmtClock, fmtMbps } from '../lib/format'
@@ -93,6 +101,20 @@ export function SpeedChart({
   // forwarded no formatter and the domain value was the only string that reached the axis.
   const points = ordered.map((test) => ({ test, key: runAxisKey(test.ts) }))
   const [compact] = useCompactMode()
+  // ONE array behind both the drawn rules and their captions. `MultiLine` draws `refLines` but
+  // names none of them, so the labels ride in their own reference-role legend below the plot —
+  // and 1.20.0's widened `basalt/chart-legend-literal` is right that a legend authored beside the
+  // marks is a second source of truth. `deriveLegend` over the same `refLines` the plot draws is
+  // the shipped answer: the swatch, the dash and the label cannot drift from the rule, because
+  // they are computed from it. Drop the whole block the day `refLines` takes a `label`.
+  const refSeries: SeriesStyle[] = refLines.map((ref) => ({
+    key: ref.label,
+    label: ref.label,
+    color: ref.color,
+    mark: 'line',
+    dash: 'dashed',
+    role: 'reference',
+  }))
   const height = compact ? SPEED_HEIGHT_COMPACT : SPEED_HEIGHT
   // The container's own width, measured here rather than inside a wrapper the kind renders under.
   // `ResponsiveChart` is gone (1.15.0 has one responsive path, `ChartFrame`, which every kind
@@ -197,21 +219,14 @@ export function SpeedChart({
           />
         </div>
       </div>
-      {/* `MultiLine` draws ref lines but names none of them, and an unlabelled rule across a
-          throughput chart is an assertion the reader has to guess at. The labels ride here, in
-          their own reference-role legend, with the numbers their caller measured. */}
-      {refLines.length > 0 && isPending !== true && (
+      {/* An unlabelled rule across a throughput chart is an assertion the reader has to guess at.
+          This legend sits outside `ChartFrame`, so its pending suppression is explicit — see the
+          `isPending` prop's docblock. */}
+      {refSeries.length > 0 && isPending !== true && (
         <ChartLegend
           chartId="speed-throughput-refs"
           placement="bottom"
-          items={refLines.map((ref) => ({
-            key: ref.label,
-            label: ref.label,
-            color: ref.color,
-            shape: 'line' as const,
-            dashed: true,
-            role: 'reference' as const,
-          }))}
+          items={deriveLegend(refSeries)}
         />
       )}
     </ChartCard>

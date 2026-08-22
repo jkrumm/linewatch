@@ -170,9 +170,14 @@ anyone they disagreed.
   The structural answer is now the framework's: `series` is the single source of
   truth, the legend and the per-series tooltip rows are DERIVED from it, and marks
   draw `ctx.visible` — so a swatch cannot name a colour its mark does not have.
-  `basalt/chart-legend-literal` fails the build on a hand-written `ChartLegend`
-  items array; the two strips' four-fill legends are `SeriesStyle[]` handed to
-  `ChartFrame` for exactly that reason.
+  `basalt/chart-legend-literal` reports (at `warn`) any `ChartLegend` items array
+  that is not derived from `series` — including, since 1.20.0, a `.map()` over some
+  other array. The two strips' four-fill legends are `SeriesStyle[]` handed to
+  `ChartFrame` for exactly that reason, and `speed-chart.tsx`'s reference legend —
+  the one legend on this page that `ChartFrame` cannot own, because `MultiLine`
+  draws `refLines` but names none of them — goes through the shipped
+  `deriveLegend(refSeries)` over the same array the rules are drawn from. Delete
+  that block the day `refLines` takes a `label`.
 - **Every chart on the cursor shows a tooltip, and exactly one of them announces
   it.** For three releases only the pointer's own chart did: this directory drew a
   value chip on every synced sibling (`charts/synced-tip.tsx`) until the 1.15.0

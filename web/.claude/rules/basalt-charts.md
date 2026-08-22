@@ -55,19 +55,31 @@ radial/matrix shape, is not optional — two `basalt` oxlint plugin rules
 
 - **`basalt/hand-rolled-plot`** — rendering a chart-assembly primitive (`AxisLeftNumeric`,
   `AxisRightNumeric`, `AxisBottomDate`, `HoverOverlay`, `Crosshair`) in a file that does not
-  compose `CartesianChart` fails the build. Escape: a `theme-allow` comment on the first such
-  site — that is how a genuinely non-single-plot shape (multi-pane, radial, matrix) declares
-  itself; `DualPanel` carries the repo's one such comment. The file that DEFINES `CartesianChart`
-  is exempt definitionally (detected by declaration, not by path), since a rule saying "compose X"
-  cannot fire inside X.
-- **`basalt/chart-legend-literal`** — passing a hand-written array literal to `ChartLegend`'s
-  `items` fails the build; the legend must be derived from the same `series` array the chart draws
-  (`deriveLegend`, or just let `ChartFrame`/`CartesianChart` do it), so it cannot go stale and keep
+  compose `CartesianChart`. **Since 1.20.0 every assembly node is reported and waived on its own**
+  — one comment no longer grants the whole file permanent immunity, which is how a 604-line chart
+  file went unpoliced. A genuinely non-single-plot shape (multi-pane, radial, matrix) declares
+  itself with a written file declaration — a `theme-allow` that both names the rule and gives a
+  reason, anywhere in the file (`theme-allow hand-rolled-plot — two panes over one x scale`);
+  `DualPanel` carries the repo's only one. The file that DEFINES `CartesianChart` is exempt
+  definitionally (detected by declaration, not by path), since a rule saying "compose X" cannot
+  fire inside X.
+- **`basalt/chart-legend-literal`** — a hand-written array literal passed to `ChartLegend`'s
+  `items`; **since 1.20.0 also a `.map()` over a non-`series` array**, because deriving from AN
+  array is not deriving from THE series. The legend must come from the same `series` the chart
+  draws (`deriveLegend`, or just let `ChartFrame`/`CartesianChart` do it), so it cannot go stale
   naming a series the plot no longer draws.
 
-Both ship at `warn` in the consumer preset (`configs/oxlint.json`) for one minor and `error`
-repo-local, per the "Shipping a stricter guard — the grace minor" doctrine in
-`packages/basalt-ui/CLAUDE.md`. They promote to `error` in the next minor.
+Both ship `warn` in the consumer preset (`configs/oxlint.json`) and `error` repo-local, per the
+"Shipping a stricter guard — the grace minor" doctrine in `packages/basalt-ui/CLAUDE.md`. 1.20.0
+WIDENS both, so both restart their grace rather than promoting — the live ledger with the promotion
+note per rule is `PLUGIN_RULE_GRACE`, exported beside the plugin in `configs/oxlint-plugin.js`, and
+a test asserts it against the shipped preset in both directions.
+
+**A documented limit:** `hand-rolled-plot` keys on those visx primitives, so a chart drawn with DOM
+nodes (divs sized in percent, an SVG assembled by hand) is structurally invisible to it. That is a
+deliberate trade — every alternative detector tried either flagged basalt's own `Donut`/`Heatmap` or
+an icon in a card header, and a noisy shipped rule gets switched off. Compose `CartesianChart`
+because it is the contract, not because lint will catch you.
 
 ## Maps are not charts
 
@@ -85,8 +97,8 @@ ships no map kind.
   an AST pass — it flags any `padding:`/`gap:`/`margin:` followed by a number in _any_ object
   literal, in any file. A map's pixel geometry (`fitBounds({ padding: 48 })`, marker offsets) trips
   it even though it isn't spacing, and hoisting the value to a module-scope const doesn't help — the
-  regex sees the line, not the binding. Use a `theme-allow` line comment; that's the sanctioned
-  answer, not a bug to file.
+  regex sees the line, not the binding. Scope a `theme-allow inline-spacing — map geometry` comment
+  to it; that's the sanctioned answer, not a bug to file.
 
 ## Every chart has
 
@@ -155,7 +167,7 @@ ships no map kind.
    in the geometry; and because the domain value must be unique, two events at the same instant
    collapse onto one position and one stops being drawn. `getX` returning a date string reads like a
    time axis and is not one. Tracked as issue #52; a chart whose x is a measured quantity currently
-   needs a `basalt/hand-rolled-plot` exemption.
+   needs a `basalt/hand-rolled-plot` file declaration.
 
 6. **The cursor is shared by default.** No provider needed — `useChartCursor` reads a module-level
    external store (`useSyncExternalStore`), so every `CartesianChart`/`ChartFrame`-composed chart on

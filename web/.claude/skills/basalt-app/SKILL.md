@@ -53,6 +53,28 @@ own the files.
 - `.basalt/manifest.json` — a sha256 per managed file + the basalt-ui version that wrote it, so
   `sync` can three-way diff and `doctor` can spot a stale install.
 
+It also patches `package.json`: **`basalt.roots`** inferred from the real layout (workspace packages
+depending on basalt or Mantine, else every workspace `src/`, else `src`) and a **`lint:basalt`**
+script (`oxlint . && basalt-ui check-theme`). Everything derives from `roots` — the guard's scan, the
+seeded CI `oxfmt` globs, the default exemption — so a workspace repo without it scaffolds a guard
+that scans zero files while every gate reports green. Correct it if your sources live elsewhere. A
+Mantine-free consumer adds `"basalt": { "profile": "tokens-only" }` by hand; `check-theme` never
+infers that, because inferring it from a missing `@mantine/core` would silence 17 kinds on a repo
+that simply keeps Mantine in another workspace package.
+
+**`init` on an EXISTING app is a lint-debt event, not a no-op.** Adopting the shipped preset turns
+on whole oxlint plugins the repo was never linted against, so previously-clean code lands with real
+findings on the first run. `init` names the plugins and every file it kept — plus what keeping it
+costs (an existing `.oxlintrc.json` that does not `extends` the preset means the entire basalt lint
+half is off, and nothing else says so; `--merge-lint` splices it in). Run `oxlint .` and triage
+before the next commit; turn a rule off with a written reason rather than disabling a plugin.
+
+Then `basalt-ui doctor`. `SKIPPED` is a third outcome beside pass/warn/fail and exits non-zero on
+its own — a check that could not run is not a check that passed — and the hard checks now include
+`basalt-resolves`, `guard-scan` (would `check-theme` cover more than zero files?) and
+`oxlint-preset` (does `.oxlintrc.json` really extend the preset? JSONC is parsed, not rejected).
+Expect doctor to go red where it was green on an older basalt; that is the point.
+
 After `init`, do the runtime wiring (the CLI scaffolds files, not your app's composition):
 
 ```tsx
@@ -94,10 +116,15 @@ ordering (e.g. alongside `@content-collections/vite`) and the full head/PWA/mani
 import 'basalt-ui/styles.css' // @layer basalt base styles, iOS input safety net, font stack
 ```
 
-Lint wires as `oxlint . && basalt-ui check-theme` — the theme guard is the teeth behind the token
-doctrine. The consumer series file (`<first basalt.root>/lib/series.ts` by default — so `src/lib/series.ts`
-on a plain app, `apps/web/src/lib/series.ts` on a monorepo; override via `basalt.seriesModulePath`) is the
-single guard-exempt palette source — see `/basalt-charts`.
+Lint wires as `oxlint . && basalt-ui check-theme` (seeded as the `lint:basalt` script) — the theme
+guard is the teeth behind the token doctrine. Before writing any composite, check whether basalt
+already ships it: round 4 found ~15 forked copies of shipped components across seven repos, all
+passing every gate, because a fork by a token-fluent author uses exactly the right tokens.
+`basalt/shadow-basalt-export` warns on the name collision; nothing catches the rest.
+
+The consumer series file (`<first basalt.root>/lib/series.ts` by default — so `src/lib/series.ts` on
+a plain app, `apps/web/src/lib/series.ts` on a monorepo; override via `basalt.seriesModulePath`) is
+the single guard-exempt palette source — see `/basalt-charts`.
 
 ## Refresh: `bunx basalt-ui sync`
 
@@ -140,13 +167,22 @@ both.
 - A thin `DESIGN.md` (deltas) + the thirteen `basalt-*` rules + the managed CLAUDE block are present.
 - `<first basalt.root>/lib/series.ts` exists as the one guard-exempt series source (for any app metric colors).
 - `basalt-ui sync --check` wired in CI (recommended) to catch drift on future upgrades.
+- `basalt-ui doctor` run after `init` and read to the last line — a `SKIPPED` check exits non-zero
+  and is not a pass.
 
 ## Notes
 
 - `init`, `sync`, and `check-theme` are all **real**. `sync` reconciles via a sha256 three-way diff
   (`--check` is a CI drift gate, `--force` overwrites local edits); `check-theme` is the palette
-  guard; `doctor` verifies the installed basalt-ui version against the manifest. All via
-  `bunx basalt-ui …`.
+  guard; `doctor` checks resolution, version, guard scan, oxlint preset, spacing-scale drift and
+  cross-package `ai` major parity. All via `bunx basalt-ui …`.
+- **Not a React app?** `bunx basalt-ui tokens:css --out src/tokens.css` emits the `--vx-*` layer with
+  no package in your dependency tree, `--selector-class dark` for the Tailwind `<html class="dark">`
+  convention, and `fonts:css` emits the shipped `--basalt-font-*` stacks. Both carry the two-line
+  `@generated basalt-ui` header the guard skips on — that header verbatim, and then only the LINES
+  that are basalt custom properties, selectors, `}` or self-closing comments, so the marker pasted
+  into a `.tsx` suppresses nothing and a declaration added to such a file is still reported — and
+  both take `--check` as a CI drift gate. See `docs/FRAMEWORK-FREE.md` in the basalt-ui repo.
 - The framework ships **no** icon or notification dep — pass icons as `ReactNode` and wire toasts
   yourself (e.g. `ThemeLabControls`' `copyIcon` / `onCopy`).
 - The framework DOES ship `motion` (motion.dev, formerly framer-motion) as a bundled dependency —

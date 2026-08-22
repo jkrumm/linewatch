@@ -8,16 +8,12 @@
   },
   "overrides": [
     {
-      // `src/charts/**` is the app's Mantine-free zone: charts draw inline <svg>, and `role="img"`
-      // on an inline <svg> is the recommended a11y pattern, not a stand-in for an <img> element.
-      // SVG's implicit role is `graphics-document`, which assistive tech announces by walking the
-      // shape tree; pairing role="img" with aria-label collapses that to one described graphic. An
-      // actual <img> would mean an external raster with no live tooltip. Scoped to charts rather
-      // than disabled globally — the rule is right everywhere else, and it caught two real cases in
-      // src/components that are now real <ul>/<li> elements.
+      // `jsx-a11y/prefer-tag-over-role` used to be turned off here — `role="img"` on an inline
+      // <svg> is the recommended a11y pattern, not a stand-in for an <img> element. basalt-ui
+      // 1.20.0 disables that rule in the shipped preset for the same reason, so the local
+      // override is gone and only the one below remains.
       "files": ["src/charts/**"],
       "rules": {
-        "jsx-a11y/prefer-tag-over-role": "off",
         // `CartesianChart`'s `tooltip.extraRows` (and `ChartFrame`/`CartesianChart`'s own
         // `children`) are render CALLBACKS the primitive invokes with a datum — not components it
         // mounts, so the identity churn this rule exists to prevent cannot happen. The rule reads

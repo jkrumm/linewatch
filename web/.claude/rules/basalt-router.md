@@ -104,10 +104,16 @@ Install `@tanstack/react-router` as a peer, then import from `basalt-ui/router-t
 
 **Prerequisites:**
 
-- `@tanstack/router-plugin/vite` must be configured in your Vite config and `tsr generate` must
-  have run at least once — the `StaticDataRouteOption` augmentation only takes effect once the route
-  tree (`src/routeTree.gen.ts`) has been generated. In CI and after adding routes, run
-  `tsr generate` (or `bun run typecheck`, which triggers it) before relying on breadcrumb or nav data.
+- **The only hard prerequisite is the `Register` module augmentation** (see "The prerequisite that
+  makes all of this real" below). `defineNav` / `navGroup` / `navTarget` / `flattenNav` / `useNav` /
+  `createSearchParamStore` all work against a hand-written `createRouter({ routeTree })` with
+  code-defined routes, no Vite plugin and no generated tree — verified end-to-end in a consumer,
+  including that a bad `to` still prints the real route-path union.
+- **`@tanstack/router-plugin/vite` + `tsr generate` are needed only for `staticData`** — that is,
+  for `useRouterBreadcrumbs` and any nav metadata read off the route tree. The
+  `StaticDataRouteOption` augmentation takes effect once `src/routeTree.gen.ts` exists. In CI and
+  after adding routes, run `tsr generate` (or `bun run typecheck`, which triggers it) before relying
+  on breadcrumb data.
 - The loader's `context.queryClient` requires `createRootRouteWithContext<{ queryClient: QueryClient }>()`.
   Run `basalt-ui init` to scaffold a `query-client.ts` + `__root.tsx` seed that wires the TanStack
   Router + Query context correctly — the generated `__root.tsx` uses
@@ -255,12 +261,18 @@ With that missing, every `to` widens to `string`, a nonexistent route path compi
 required `search` compiles, and the API looks like it is working while catching nothing. This is
 the single highest-value thing to verify when adopting the config: change one `to` to a garbage
 path and confirm you get a compile error listing the real route paths. If you don't, the
-augmentation is missing or `tsr generate` has not run.
+augmentation is missing (or, on a file-route setup, `tsr generate` has not run).
 
-Second thing to know before you migrate: TypeScript cannot catch a destination that FORGETS a
-default `search` when the route validates with `validateSearch: (raw: Record<string, unknown>) => T`
-— that gives TanStack an input type where no key is required. Diff an old hand-written target table
-against the new definition by hand, key by key.
+Second thing to know before you migrate: whether a missing `search` is caught depends on the
+schema's OUTPUT type, not on the `validateSearch` signature. If every key of `T` is required —
+which is what a Zod object with defaults produces, since defaults apply on parse and the output has
+no optionals — TanStack raises `MakeRequiredSearchParams` and the compiler catches it. Two routes in
+one consumer had been shipping nav links with no search params behind a `to={target.to as never}`
+cast; removing the callback surfaced both immediately.
+
+**The caveat holds only when `T` has no required keys** (every key optional, or the validator
+returns a partial). There, a forgotten `search` compiles — diff the old target table against the new
+definition by hand, key by key. Everywhere else, trust the error.
 
 Error messages here are the router's own and they are large: one wrong `to` prints the whole
 route-path union plus a `RouterCore<…>` blob, because TanStack's `Constrain` falls back to the

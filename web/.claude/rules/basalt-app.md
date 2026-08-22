@@ -69,6 +69,49 @@ The one real caveat is a plugin that **emits files from its own `closeBundle`**:
 `vite-plugin-pwa`'s, those files are written too late to be precached (the `rollup-plugin-copy`
 class of bug). `vite-plugin-pwa` exposes `integration.closeBundleOrder` to sequence against it.
 
+## What `basalt-ui init` writes into `package.json`
+
+`init` is not only a file-scaffolder. It also patches two keys, and on an existing app it is a
+**lint-debt event, not a no-op** — the shipped preset switches on whole oxlint plugins the repo was
+never linted against, so previously-clean code lands with real findings on the first run. `init`
+prints the plugin list; run `oxlint .` and triage it before your next commit rather than
+blanket-disabling a plugin.
+
+- **`basalt.roots`** — inferred from the real layout (workspace packages depending on basalt or
+  Mantine, else every workspace `src/`, else `src`). Everything derives from it: `check-theme`'s
+  scan, the seeded CI `oxfmt` globs, the default scan exemption. Correct it if your sources live
+  elsewhere; without it a workspace repo scaffolds a guard that scans zero files.
+- **`scripts["lint:basalt"]`** — `oxlint . && basalt-ui check-theme`. Previously the docs told you
+  to wire this and nothing wrote it.
+- **`basalt.profile: 'tokens-only'`** — for a consumer on the `--vx-*` layer with no Mantine. It
+  must be DECLARED (or passed as `--tokens-only`); `check-theme` deliberately never infers it,
+  because inferring from a missing `@mantine/core` would silence 17 kinds on any repo that keeps
+  Mantine in a different workspace package. `doctor` does infer it, because its profile only changes
+  which ADVICE it prints and never what it enforces — and it names the key to write down.
+
+`init` keeps an existing `.oxlintrc.json` rather than clobbering it, and now names what keeping it
+costs (the whole basalt lint half stays off). `--merge-lint` splices the preset's `extends` in; it
+refuses on a commented config rather than deleting the comments.
+
+Run `basalt-ui doctor` afterwards to confirm the wiring took. A check that cannot RUN is reported as
+`SKIPPED` and exits non-zero on its own — "All checks passed" is only printable when every check ran.
+
+## `index.html` and `public/` are scanned
+
+`check-theme` resolves `.html` / `.webmanifest` / `.json` as markup (colour kinds only), and each
+`basalt.roots` entry's PARENT contributes its `index.html` and its `public/` tree — exactly the Vite
+layout above. So a raw hex in a `theme-color` meta or a webmanifest's `background_color` is a
+finding now; those are the two colours nothing re-derives on a scheme change. Nothing else in the
+parent is walked, and `.json` is never blanket-scanned — name one in `basalt.include`.
+
+## `__APP_VERSION__`
+
+`basaltViteConfig` injects the `__APP_VERSION__` define, and since 1.20.0 ships the ambient
+declaration with it (`src/register.ts` → `dist/register.d.ts`, re-exported by the root barrel). An
+app that imports anything from `basalt-ui` has it in scope — delete your hand-written ambient block
+and its `oxlint-disable`. A subpath-only consumer does not get it, which is the same set as the
+consumers not on this Vite preset anyway.
+
 ## CSS layer order (Mantine)
 
 `basalt-ui/styles.css` must load AFTER every `@mantine/*/styles.layer.css` bundle — the layered

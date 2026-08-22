@@ -24,12 +24,76 @@ status pops — never floods. (Blueprint/Basalt zinc-charcoal are the historical
 ancestors; `docs/DESIGN-SPEC.md` in the basalt-ui repo supersedes both — see its "Doctrine
 inversions" section.) This
 rule is the operational checklist; it is enforced mechanically by **`basalt-ui check-theme`**
-(wire it into `lint`: `oxlint . && basalt-ui check-theme`). A violation fails the build. Escape hatch: a
-`theme-allow` line comment (diff-visible, deliberate).
+(wire it into `lint`: `oxlint . && basalt-ui check-theme`; `init` seeds that as `lint:basalt`). A
+violation fails the build. Escape hatch: a scoped `theme-allow <rule-id> — <reason>` comment
+(diff-visible, deliberate) — see the contract below.
 
 `check-theme` reads its config from your `package.json` `"basalt"` key
-(`{ roots?, exempt?, spacingSteps?, forbiddenAccents? }`); set `roots` to your source dirs and `exempt`
-to the files that legitimately define palette values.
+(`{ roots?, exempt?, include?, profile?, severity?, spacingSteps?, forbiddenAccents? }`); set `roots`
+to your source dirs and `exempt` to the files that legitimately define palette values.
+
+**`roots` is not optional in practice.** Omitted it falls back to `src` relative to the cwd — fine
+for a single-app repo, zero files for anything under `apps/*/src`, and `check-theme` then exits 1
+with `0 files scanned`. Since 1.20.0 `init` writes a real `roots` from the detected layout and
+`doctor`'s `guard-scan` check fails when the configured roots resolve to nothing; before that a repo
+could look fully wired while the gate scanned nothing.
+
+The scan reaches slightly beyond `roots`: each root's PARENT contributes its `index.html` and its
+`public/` tree (the Vite layout basalt's own preset assumes), because that is where a `theme-color`
+meta and a webmanifest's `background_color` actually live. `.json` is never blanket-scanned — name a
+design-surface JSON in `basalt.include`, the only route to one.
+
+## `theme-allow` — the 1.20.0 contract
+
+Scope it. `theme-allow <rule-id> — <reason>` waives that ONE kind; the id is a guard kind
+(`raw-surface`, `inline-spacing`, …) or an oxlint plugin rule (`hand-rolled-plot`,
+`raw-scroll-container`, …), with or without the `basalt/` prefix.
+
+```tsx
+// theme-allow raw-surface — third-party widget needs a literal corner
+<Widget style={{ borderRadius: 3 }} />
+```
+
+- **A bare `theme-allow` still waives everything**, so no upgrade takes a build down over comment
+  placement — but it now reports `theme-allow-unscoped` (`warn` for one minor, then `error`).
+  Rescope the ones you have; that is the whole migration.
+- **Spell the id right — a typo waives nothing.** A word in the id slot that names no rule is
+  recorded as unknown and suppresses nothing; the annotation covers exactly the ids it got right.
+  Only a genuinely bare `theme-allow` is the blanket form. Because the id slot is read strictly, a
+  prose reason has to be introduced by a separator: `theme-allow: <why>` or
+  `theme-allow <id> — <why>`, never `theme-allow <why>`.
+- **Three placements work and both engines agree on all three**: the reported line, a comment-ONLY
+  line directly above it (the only form JSX can express — the reported line is usually a multi-line
+  opening tag or a `{expr}` child), and in CSS a trailing annotation reaching back over the
+  declaration it terminates. The third is what survives the shipped `oxfmt` reflowing a long
+  `background-color` so the hex lands ABOVE the comment.
+- **`basalt/hand-rolled-plot` no longer grants whole-file immunity** off whichever comment happened
+  to sit on the first assembly node. Every node is waived on its own; a file-scoped exception needs
+  a written declaration that both names the rule and gives a reason, anywhere in the file.
+
+### New in 1.20.0 — five guard kinds, all `warn` for one minor
+
+| Kind                      | Fires on                                                                                                            |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `theme-allow-unscoped`    | a `theme-allow` with no rule id, no reason, or an id that names no rule                                             |
+| `surface-shadow-override` | a `boxShadow` built FROM tokens that REPLACES `--vx-shadow-card` instead of composing with it                       |
+| `css-raw-surface`         | the kebab dialect of the surface kinds in CSS (`border-radius: 6px`); sub-scale corners and circle/pill values pass |
+| `inline-font-size`        | `style={{ fontSize: 11 }}` — the `check-theme` half of `basalt/no-raw-font-size`, for a CI that runs only the guard |
+| `hidden-inline-style`     | a multi-line opening tag, or a style object hoisted to a const — `raw-html-layout`'s formatting-independent half    |
+
+Two new oxlint rules ship at `warn` alongside them: **`basalt/shadow-basalt-export`** (below) and
+**`basalt/hand-rolled-shell`** (`AppShell` parts or `Burger` in a file that does not render
+`BasaltShell`). **`basalt/raw-size-literal` is now `error`** — CSS-length strings on
+`size`/`fz`/`fontSize`. Every kind keeps its own boolean, `basalt.severity` and `exemptRules`.
+
+## The guard sees palette, not vocabulary
+
+Round 4 swept seven consumer repos: every gate green, and ~15 independently re-rolled copies of
+components basalt already ships (`StatCard` in 4 of 4 apps, `EmptyState`, a 266-line hand-rolled
+`AppShell`). A fork written by a token-fluent author uses exactly the right tokens, so no palette
+guard can ever see it. **`basalt/shadow-basalt-export` is the cheap detector** — it warns when a
+local component's name collides with a live basalt export, read from the real shipped barrel. The
+habit it stands in for: check whether basalt already ships the thing before building it.
 
 ## Filled surfaces — the fill band
 
@@ -158,5 +222,10 @@ export const paletteGroups = { [`${GROUP}-`]: SERIES } // -> { 'activity-': SERI
 ## When the guard fires
 
 Fix the source, don't silence it — reach for the right token first. Only add `theme-allow` for a
-genuine, documented exception (e.g. a third-party widget needing a literal). The palette-definition
-files are listed in your `exempt` set so they don't self-trip.
+genuine, documented exception (a third-party widget needing a literal), scoped to the rule id, with
+a reason: a bare `// theme-allow` passes the check, tells the next reader nothing, and now reports
+`theme-allow-unscoped` besides. The palette-definition files are listed in your `exempt` set so they
+don't self-trip. A stylesheet emitted by `basalt-ui tokens:css` needs no entry — in a `.css` file
+carrying that exact two-line `@generated basalt-ui` header, the guard skips the LINES that are
+basalt custom properties, selectors, `}` or self-closing comments. Pasting the marker anywhere else
+suppresses nothing, and an ordinary declaration added to such a file is still reported.

@@ -1,5 +1,5 @@
 import { defineConfig, mergeConfig } from 'vite'
-import { basaltViteConfig } from 'basalt-ui/vite'
+import { basaltAppPlugin, basaltViteConfig } from 'basalt-ui/vite'
 import react from '@vitejs/plugin-react'
 import { TanStackRouterVite } from '@tanstack/router-plugin/vite'
 import { readFileSync } from 'fs'
@@ -35,6 +35,15 @@ const basalt = basaltViteConfig({
 
 export default defineConfig(
   mergeConfig(basalt, {
-    plugins: [TanStackRouterVite({ target: 'react', autoCodeSplitting: true }), react()],
+    plugins: [
+      TanStackRouterVite({ target: 'react', autoCodeSplitting: true }),
+      react(),
+      // Owns the `<meta name="theme-color">` pair, which used to be two hand-copied hexes in
+      // `index.html`. They had already rotted — `#EDEFF2`/`#242424` against the palette's actual
+      // `SURFACE.bg` of `#f2f2f5`/`#27272a` — which is exactly the drift the plugin exists to
+      // stop, and what `check-theme`'s `raw-hex` now reports on markup. No manifest and no icon
+      // links: this is a tailnet dashboard with no `public/` tree and nothing to install.
+      ...basaltAppPlugin({ name: 'linewatch', manifest: false, icons: false }),
+    ],
   }),
 )

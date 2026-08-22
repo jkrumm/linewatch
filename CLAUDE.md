@@ -128,6 +128,13 @@ anyone they disagreed.
   genuine documented exception, one line at a time. The three scoped oxlint overrides
   in `web/.oxlintrc.json` each carry their reason inline; that file is JSONC, so a new
   one must too.
+- **The dashboard's `<head>` is `basaltAppPlugin`'s, not `index.html`'s.** The
+  `theme-color` pair used to be two hand-copied hexes in `web/index.html` and had
+  already drifted from the palette by a visible amount. `basaltAppPlugin` (in
+  `web/vite.config.ts`) resolves them from `SURFACE.bg`, so they track a retune;
+  `manifest`/`icons` are off because this is a tailnet dashboard with no `public/`
+  tree. `check-theme` reads `index.html` as of 1.20.0, so a hex put back there fails
+  the build.
 - **A single-plot cartesian chart composes `CartesianChart` and draws only marks —
   this is lint-enforced, not a preference.** `basalt/hand-rolled-plot` fails the
   build on an axis, overlay or crosshair primitive in a file that does not compose

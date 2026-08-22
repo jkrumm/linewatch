@@ -67,7 +67,8 @@ Retuning a fill OUTSIDE the band breaks its label. `theme/contrast.test.ts` fail
   or genuine multi-series separation. A count badge is a signal → it may carry blue; a nav active-state
   is UI chrome → it stays neutral (`NavCountBadge` already encodes this). Active nav renders a
   **neutral surface fill** + plain text + a weight bump, never the accent — baked into the theme's
-  NavLink `--nl-*` defaults across every render path (including a router `<Link>` via `renderNavLink`).
+  NavLink `--nl-*` defaults across every render path (including a router `<Link>` hosted through
+  `SidebarItem.Anchor`).
 - **Accent restraint, mechanically.** The accent lands on exactly the single primary CTA per view
   (`variant="filled"`), focus rings, links, and small status pops — nowhere else. Routine/secondary
   buttons use `variant="default"` (neutral); don't reach for a colored `variant="light"` (it reads

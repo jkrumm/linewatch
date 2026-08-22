@@ -60,8 +60,9 @@ Restraint is the #1 lever — neutrals carry the surface, the accent only points
   reads as a button sitting in the nav rather than as the current location. Inactive = muted text,
   faint icon, hover ink-6%; an active row hovers one step further to ink-13%. This is baked into
   the theme's NavLink defaults (`--nl-*` vars) and holds for _every_ render path, including a
-  consumer's router `<Link>` passed via `renderNavLink`. Child items indent with a 1px `divider`
-  left border; active child = accent text, weight 600.
+  consumer's router `<Link>` hosted through `SidebarItem.Anchor`. Child items indent with a 1px
+  `divider` left border; active child = accent text, weight 600. The MOBILE bar is the one
+  deliberate exception to the accent-icon half of this rule — see "Mobile bar" below.
 - **Buttons**: the primary action = filled accent (`variant="filled"`), **exactly one per view**.
   Every other/secondary action = `variant="default"` (neutral). Do **not** use a colored
   `variant="light"` for routine actions.
@@ -280,8 +281,8 @@ shadow-surfaces.test.ts` mechanically enumerates every site that applies either 
 `BasaltShell` is the canonical single-mount. When a fully custom layout is needed, the shell
 sub-components are available individually from `basalt-ui`:
 
-- `AppSidebar` — desktop sidebar (sections, collapse, brand, footer/settings extras)
-- `MobileNav` — bottom-tab mobile nav
+- `AppSidebar` — desktop sidebar (sections, collapse, brand, settings/account extras)
+- `MobileNav` — the bottom tab bar (takes a `MobileNavModel` from `projectMobileNav`)
 - `AppBreadcrumbs` — breadcrumb bar (reads from `useRouterBreadcrumbs` or a manual trail)
 - `PageHeaderProvider` + `PageActions` + `PageActionsOutlet` — portal-based page action slots
 - `NavCountBadge` — count badge for sidebar nav items
@@ -294,13 +295,14 @@ import {
   PageHeaderProvider,
   PageActionsOutlet,
   NavCountBadge,
+  projectMobileNav,
 } from 'basalt-ui'
 
 function CustomShell({ children }: { children: React.ReactNode }) {
   return (
     <PageHeaderProvider>
-      <AppSidebar sections={sections} brand={brand} renderNavLink={renderNavLink} />
-      <MobileNav sections={mobileSections} renderNavLink={renderNavLink} />
+      <AppSidebar sections={sections} brand={brand} />
+      <MobileNav model={projectMobileNav(sections)} />
       <main>
         <AppBreadcrumbs />
         <PageActionsOutlet />
@@ -313,6 +315,69 @@ function CustomShell({ children }: { children: React.ReactNode }) {
 
 Prefer `BasaltShell` unless the layout genuinely diverges — it already composes all of the above
 with the correct wiring (collapse persistence, mobile breakpoint, breadcrumb integration).
+
+## Mobile bar
+
+The bottom bar is a **tab bar, not a menu**: a slot is a DESTINATION, so a tap navigates instantly
+with nothing to dismiss. There is no full-height mobile sidebar drawer — everything it used to hold
+(nav, account, settings, theme switcher) is reachable from the trailing More slot instead.
+
+`BasaltShell` builds the whole thing from the same `SidebarSection[]` the desktop sidebar renders:
+**`projectMobileNav`** projects those sections onto the bar and **`MobileNav`** paints the result.
+There is no second nav model to maintain, and in the common case no configuration at all.
+
+**Surface inference — the part you do not configure.** For any slot holding `n` rows:
+
+| `n`                     | surface                                                                   |
+| ----------------------- | ------------------------------------------------------------------------- |
+| 0                       | the slot is dropped                                                       |
+| 1                       | a plain navigation link — a group of one IS a destination                 |
+| ≤ `menuMax` (default 6) | a Mantine `Menu` that pops upward out of the tab, content-sized, no scrim |
+| > `menuMax`             | a bottom `Drawer` sheet with a grabber and an internal `ScrollArea`       |
+
+Six is arithmetic, not taste: 6 × 44px + 8px padding = 272px against 415px of headroom on the
+smallest supported viewport, which is why the menu is configured `flip: false` and can never render
+below the fold. Move a destination in or out of the More slot and the surface changes itself.
+
+**Placement** is one field per destination — `SidebarItem`'s `mobile`: `'tab'` gives it a slot of
+its own, `'more'` (the default) makes it an overflow row, `'hidden'` drops it from mobile entirely.
+A whole section claims one slot with `mobile: { tab: true }` (its destinations then open per the
+table above) or leaves mobile with `mobile: false`. Configure nothing and the first four non-disabled
+top-level destinations take slots — a nav that works before anyone has thought about mobile.
+
+**`MobileNavConfig`** (the `mobileNav` prop) is the escape hatch, not the interface: `tabs` for an
+explicit slot order by key when the bar order must differ from the sidebar's, `maxTabs` (5),
+`menuMax` (6), `moreLabel`, `moreExtra`, and `getScrollElement` for re-tap-to-top when the page
+scrolls inside a container rather than the document.
+
+Design rules specific to the bar, each one load-bearing:
+
+- **The active indicator is a neutral pill behind the ICON only** — `--vx-ink` at 10% plus
+  `--vx-radius-ctrl`, the Material-3 idiom. Never the identity blue, and never a full-tab fill: a
+  filled tab reads as chrome instead of as a tab bar. This is the exception to "active nav = accent
+  icon" in the palette rules above; the desktop sidebar keeps that rule unchanged.
+- **A count renders as an 8px accent dot** on the slot icon, not a number — a count glyph is
+  unreadable at 56px. `SidebarItem.count` drives it; `SidebarItem.badge` (a rich node) stays
+  desktop-only.
+- **Press feedback is the icon, not the hit box**: `.tab:active` scales the icon to 0.9 over 140ms.
+  `touch-action: manipulation` + `-webkit-tap-highlight-color: transparent` kill the 300ms
+  double-tap delay and the blue flash.
+- **Every `:hover` rule sits behind `@media (hover: hover)`.** Ungated, a tapped row stays lit until
+  something else is tapped.
+- **Re-tapping the ACTIVE slot scrolls to top** instead of pushing a redundant history entry.
+- **Never add `padding-bottom: env(safe-area-inset-bottom)` to the bar.** Mantine's own
+  `AppShell.Footer` rule already grows the footer box by the inset and pads its content; adding it
+  again double-counts. The one real gap is `AppShell.Main`, whose padding is computed from an offset
+  var that excludes the inset — the shell closes that itself.
+- **Reduced motion** is read explicitly via `useReducedMotion` (Mantine's
+  `respectReducedMotion` defaults to `false` and basalt does not change it) and zeroes both the menu
+  and sheet transitions.
+
+Accessibility, all handled by the shell: the bar is `<nav aria-label="Primary">`, the active slot
+carries `aria-current="page"`, every slot carries `aria-label` (the visible text is the short
+label), menus get `menuItemTabIndex={0}` for the WAI-ARIA disclosure pattern, and the row height
+floors at 44px with the bar at 48px regardless of the `density` level. **Do not hand-set
+`aria-haspopup` / `aria-expanded`** on a `Menu.Target` child — Mantine clones them on.
 
 ## Icons
 

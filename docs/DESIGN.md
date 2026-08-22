@@ -444,7 +444,7 @@ monitoring down with it.
 
 ## Dashboard
 
-basalt-ui (Mantine v9) + visx, per the `/dataviz` conventions.
+basalt-ui (Mantine v9) + visx. The visual law is `web/.claude/rules/basalt-*.md` + `web/DESIGN.md`, worked through `/basalt-design` — not the generic `/dataviz` skill.
 
 **One page, one range control, no navigation chrome.** This was five routes, then
 one route with four tabs, then one route with five stacked sections each hiding a

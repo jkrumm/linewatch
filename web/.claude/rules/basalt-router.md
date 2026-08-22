@@ -1,6 +1,6 @@
 ---
 source: basalt-ui
-description: TanStack Router conventions for basalt-ui apps — file-based routes, typed search params, and loader/query coupling. Advisory (ships an optional ./router-tanstack adapter for active-state and breadcrumb wiring).
+description: TanStack Router conventions for basalt-ui apps — file-based routes, typed search params, loader/query coupling, and the one typed nav definition that drives both the desktop sidebar and the mobile bar. Advisory (ships an optional ./router-tanstack adapter).
 paths:
   - 'src/routes/**'
   - 'apps/**/src/routes/**'
@@ -8,13 +8,14 @@ paths:
 
 # Basalt Router — TanStack Router Conventions
 
-basalt-ui is **router-agnostic** — `BasaltShell` takes a `NavLinkRenderer` for nav rendering and
-receives active state from the consumer. Nav active-state can now be resolved via
-`useBasaltNav().isActive(item.href)` from `basalt-ui/router-tanstack`, and breadcrumbs via
-`useRouterBreadcrumbs()`; navigation itself stays with TanStack's typed `<Link>` / `useNavigate`.
-Badge counts and navigation wiring remain consumer-side. This rule is the recommended opinion layer
-when you use TanStack Router (the basalt-ui default). It is **advisory** — adopt it for
-consistency; nothing in the framework enforces it.
+basalt-ui is **router-agnostic** — the shell renders every pixel of nav chrome and hosts the
+consumer's router component through one seam, `SidebarItem.Anchor` (a **`NavAnchor`**). With
+TanStack Router you never write that seam by hand: **`defineNav`** declares the whole navigation
+once and **`useNav`** resolves it against the live router, returning the two props `BasaltShell`
+needs. Breadcrumbs come from **`useRouterBreadcrumbs`**, ad-hoc active checks from
+**`useBasaltNav`**. This rule is the recommended opinion layer when you use TanStack Router (the
+basalt-ui default). It is **advisory** — adopt it for consistency; nothing in the framework
+enforces it.
 
 ## Adding a page
 
@@ -23,7 +24,7 @@ consistency; nothing in the framework enforces it.
 3. Add `validateSearch` with a Zod schema parsed via a function — not the schema passed directly.
 4. Define `loaderDeps` to forward search params to the loader (required for search-param-driven queries).
 5. Add a `loader` that calls `ensureQueryData` for each query the page needs.
-6. Register the page in your `BasaltShell` sidebar sections (`SidebarSection[]`).
+6. Register the page in your `defineNav` definition (see "One typed nav definition" below).
 
 ## Route structure
 
@@ -146,28 +147,126 @@ function AppBreadcrumbs() {
 }
 ```
 
-**renderNavLink pattern** — wire the shell's `NavLinkRenderer` with typed TanStack routes.
-basalt does NOT ship this renderer; typed-route `to` is the consumer's typed concern:
+**One typed nav definition** — `defineNav` / `navGroup` / `navTarget` / `useNav`.
 
-```ts
-import { Link } from '@tanstack/react-router'
-import { NavLink as MantineNavLink } from '@mantine/core'
-import { useBasaltNav } from 'basalt-ui/router-tanstack'
-import type { NavLinkRenderer } from 'basalt-ui'
+The whole navigation — desktop sidebar and mobile bar — is declared once in a **leaf** module
+(`src/lib/nav.tsx`), which imports `@tanstack/react-router` and `basalt-ui/router-tanstack` and
+**never** `routeTree.gen` or `__root.tsx`, so command palettes and redirects can import it without
+closing a cycle.
 
-const { isActive } = useBasaltNav()
+```tsx
+import { linkOptions } from '@tanstack/react-router'
+import { defineNav, navGroup } from 'basalt-ui/router-tanstack'
 
-const renderNavLink: NavLinkRenderer = (item, _flags) => (
-  <MantineNavLink
-    component={Link}
-    to={item.href ?? '/'}
-    label={item.label}
-    leftSection={item.icon}
-    rightSection={item.badge}
-    active={isActive(item.href ?? '/')}
-  />
+const ICON = 18
+
+export const NAV = defineNav({
+  groups: [
+    navGroup({ id: 'health', label: 'Health', icon: <IconHeartbeat size={ICON} /> }, [
+      {
+        id: 'garmin',
+        label: 'Garmin Health',
+        short: 'Garmin', // bar/menu label — keep it ≤ 10 chars
+        mobile: 'tab', // give this destination its own slot on the mobile bar
+        icon: <IconHeartbeat size={ICON} />,
+        link: linkOptions({ to: '/garmin-health', search: { window: '30d' } }),
+      },
+      {
+        id: 'reading',
+        label: 'Reading',
+        icon: <IconBook size={ICON} />,
+        link: linkOptions({ to: '/reading' }),
+        children: [
+          {
+            id: 'reading-stats',
+            label: 'Stats',
+            icon: <IconChartBar size={ICON} />,
+            link: linkOptions({ to: '/reading/stats' }),
+          },
+        ],
+      },
+    ]),
+  ],
+})
+```
+
+Rules that are not stylistic:
+
+- **Route options live under `link:`, wrapped in TanStack's own `linkOptions`** — never spread flat
+  onto the item. `to` / `search` / `params` get the router's full validation there, while `id`,
+  `label`, `short`, `icon`, `mobile`, `disabled` and `exact` ride outside it. A flat shape
+  (`{ id, label, to }`) validates `to` by ASSIGNABILITY, which does no excess-property checking, so
+  a typo'd metadata key would compile silently. A top-level `to:` is a compile error by design.
+- **`search` may be a thunk** — `search: () => ({ date: format(new Date(), 'yyyy-MM-dd') })`
+  compiles without `as const` and re-evaluates at click time, so "today" never goes stale in a
+  long-lived tab.
+- **Nesting is `children`**, and nested destinations are indexed by id just like top-level ones.
+- **`NavItemMeta`**'s `mobile` field places the destination on the bar: `'tab'` (own slot),
+  `'more'` (the default — reachable through the More overlay) or `'hidden'`. A group claims a slot
+  of its own with `mobile: { tab: true }`, and leaves mobile entirely with `mobile: false`.
+
+```tsx
+// __root.tsx — four lines replace a hand-written sections array, two render callbacks,
+// a NAV_TARGETS table and one useMatchRoute call per destination.
+import { useNav } from 'basalt-ui/router-tanstack'
+import { NAV } from '../lib/nav'
+
+const nav = useNav(NAV, { badges: { calendar: unread } }) // keys autocomplete; a typo is an error
+return (
+  <BasaltShell brand={brand} {...nav}>
+    {children}
+  </BasaltShell>
 )
 ```
 
-Navigation (`.navigate()`, `<Link to={…}>`) is always the consumer's typed concern — the adapter
-exposes no `navigate()` helper so that TanStack's route-tree types remain authoritative.
+**`useNav`** returns `{ sections, mobileNav }` — both are `BasaltShell` props, so spread it. It
+resolves `active` per destination through `useMatchRoute` (prefix match by default, exact when the
+item sets `exact: true`, and always exact for `'/'`), and builds each destination's **`NavAnchor`**
+so `preload="intent"`, middle-click and back/forward keep working. `badges` values that are
+`number` become `SidebarItem.count` (a desktop **`NavCountBadge`** plus an accent dot on the mobile
+slot); anything else becomes `SidebarItem.badge`, which is desktop-only because a count glyph is
+unreadable in a 56px tab.
+
+**`navTarget`** returns one destination's link options, typed per id — spread it into `<Link>`,
+`router.navigate()` or `redirect()` instead of restating the route and its default search:
+
+```ts
+throw redirect(navTarget(NAV, 'garmin')) // exactly { to: '/garmin-health', search: { window: '30d' } }
+```
+
+**`flattenNav`** walks the definition depth-first (parent, then children), tagging each destination
+with `groupId` / `groupLabel` — the leaf every other surface reads, e.g. projecting the whole nav
+into Spotlight commands in one `.map()`.
+
+### The prerequisite that makes all of this real
+
+**Without the `Register` module augmentation, `defineNav` validates NOTHING and reports zero
+errors.** `RegisteredRouter` falls back to `AnyRouter` when the consumer has not written:
+
+```ts
+declare module '@tanstack/react-router' {
+  interface Register {
+    router: typeof router
+  }
+}
+```
+
+With that missing, every `to` widens to `string`, a nonexistent route path compiles, a missing
+required `search` compiles, and the API looks like it is working while catching nothing. This is
+the single highest-value thing to verify when adopting the config: change one `to` to a garbage
+path and confirm you get a compile error listing the real route paths. If you don't, the
+augmentation is missing or `tsr generate` has not run.
+
+Second thing to know before you migrate: TypeScript cannot catch a destination that FORGETS a
+default `search` when the route validates with `validateSearch: (raw: Record<string, unknown>) => T`
+— that gives TanStack an input type where no key is required. Diff an old hand-written target table
+against the new definition by hand, key by key.
+
+Error messages here are the router's own and they are large: one wrong `to` prints the whole
+route-path union plus a `RouterCore<…>` blob, because TanStack's `Constrain` falls back to the
+whole constraint. That is not misuse — read the union for the intended path and fix the string.
+**Do not reach for `as never` to make it quiet**; the checking is the entire point of the config.
+
+Navigation itself (`.navigate()`, `<Link to={…}>`) stays the consumer's typed concern — the adapter
+still exposes no `navigate()` helper, so TanStack's route-tree types remain authoritative. What
+`navTarget` hands back is the ARGUMENT to those calls, never the call.

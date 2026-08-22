@@ -76,6 +76,63 @@ const { data } = useSuspenseQuery(resourceQueries.summary())
   router's `ensureQueryData` (see basalt-router.md).
 - Wrap pages or panels in `<Suspense fallback={…}>` at the route level.
 
+## Rendering a query — use `QueryState`, don't write the switch
+
+```tsx
+import { QueryState } from 'basalt-ui' // NOT basalt-ui/query — it renders Mantine
+
+function Library() {
+  const q = useQuery(imageQueries.list())
+  return (
+    <QueryState
+      query={q}
+      variant="page" // or "section" for a panel inside a page
+      errorTitle="Could not load images"
+      empty={{ title: 'No images yet', description: 'Upload one to get started.' }}
+      isEmpty={(d) => d.items.length === 0}
+    >
+      {(data) => <ImageGrid items={data.items} />}
+    </QueryState>
+  )
+}
+```
+
+**Rendering only the empty branch is the bug this retires.** A consumer's library showed
+`No images` on a **500**, and a share detail showed `Share not found` on a dropped connection —
+"nothing here" is what an app renders when nobody wrote the other three branches. One import
+replaced 204 hand-rolled lines across 10 call sites there.
+
+Precedence, in evaluation order:
+
+| Condition                           | Renders                                                                   |
+| ----------------------------------- | ------------------------------------------------------------------------- |
+| `isError`, no `data`                | `ErrorState` — `errorTitle` / `errorFallback` / `errorAction`, with Retry |
+| no `data`, `fetchStatus === 'idle'` | the `empty` copy (nothing, if `empty` is omitted)                         |
+| no `data`                           | `loading`, else `LoadingState`                                            |
+| `data`, `isEmpty(data)`             | the `empty` copy                                                          |
+| `data`                              | `children` — a node, or `(data) => node`                                  |
+| `data` **and** `isError`            | a fixed _Showing cached data_ banner above `children`                     |
+
+`errorTitle` / `errorFallback` / `errorAction` reach the no-data error branch only; the stale-data
+banner carries its own copy. `empty` is `{ title, description?, icon?, action? }` — `description`
+is optional, so a compact panel needs no invented second sentence.
+
+**`useQuery`, not `useSuspenseQuery`.** A suspense read never hands you an undefined `data` or an
+error branch — it throws to the nearest boundary — so `QueryState` has nothing to decide there.
+Suspense + an error boundary and `QueryState` are the two ways to render a query; pick one per read.
+
+`LoadingState` and `ErrorState` ship beside it as the escape hatch for a page that must place its
+branches in different DOM positions.
+
+**`query` is a structural subset, checked at runtime.** It needs `{ data, isError, error,
+fetchStatus, refetch }` — a TanStack `UseQueryResult` satisfies it, and a hand-composed object is
+legal. Because the subset gives up the compiler's help, a missing `isError` **throws** naming the
+field rather than rendering a false claim about the data.
+
+Decoding an unknown error into copy is `toErrorMessage(err, fallback?)` from `basalt-ui/query`,
+with `errorStatus(err)` for the status; `toErrorMessage` folds the status into the fallback when the
+body decodes to nothing readable, so an opaque envelope never renders as `{}`.
+
 ## Mutations
 
 ```ts

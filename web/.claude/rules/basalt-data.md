@@ -59,6 +59,23 @@ const columns = [
 | `initialSorting`   | `SortingState`              | `[]`     | Initial sort state; drives `useState` initializer      |
 | `onSortingChange`  | `(s: SortingState) => void` | —        | Called whenever sorting changes; omit for uncontrolled |
 
+Body chrome — all conditional pass-throughs to Mantine `Table` except `withTableBorder`, which
+basalt defaults to `true`:
+
+| Prop                                    | Type                            | Notes                                                                |
+| --------------------------------------- | ------------------------------- | -------------------------------------------------------------------- |
+| `maxHeight`                             | `number \| string`              | Caps the body height — renders `Table.ScrollContainer type="native"` |
+| `minWidth`                              | `number \| string`              | Same container; `maxHeight` alone passes `minWidth={0}`              |
+| `stickyHeader` / `stickyHeaderOffset`   | `boolean` / `number \| string`  | Forwarded to Mantine; pair with `maxHeight`                          |
+| `verticalSpacing` / `horizontalSpacing` | `MantineSpacing`                | Cell padding                                                         |
+| `withRowBorders` / `withTableBorder`    | `boolean`                       | `withTableBorder` defaults `true` here, overriding Mantine's `false` |
+| `meta: { align }` (per column)          | `'left' \| 'center' \| 'right'` | Sets `textAlign` on BOTH the `th` and the `td`                       |
+| `meta: { numeral: false }` (per column) | `boolean`                       | Opts a numeric cell OUT of the mono-numeral style. Opt-out only      |
+
+`meta.align` is a `ColumnMeta` module augmentation, so a typo'd key is a tsc error and a value
+outside the union **throws** naming the column — a money column never silently left-aligns. Set it
+once on the column def instead of repeating `textAlign: 'right'` on the header and the cell.
+
 ### Controlled sorting and URL sync
 
 `initialSorting` seeds the internal `useState` and `onSortingChange` is called on every sort
@@ -122,18 +139,18 @@ col.display({ id: 'actions', header: 'Actions', cell: (ctx) => <Button>Delete {c
 `ColumnDef<T>` defaults `TValue` to `unknown`, not `any`. Never cast column defs to `any` — use
 the correct `ColumnDef<T>` type or `ColumnDef<T, unknown>`.
 
-### Deferred for later versions
+### Also shipped, and easy to miss
 
-The 1.0 table ships sorting only. Natural extensions are **not** in scope yet:
+Global search (`enableGlobalFilter`, `globalFilterPlaceholder`, `searchIcon`,
+`initialGlobalFilter`, `onGlobalFilterChange`), faceted filters (`facets`), a toolbar slot
+(`toolbarActions`), pagination client- or server-side (`enablePagination`, `pageSizeOptions`,
+`initialPagination`, `onPaginationChange`, `manualPagination`, `rowCount`, `pageCount`) and column
+pinning (`enablePinning`, `initialColumnPinning`). **Don't hand-roll any of these** — read the props
+on the type, they are all there.
 
-- Filtering (column or global search)
-- Pagination (client-side or server-side)
-- Row selection (checkboxes)
-- Row expansion / sub-rows
-
-Add them when a concrete consumer need arises; keep the API additive. Controlled (fully external)
-sorting for `BasaltDataTable` itself is likewise deferred — `onSortingChange` above is the current
-sync seam.
+Still deferred: row selection, row expansion / sub-rows, and fully controlled (external) sorting —
+`onSortingChange` is the sync seam. Add them when a concrete consumer need arises; keep the API
+additive.
 
 ### The blessed lane vs the raw escape hatch
 
@@ -166,9 +183,24 @@ const table = useReactTable({ data: rows, columns, getCoreRowModel: getCoreRowMo
 // table.getHeaderGroups() / table.getRowModel().rows, rendered with flexRender(...) and your own markup
 ```
 
-Reach for the escape hatch only when `BasaltDataTable`'s props genuinely can't express the shape —
-grid feature growth (pagination, server-side data, column visibility, filtering) is consumer-pulled
-future work, not a reason to bypass the blessed lane by default.
+Reach for the escape hatch only when `BasaltDataTable`'s props genuinely can't express the shape.
+Pagination, server-side data and filtering are **not** among those cases any more — see above.
+
+**Both lanes scroll through the same node.** An escape-hatch table that needs a capped body wraps
+it in `<Table.ScrollContainer type="native" minWidth={0} maxHeight={320}>` — and that is byte for
+byte what `BasaltDataTable`'s `maxHeight`/`minWidth` render. The blessed lane and the escape cannot
+contradict each other on scrolling, and neither should reach for `type="scrollarea"`: `ScrollArea`'s
+custom viewport is the positioning context a sticky `<thead>` resolves against, so the default type
+pins the header to the page viewport instead of the table's box. (`basalt/raw-scroll-container`
+takes no view here — it steers raw `overflow: auto`, and `Table.ScrollContainer` is a Mantine
+component, not a raw scroll box.)
+
+**Adopt the blessed lane for ownership, not for a line count.** Porting one consumer's three tables
+onto these props made them 341 → **370** lines, 29 longer: eight accessor blocks at 4–6 lines each
+cost more than an eight-`<Table.Td>` row at ~3 when every cell is bespoke. What the port bought was
+the `type="native"` footgun, alignment stated once instead of on both `th` and `td` six times over,
+and sorting/filtering/pagination no longer being yours to maintain. Expect that trade, not a
+shrink.
 
 ## BasaltVirtualList
 

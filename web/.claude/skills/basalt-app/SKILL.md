@@ -149,6 +149,13 @@ the single guard-exempt palette source — see `/basalt-charts`.
 - `sync --check` makes no changes and exits non-zero on drift — wire it as a CI freshness gate so a
   consumer can't silently fall behind the shipped rules.
 
+**Run it anywhere in the repo.** `sync`, `check-theme` and `doctor` share one resolver:
+`BASALT_CWD` → the cwd → declared workspace packages → a two-level descend → an **ascend** to the
+nearest ancestor carrying a basalt project, bounded by the repo root. Both directions announce the
+relocation in one sentence. From a sub-package `sync` now refreshes the parent install rather than
+refusing — but it still **exits 1 rather than scaffolding a second consumer** where the resolved
+project has no `.basalt/manifest.json`. Creating an install stays `basalt-ui init`'s decision.
+
 Seeds (`DESIGN.md`, the toolchain files, the scaffolds) are never reconciled or drift-reported —
 they are yours. The managed files (rules, skills, the CLAUDE block) are framework-owned and meant
 to be overwritten; the sync diff is where you review a doctrine change before committing it.

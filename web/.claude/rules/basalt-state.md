@@ -83,6 +83,11 @@ export const analytics = createSearchStore({
   so unrelated params survive.
 - **`useActiveCount()` / `useReset()`** are what a `Filters (n)` pill and its `Reset all` derive
   from. Never hand-count either.
+- **A reset UNSETS.** `useReset()` and `field.clear()` DELETE the persisted key; they never write
+  `fallback`, which would pin a thunk fallback (`() => todayIso()`) as a value nobody chose. A
+  hand-rolled reset calls `field.clear()`, never `setValue(field.fallback)`.
+- **`set(next, { patch })`** merges sibling params the store does NOT own into the same navigate. A
+  key another field of the same store owns throws in dev — write it through that field's setter.
 
 ## Nav links carry the store BY REFERENCE
 

@@ -64,6 +64,9 @@ C1's cross-file case, a hand-rolled section heading, C11 outside `BasaltDataTabl
 - **A control's home is a decision about reach**: it belongs next to what it acts on. If it affects
   more than one widget it is promoted to the page bar; if it formats one widget it stays in that
   widget's header.
+- **An overlay rendered by the PARENT is exempt by FILENAME**: `control-outside-home` and
+  `raw-selection-control` skip a file basenamed `*-{modal,drawer,popover,panel,form}.tsx`, since no
+  scan of it sees the `<Modal>`. Outside that: `theme-allow-file control-outside-home — overlay`.
 
 ## The `ctl` tier — the home sizes the control
 
@@ -141,15 +144,17 @@ its items. A `custom` block is desktop-only, by design.
 
 ## Anti-patterns
 
-| Instead of                                            | Write                                                |
-| ----------------------------------------------------- | ---------------------------------------------------- |
-| `useState` + a `SegmentedControl` in the page body    | a store field + `ViewTabs` in the home's `tabs` slot |
-| a raw `Select`/`MultiSelect`/`Chip.Group` as a filter | `SelectFilter` / `MultiSelectFilter`                 |
-| `<X visibleFrom="sm"/>` beside `<X hiddenFrom="sm"/>` | one control — the swap is already inside it          |
-| `size="xs"` on a button in a home slot                | nothing; the home sets the tier                      |
-| a hand-written `presetToParams`                       | `field.toWindow(value)`                              |
-| a hand-counted `Filters (3)` badge                    | nothing; `FilterSet` derives it                      |
-| `overflowX: 'auto'` on a filter row                   | nothing; the fold is basalt's                        |
-| a local `Section` / `PageHeader` / `RefreshButton`    | `Section` / `PageBar` / `SyncButton`                 |
-| an in-body `<Title order={1}>`                        | the route's breadcrumb title                         |
-| a hand-built joined button row                        | `ControlGroup` (or `group: true` on the actions)     |
+| Instead of                                                   | Write                                                 |
+| ------------------------------------------------------------ | ----------------------------------------------------- |
+| `useState` + a `SegmentedControl` in the page body           | a store field + `ViewTabs` in the home's `tabs` slot  |
+| a raw `Select`/`MultiSelect`/`Chip.Group` as a filter        | `SelectFilter` / `MultiSelectFilter`                  |
+| a numeric threshold widened into a string enum               | `field.number` + `NumberFilter`                       |
+| `<X visibleFrom="sm"/>` beside `<X hiddenFrom="sm"/>`        | one control — the swap is already inside it           |
+| `size="xs"` on a button in a home slot                       | nothing; the home sets the tier                       |
+| a hand-written `presetToParams`                              | `field.toWindow(value)`                               |
+| a hand-counted `Filters (3)` badge                           | nothing; `FilterSet` derives it                       |
+| `overflowX: 'auto'` on a filter row                          | nothing; the fold is basalt's                         |
+| a local `Section` / `PageHeader` / `RefreshButton`           | `Section` / `PageBar` / `SyncButton`                  |
+| an in-body `<Title order={1}>`                               | the route's breadcrumb title                          |
+| the same on a shell-less surface (auth gate, error boundary) | `theme-allow in-body-page-title — shell-less surface` |
+| a hand-built joined button row                               | `ControlGroup` (or `group: true` on the actions)      |

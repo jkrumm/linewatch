@@ -33,13 +33,11 @@ export const dashboard = createSearchStore({
     // `from`/`to` params ride along unused. The param name defaults to the field's own name, so
     // `?range=7d` deep links are unchanged.
     //
-    // **`custom: false` is written out, and it is load-bearing at the TYPE level.** It defaults to
-    // `false`, but a `field.range(…)` called INLINE inside `fields` re-infers its `const C extends
-    // boolean` against `AnyField`'s widened `RangeField`, so `custom` comes out `boolean` and every
-    // read of `search.range` widens to `RangeOption | 'custom'` — a value this store can never
-    // hold. Stating it restores the inference site. (Hoisting the field to its own `const` fixes it
-    // too; this is the smaller of the two.)
-    range: field.range({ presets: RANGE_OPTIONS, fallback: '24h', custom: false }),
+    // As of basalt-ui 1.27.0, `field.range` is three overloads and an omitted `custom` infers
+    // `false` correctly even called inline here — the explicit `custom: false` this used to need
+    // (and the cast it forced on `<RangeFilter field={…} />`, since `RangeFilterProps` is now
+    // generic over the flag) are both gone.
+    range: field.range({ presets: RANGE_OPTIONS, fallback: '24h' }),
     minDuration: field.number({ fallback: 0, min: 0, int: true }, { persist: false }),
     /**
      * Compact mode: the dashboard with its supporting detail dropped, and every conclusion still on

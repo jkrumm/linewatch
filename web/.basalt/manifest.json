@@ -4,7 +4,7 @@
     ".claude/rules/basalt-mantine.md": "c9d5ebce7cb416ab28086e6590bc0076985952f545783e0aa801d4093969b690",
     ".claude/rules/basalt-charts.md": "5965fbdf23158d2a952489507e99f3c23dad6f1cd1d507d873f392135499af3e",
     ".claude/rules/basalt-tokens.md": "dd221ad68bae1b136955d18afc4e7e332e994bd23e5bd0bb9d62810ec72a3899",
-    ".claude/rules/basalt-state.md": "b21c06bd363146d0c90b946dd3ceaed89e943218263116360e78f9e6dfaa8e99",
+    ".claude/rules/basalt-state.md": "a04c9e1c12baa02ab0fa3ed640d8bd022ca2a3741240e7711f21ab6ab8107015",
     ".claude/skills/basalt-app/SKILL.md": "f6e43ec5effdffa25e6e093ff5a19b4bbc8e42a75a28ea3f0bbc7df75f6cefdb",
     ".claude/skills/basalt-design/SKILL.md": "989ce7b4dbb7f94309459428c1b83de47d9aca2233aebbd68adb0b6cbaccfc42",
     ".claude/skills/basalt-charts/SKILL.md": "29c7c8e8844e607c027b40088f3e833975071952f954718a263c12e917e21b9a",
@@ -17,9 +17,9 @@
     "src/query-client.ts": "5efb420731453ee1e0279a4501bf6536b066b595f14886ba3d7329336eae09c1",
     "src/routes/__root.tsx": "439fb91cf26ee51eb56ae6415556970d323dae6049d10415970709b79c0373e0",
     ".claude/rules/basalt-batteries.md": "89555bd71d0d4be5f52522d55ed8e3ba363ab2ed39a464cd2baf52f42211cce6",
-    ".claude/rules/basalt-controls.md": "216736493ca4cde9b946ff78a965647cf7bff3283975e4a2744e51a4c4f1c7ef"
+    ".claude/rules/basalt-controls.md": "e6f31bccf28fda4b7b27c4e5d719adec9178455414748222f29dfe681f307a76"
   },
-  "basaltVersion": "1.26.0",
+  "basaltVersion": "1.27.0",
   "spacingScale": {
     "xs": 11,
     "sm": 13,

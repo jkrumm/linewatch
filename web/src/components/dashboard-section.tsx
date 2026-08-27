@@ -159,12 +159,13 @@ export function DashboardSection<T extends string>({
  * `VerdictPanel` renders a plain `#section-…` anchor, which is why this listens to the hash rather
  * than to the verdict set.
  *
- * **It writes basalt's own fold key, and then fires a `storage` event at it.** `Section` persists at
- * `basalt:section:<persistKey>` through `createPersistedState`, whose in-tab listener set belongs to
- * the factory INSTANCE that wrote — so a write from a second instance (this one) reaches
- * localStorage but notifies nobody, and the fold would only open on the next unrelated re-render.
- * A synthetic `storage` event is the same channel `createPersistedState` already listens on for
- * cross-tab writes, and it is keyed, so it reaches that section's instance and nothing else.
+ * **It writes basalt's own fold key with a plain `setOpen`.** `Section` persists at
+ * `basalt:section:<persistKey>` through `createPersistedState`; before basalt-ui 1.27.0 that
+ * factory's in-tab listener set belonged to the INSTANCE that wrote, so a write from a second
+ * instance (this one) reached localStorage but notified nobody, and the fold only opened on the
+ * next unrelated re-render — worked around here with a synthetic `storage` event dispatched at the
+ * same key. 1.27.0 registers subscribers per storage key instead, so every instance sharing a key
+ * now notifies every other one in-tab and the workaround is gone.
  *
  * **It also re-scrolls, and that half only matters in compact.** Compact drops the collapsible
  * section outright, so a verdict link clicked there fires the browser's own hash scroll against a
@@ -204,7 +205,6 @@ function useOpenOnHash({
     const openIfTargeted = () => {
       if (!targeted() || openRef.current) return
       setOpen(true)
-      window.dispatchEvent(new StorageEvent('storage', { key: `basalt:${storageKey}` }))
     }
     openIfTargeted()
     if (targeted()) document.getElementById(anchor)?.scrollIntoView()

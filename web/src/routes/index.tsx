@@ -1,11 +1,10 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { Card, Group, SegmentedControl, Stack, Text } from '@mantine/core'
+import { Card, Stack, Text } from '@mantine/core'
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { PageBar, ThemeToggle } from 'basalt-ui'
 import { TooltipRow, VX } from 'basalt-ui/charts'
 import { Callout } from 'basalt-ui/content'
-import { FilterSet, RangeFilter } from 'basalt-ui/controls'
-import type { FieldHandle, RangeField } from 'basalt-ui/router-tanstack'
+import { FilterSet, NumberFilter, RangeFilter } from 'basalt-ui/controls'
 import {
   eventsQuery,
   outagesQuery,
@@ -47,7 +46,7 @@ import { downtimeTint, measuredFraction, type ThresholdTint, worstBucketLoss, wo
 import { coverageKind, fmtCoveragePct } from '../lib/coverage'
 import { speedWindowStats } from '../lib/speed-stats'
 import { unmappedVerdictIds } from '../lib/verdict-section'
-import { RANGE_LABEL, type RangeOption, rangeToBucket, rangeToWindow } from '../lib/range'
+import { RANGE_LABEL, rangeToBucket, rangeToWindow } from '../lib/range'
 import {
   dashboard,
   latencyViews,
@@ -77,10 +76,10 @@ import {
 } from '../lib/guides'
 
 const MIN_DURATION_OPTIONS = [
-  { label: 'Any', value: '0' },
-  { label: '≥1m', value: '60' },
-  { label: '≥5m', value: '300' },
-  { label: '≥10m', value: '600' },
+  { label: 'Any', value: 0 },
+  { label: '≥1m', value: 60 },
+  { label: '≥5m', value: 300 },
+  { label: '≥10m', value: 600 },
 ]
 
 /**
@@ -313,18 +312,15 @@ function DashboardPage() {
         className={barClasses.bleed}
         filters={
           <FilterSet>
-            {/* The one cast on this page, and it is a framework gap rather than a shortcut.
-                `RangeFilterProps.field` is typed `FieldHandle<RangeField<P>>`, which pins the
-                unstated `custom` type argument to its default `boolean` — so the control cannot
-                express a range field that declares `custom: false`, and this store declares exactly
-                that (see `dashboard-store.ts` for why the declaration has to stay). Widening here
-                keeps `search.range` honestly typed as `RangeOption` at all eight read sites, which
-                is where being wrong would cost something; the control never writes `'custom'`,
-                because it derives its presets from `field.options` and the codec omits `'custom'`
-                from those unless the field opted in. */}
-            <RangeFilter
-              field={dashboard.field.range as FieldHandle<RangeField<RangeOption>>}
-              label="Range"
+            <RangeFilter field={dashboard.field.range} label="Range" />
+            {/* Moved here from the Uptime section's own summary row as of basalt-ui 1.27.0's
+                `NumberFilter` — see that section's `meta` for why it used to be a raw
+                `SegmentedControl` living outside every home (`basalt/control-outside-home`,
+                law C1). `field.number` had no control before this minor. */}
+            <NumberFilter
+              field={dashboard.field.minDuration}
+              label="Min duration"
+              options={MIN_DURATION_OPTIONS}
             />
           </FilterSet>
         }
@@ -398,52 +394,49 @@ function DashboardPage() {
           id="uptime"
           field={uptimeViews.field.view}
           meta={
-            <Group justify="space-between" align="flex-end" wrap="wrap" gap="sm">
-              <StatStrip
-                stats={[
-                  {
-                    label: 'Downtime',
-                    // Gated on `allOutageData`, not `outageData` — this figure reads the
-                    // UNFILTERED outage list (see that query's own comment above); the FILTERED
-                    // query's arrival says nothing about whether this value is ready.
-                    value: allOutageData === undefined ? null : fmtMinutes(downtime.seconds),
-                    tone: stripTone(downtimeTone),
-                    hint:
-                      allOutageData === undefined
+            <StatStrip
+              stats={[
+                {
+                  label: 'Downtime',
+                  // Gated on `allOutageData`, not `outageData` — this figure reads the
+                  // UNFILTERED outage list (see that query's own comment above); the FILTERED
+                  // query's arrival says nothing about whether this value is ready.
+                  value: allOutageData === undefined ? null : fmtMinutes(downtime.seconds),
+                  tone: stripTone(downtimeTone),
+                  hint:
+                    allOutageData === undefined
+                      ? undefined
+                      : downtime.openCount > 0
+                        ? `${downtime.openCount} outage${downtime.openCount === 1 ? ' is' : 's are'} still open — this is a floor, already out of date. Outages straddling the window count only their time inside it.`
+                        : 'Minutes, not a percentage — a home line’s percentage flatters. Outages straddling the window count only their time inside it.',
+                },
+                {
+                  label: 'Outages',
+                  value: outageData === undefined ? null : String(outageData.outages.length),
+                  hint:
+                    outageData === undefined
+                      ? undefined
+                      : search.minDuration > 0
+                        ? `Only outages of at least ${fmtMinutes(search.minDuration)}. Shorter ones are recorded, just excluded here by the filter above.`
+                        : 'Every recorded outage in the window, single-cycle blips included.',
+                },
+                {
+                  label: 'Coverage',
+                  value: outageData === undefined ? null : fmtCoveragePct(outageData.summary?.coveragePct ?? null),
+                  // `bad` is the coverage envelope's own third state; the strip has only two
+                  // tints, and its `warn` is the one a reader must not read past.
+                  tone:
+                    outageData?.summary === undefined || outageData.summary === null
+                      ? undefined
+                      : coverageKind(outageData.summary) === 'info'
                         ? undefined
-                        : downtime.openCount > 0
-                          ? `${downtime.openCount} outage${downtime.openCount === 1 ? ' is' : 's are'} still open — this is a floor, already out of date. Outages straddling the window count only their time inside it.`
-                          : 'Minutes, not a percentage — a home line’s percentage flatters. Outages straddling the window count only their time inside it.',
-                  },
-                  {
-                    label: 'Outages',
-                    value: outageData === undefined ? null : String(outageData.outages.length),
-                    hint:
-                      outageData === undefined
-                        ? undefined
-                        : search.minDuration > 0
-                          ? `Only outages of at least ${fmtMinutes(search.minDuration)}. Shorter ones are recorded, just excluded here by the filter beside this strip.`
-                          : 'Every recorded outage in the window, single-cycle blips included.',
-                  },
-                  {
-                    label: 'Coverage',
-                    value: outageData === undefined ? null : fmtCoveragePct(outageData.summary?.coveragePct ?? null),
-                    // `bad` is the coverage envelope's own third state; the strip has only two
-                    // tints, and its `warn` is the one a reader must not read past.
-                    tone:
-                      outageData?.summary === undefined || outageData.summary === null
-                        ? undefined
-                        : coverageKind(outageData.summary) === 'info'
-                          ? undefined
-                          : coverageKind(outageData.summary) === 'bad'
-                            ? 'bad'
-                            : 'warn',
-                    hint: 'The share of the window the collector actually measured. Every figure here is only as true as this number — a window measured a tenth of itself reports almost no downtime.',
-                  },
-                ]}
-              />
-              <MinDurationFilter />
-            </Group>
+                        : coverageKind(outageData.summary) === 'bad'
+                          ? 'bad'
+                          : 'warn',
+                  hint: 'The share of the window the collector actually measured. Every figure here is only as true as this number — a window measured a tenth of itself reports almost no downtime.',
+                },
+              ]}
+            />
           }
           views={[
             {
@@ -815,48 +808,6 @@ function DashboardPage() {
  */
 function stripTone(tint: ThresholdTint): 'warn' | 'bad' | undefined {
   return tint === 'good' ? undefined : tint
-}
-
-/**
- * The outage-duration filter, in the Uptime section's own `summary` row rather than in a view body.
- *
- * It lived inside the Outages view — behind a view switch, next to a paragraph, with an `aria-label`
- * and no visible one — so it was a URL parameter with no discoverable control. Here it is visible
- * whichever Uptime view is drawn, and it sits beside the "Outages" count it scopes, which is the
- * only place its effect is legible.
- *
- * **`dashboard.field.minDuration.use()` owns both lanes**, so there is no `value`/`onChange` and no
- * `navigate` here: the handle writes the URL (with `resetScroll: false`, which basalt now passes on
- * every store write — filtering from halfway down the page must not throw the reader back to the
- * top) and skips the localStorage mirror, because the field declares `persist: false`.
- *
- * **It is deliberately NOT in a home slot, and it stays a raw `SegmentedControl` for one reason:**
- * the value is an open numeric bound, so it is a `field.number`, and every bound basalt control
- * takes an enum, a multi or a range. Rendered here it reports `basalt/control-outside-home` at
- * `warn` — the honest reading of law C1, and the fix is a numeric filter upstream rather than an
- * enum of duration strings that would change the URL's shape to silence a lint rule.
- *
- * The label is visible text, not an `aria-label`. "Ignore under" is what makes it a control a
- * reader can find rather than a row of unexplained durations.
- */
-function MinDurationFilter() {
-  const [minDuration, setMinDuration] = dashboard.field.minDuration.use()
-  return (
-    <Group gap={6} wrap="nowrap" w={{ base: '100%', sm: 'auto' }}>
-      <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
-        Ignore under
-      </Text>
-      <SegmentedControl
-        size="xs"
-        fullWidth
-        value={String(minDuration)}
-        onChange={(next) => setMinDuration(Number(next))}
-        data={MIN_DURATION_OPTIONS}
-        aria-label="Minimum outage duration"
-        style={{ flex: 1 }}
-      />
-    </Group>
-  )
 }
 
 /**

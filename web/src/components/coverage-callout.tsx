@@ -6,7 +6,7 @@ import { VX } from 'basalt-ui/charts'
 import type { HomeLineVerdict, RangeSummary } from '../lib/types'
 import { coverageKind, coverageSinceFirst, fmtCoveragePct } from '../lib/coverage'
 import { fmtDateTime } from '../lib/format'
-import { useCompactMode } from '../lib/compact'
+import { dashboard } from '../lib/dashboard-store'
 
 /**
  * What each vantage verdict claims, phrased so the four never read alike. Only `all` claims the
@@ -117,7 +117,7 @@ function CompactCoverage({ summary }: { summary: RangeSummary }) {
  * expanded coverage explanation snap shut on its own every time the window advanced.
  */
 export function CoverageCallout({ summary }: { summary: RangeSummary | null | 'pending' }) {
-  const [compact] = useCompactMode()
+  const [compact] = dashboard.field.compact.use()
   if (summary === null) return null
   if (summary === 'pending') {
     return (
@@ -132,7 +132,7 @@ export function CoverageCallout({ summary }: { summary: RangeSummary | null | 'p
   const kind = coverageKind(summary)
   // The info row states that nothing is wrong ("Coverage 100.0% — 2880 of 2880 expected cycles
   // recorded"). It is the one coverage branch compact mode drops; `warn` and `bad` below are
-  // findings and are drawn in every mode. See `lib/compact.tsx` for the whole split.
+  // findings and are drawn in every mode. See `lib/dashboard-store.ts` for the whole split.
   if (kind === 'info') return compact ? null : <CompactCoverage summary={summary} />
 
   const since = sinceSentence(summary)

@@ -8,7 +8,7 @@ import { SECTION_LABEL, VERDICT_SECTION, sectionAnchor } from '../lib/verdict-se
 import { groupVerdicts, triageVerdicts } from '../lib/verdict-group'
 import type { VerdictGroup } from '../lib/verdict-group'
 import type { Evidence, Severity, Verdict } from '../lib/types'
-import { useCompactMode } from '../lib/compact'
+import { dashboard } from '../lib/dashboard-store'
 
 /** `ok` maps to `good`, basalt's success kind. The other three are one-to-one. */
 const CALLOUT_KIND: Record<Severity, CalloutKind> = {
@@ -49,7 +49,7 @@ const SEVERITY_COLOR: Record<Severity, string> = {
  * actionable finding is never hidden behind a disclosure is unchanged — see `triageVerdicts`.
  */
 export function VerdictPanel({ verdicts }: { verdicts: Verdict[] | undefined }) {
-  const [compact] = useCompactMode()
+  const [compact] = dashboard.field.compact.use()
   if (verdicts === undefined) {
     /**
      * A THIRD state, and it must not borrow either of the other two's words.
@@ -102,7 +102,7 @@ export function VerdictPanel({ verdicts }: { verdicts: Verdict[] | undefined }) 
       {/* Critical and warn are drawn in every mode — a finding that asks for something is never
           behind a switch, which is this band's whole contract. The routine group is the one
           compact mode drops, and only because `triageVerdicts` routes a finding there precisely
-          when it needs no action; the row it draws says exactly that. See `lib/compact.tsx`. */}
+          when it needs no action; the row it draws says exactly that. See `lib/dashboard-store.ts`. */}
       {!compact && routine.length > 0 && <RoutineGroups groups={routine} />}
     </Stack>
   )
@@ -226,7 +226,7 @@ function VerdictBody({ group }: { group: VerdictGroup }) {
  * line, and it must not be reported inside a finding as though it were.
  */
 function EvidenceLink({ id }: { id: string }) {
-  const [, setCompact] = useCompactMode()
+  const [, setCompact] = dashboard.field.compact.use()
   const section = VERDICT_SECTION[id]
   if (section === undefined) return null
   return (

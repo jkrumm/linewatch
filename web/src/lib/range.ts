@@ -1,30 +1,8 @@
-import { createSearchParamStore } from 'basalt-ui/router-tanstack'
 import type { ProbeBucketSeconds } from './types'
 
 /** Selectable ranges shared by the Latency and Speed views, per DESIGN.md's "Dashboard" section. */
 export const RANGE_OPTIONS = ['1h', '24h', '7d', '30d', 'all'] as const
 export type RangeOption = (typeof RANGE_OPTIONS)[number]
-
-/**
- * The range param, on basalt-ui's shipped search-param store rather than a bare Zod enum.
- *
- * **The range stays in the URL and that is unchanged** — `validateSearch` always returns a value, so
- * the router writes it back and every link to a reading still carries it (`lib/compact.ts` has the
- * URL-vs-persisted split this repo works to). What the store adds is the fallback UNDER the URL: a
- * bare `/` now opens on the range this reader last chose instead of always on 24h. Nobody watching
- * one line wants to re-pick `7d` on every visit, and a shared link is unaffected because it carries
- * the param explicitly.
- *
- * The second thing it buys is that `?range=nonsense` no longer throws. `z.enum(...).default()` only
- * defaults an ABSENT key — a present-but-invalid one is a `ZodError` out of `validateSearch`, i.e.
- * a hand-edited URL takes the dashboard down. The store falls back instead.
- */
-export const rangeStore = createSearchParamStore({
-  key: 'dashboard-range',
-  param: 'range',
-  values: RANGE_OPTIONS,
-  fallback: '24h',
-})
 
 const HOUR_MS = 60 * 60 * 1000
 const DAY_MS = 24 * HOUR_MS
@@ -66,10 +44,6 @@ const RANGE_BUCKET: Record<RangeOption, ProbeBucketSeconds> = {
  * flooring to "simplify" this.
  */
 export const PROBE_CYCLE_MS = 30_000
-
-export function isRangeOption(value: string): value is RangeOption {
-  return (RANGE_OPTIONS as readonly string[]).includes(value)
-}
 
 export function rangeToWindow(range: RangeOption, now: number = Date.now()): { from: number; to: number } {
   // Floor `to` (never round) so the window never reaches past `now` into data that cannot exist yet,

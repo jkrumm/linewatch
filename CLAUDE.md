@@ -116,7 +116,12 @@ anyone they disagreed.
   `StatCard`'s `VisuallyHidden` threshold sentence verbatim, and
   `status-bar.render.test.tsx` pins it. A rail nothing announces is the exact defect
   `StatCard.tone` was adopted to remove; re-introducing it silently is the failure mode
-  here, not the hand-rolling. One card idiom still holds — the bar is one card.
+  here, not the hand-rolling. One card idiom still holds — the bar is one card. **The
+  deviation is the CARD, never the heading**: each cell's label is a shipped
+  `WidgetHeader tier="widget"` (law C8), which is what makes the bar twelve real `<h3>`s
+  a screen reader can list rather than twelve unmarked uppercase strings — the same test
+  pins that per label rather than by count, because the cell list renders twice (a
+  `SimpleGrid` below `xl`, a divided `Group` above it).
 - **After a `basalt-ui` upgrade, run `./node_modules/.bin/basalt-ui sync`** — `sync --check`
   gates the drift in CI and pre-commit, and `basalt-ui doctor` diagnoses the install.
   **Never `bunx basalt-ui`**: it fetches its own copy from npm and reuses the cached one without
@@ -138,7 +143,7 @@ anyone they disagreed.
   naming no rule waives **nothing** — a typo fails closed. Three things to know before
   writing one: the annotation must **start** its comment (prose merely mentioning it
   waives nothing), the id is the *reported kind* rather than the concept (the status
-  dot in `page-header.tsx` reads `raw-surface`, not `raw-radius`), and a comment-only
+  dot in `live-chip.tsx` reads `raw-surface`, not `raw-radius`), and a comment-only
   annotation reaches the first **code** line below it — inside a `{cond && (…)}` that
   means a `//` line comment, since a `{/* */}` there is a syntax error. Nothing here
   uses `theme-allow-file`: every waiver is node-scoped, deliberately.
@@ -326,27 +331,50 @@ anyone they disagreed.
   *evidence* may sit behind a named view switch; a **conclusion never may** — every
   verdict renders in the band above the sections, unconditionally.
 - **Compact mode is the one control that can hide part of the page, and what it
-  may hide is declared, not decided per block.** `lib/compact.ts` holds the split
-  and the reasoning; `lib/compact.contract.test.ts` pins the half that matters by
+  may hide is declared, not decided per block.** It is a `{ url: false }` field on
+  `lib/dashboard-store.ts`'s one store, and that field's docblock holds the split and
+  the reasoning; `lib/compact.contract.test.ts` pins the half that matters by
   grepping `verdict-panel.tsx` for a gate its critical/warn lists must never
-  acquire. It is a source test on purpose — `createPersistedState` is SSR-safe, so
-  compact always resolves to `false` under `renderToStaticMarkup` and a render test
-  could only ever observe the non-compact branch. Two consequences worth holding:
-  a section's heading and its view switch share one `space-between` row whose
-  height is the switch's, so they go together or not at all — hiding the title
-  alone saves nothing; and because compact drops the Path & hardware section
-  outright, `EvidenceLink` **leaves compact** rather than merely scrolling, and
-  `Section` re-scrolls on mount while the hash still names it. A verdict that
-  points somewhere has to land somewhere.
-- **The range rides basalt-ui's `createSearchParamStore` (`lib/range.ts`), and it
-  is still URL state.** The store only supplies the fallback *under* the URL, so a
-  link to a reading still carries `?range=`; what it adds is that a bare `/` opens
-  on the range this reader last chose, and that `?range=nonsense` falls back
-  instead of throwing a `ZodError` out of `validateSearch` — `z.enum().default()`
-  only defaults an ABSENT key, so a hand-edited URL used to take the page down.
-  `minDuration` stays on Zod and the two compose by spreading: the store is typed
-  `T extends string` over a closed `values` list and cannot hold an open numeric
-  bound.
+  acquire. It is a source test on purpose — the mirror is `createPersistedState`,
+  which is SSR-safe, so compact always resolves to `false` under
+  `renderToStaticMarkup` and a render test could only ever observe the non-compact
+  branch. Two consequences worth holding: basalt's `Section` draws its title and its
+  `tabs` in one header row whose height is the switch's, so they go together or not
+  at all — which is why compact drops `Section` itself rather than passing it fewer
+  props; and because compact drops the Path & hardware section outright,
+  `EvidenceLink` **leaves compact** rather than merely scrolling, and
+  `DashboardSection` re-scrolls on mount while the hash still names it. A verdict
+  that points somewhere has to land somewhere.
+- **Every control on the page reads one store, `lib/dashboard-store.ts`, and Zod
+  is gone from the route.** `createSearchStore` (basalt-ui 1.26.0) takes typed
+  fields, so the range, the outage-duration bound and the density toggle each
+  declare their own lanes once — `range` on the URL with a localStorage mirror
+  under it, `minDuration` URL-only (`persist: false` — a filter you narrowed once
+  should not narrow every later visit), `compact` local-only (`url: false`). The
+  URL is still the truth for the first two: a link to a reading carries `?range=`,
+  and `?range=nonsense` falls back instead of throwing a `ZodError` out of
+  `validateSearch` (`z.enum().default()` only defaults an ABSENT key, so a
+  hand-edited URL used to take the page down). Two things that are easy to get
+  wrong here: **the store's own navigate already passes `resetScroll: false`**, so
+  never hand-roll one beside a field write; and **`field.range` must be written
+  with an explicit `custom: false`** — called inline inside `fields`, its `const C
+  extends boolean` re-infers against `AnyField`'s widened `RangeField` and every
+  read of `search.range` silently widens to `RangeOption | 'custom'`, a value this
+  store can never hold. The reciprocal gap is upstream and costs one cast in
+  `routes/index.tsx`: `RangeFilterProps.field` pins that same argument to its
+  default `boolean`, so the control cannot take a `custom: false` handle.
+- **The page's chrome is basalt's `PageBar`, and the sticky height is its own.**
+  Shell-less, so both rows render in flow with `title` leading and the whole bar
+  publishes its measured height as `--basalt-page-bar-h` in the LAYOUT phase —
+  which is what every section anchor's `scroll-margin-top` clears. The
+  `useElementSize` + `useLayoutEffect` publisher, the `--lw-header-h` variable and
+  its `96px` fallback are all gone; do not reintroduce a measured header height.
+  Two consumer-side facts: the full bleed across `__root.tsx`'s Container gutters
+  and the hairline under the bar arrive through `PageBar.className`
+  (`components/page-bar.module.css`) because they are the only part of the layout
+  basalt cannot know, and the bar renders **three** secondary actions inline before
+  folding the rest into a `More` dropdown — which is why the version string sits on
+  `filtersEnd` rather than becoming a fourth.
 - **A chart's axis label and its scale key are two different things, and as of
   basalt-ui 1.17.0 nothing on this page confuses them.** Every chart renders its
   domain through a formatter: the four bucketed ones keep the bucket's ISO start
@@ -420,7 +448,7 @@ anyone they disagreed.
   asked. The rule is one; the sentinel varies with the component's shape, which
   is a known wart rather than a discovery: charts and tables take `isPending`,
   `CoverageCallout` takes a `'pending'` string, `Stat.value` takes `null`, and
-  the card-owning components (`StatusBar`, `PageHeader`, `VantageCard`,
+  the card-owning components (`StatusBar`, `LiveChip`, `VantageCard`,
   `LinkComparison`, `pathStats`) treat `null`/`undefined` as *not asked yet*.
   **Guard even where a route loader makes the state unreachable** — the loader
   guarantee is route config that a later edit can silently remove, and the cost

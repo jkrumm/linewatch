@@ -1,0 +1,29 @@
+/*
+ * The two things `PageBar` deliberately does not know: this app's container gutters, and whether the
+ * sticky bar wants a hairline under it. Both arrive through `PageBar.className`, which lands on the
+ * bar's root — the shell-less `[data-basalt-page-bar="standalone"]` here, since linewatch has no
+ * `BasaltShell`.
+ *
+ * Scoped through this class rather than through a global `[data-basalt-page-bar]` selector, which is
+ * what basalt's own docs ask for: the attribute is stable enough to read, but a global rule would
+ * reach every bar in the app including the ones that want neither of these.
+ *
+ * **Full-bleed is not decoration.** Without it the sticky background stops at `__root.tsx`'s
+ * `Container` content box and the page scrolls visibly through the 13px strips either side of it.
+ * The negative margin has to match that Container's own `px={{ base: 'sm', sm: 'lg' }}` exactly, and
+ * the padding puts the bar's contents back on the content edge — so the two numbers move together
+ * or the title stops lining up with the cards under it.
+ */
+.bleed {
+  margin-inline: calc(-1 * var(--mantine-spacing-sm));
+  padding-inline: var(--mantine-spacing-sm);
+  border-bottom: 1px solid var(--vx-surface-hairline);
+}
+
+/* Mantine's `sm` breakpoint (48em) — where `__root.tsx`'s Container switches to the `lg` gutter. */
+@media (min-width: 48em) {
+  .bleed {
+    margin-inline: calc(-1 * var(--mantine-spacing-lg));
+    padding-inline: var(--mantine-spacing-lg);
+  }
+}

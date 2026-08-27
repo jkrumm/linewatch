@@ -106,7 +106,7 @@ function ReadingCard({ reading, now }: { reading: RateReading; now: number }) {
   return (
     <Stack gap={4}>
       <StatCard
-        label={`${reading.label} · ${age}`}
+        title={`${reading.label} · ${age}`}
         value={reading.mbps === null ? '—' : `${reading.mbps.toFixed(reading.mbps < 10 ? 2 : 1)} ${unit}`}
       />
       <Group gap={6}>

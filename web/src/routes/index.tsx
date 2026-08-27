@@ -1,9 +1,11 @@
-import { createFileRoute, useNavigate } from '@tanstack/react-router'
-import { z } from 'zod'
+import { createFileRoute } from '@tanstack/react-router'
 import { Card, Group, SegmentedControl, Stack, Text } from '@mantine/core'
 import { useQueries, useQuery } from '@tanstack/react-query'
+import { PageBar, ThemeToggle } from 'basalt-ui'
 import { TooltipRow, VX } from 'basalt-ui/charts'
 import { Callout } from 'basalt-ui/content'
+import { FilterSet, RangeFilter } from 'basalt-ui/controls'
+import type { FieldHandle, RangeField } from 'basalt-ui/router-tanstack'
 import {
   eventsQuery,
   outagesQuery,
@@ -16,10 +18,11 @@ import {
   verdictsQuery,
 } from '../lib/queries'
 import { StatusBar, type KpiWindow } from '../components/status-bar'
-import { useCompactMode } from '../lib/compact'
 import { VerdictPanel } from '../components/verdict-panel'
-import { PageHeader } from '../components/page-header'
-import { Section } from '../components/section'
+import { CompactToggle } from '../components/compact-toggle'
+import { LiveChip } from '../components/live-chip'
+import { DashboardSection } from '../components/dashboard-section'
+import barClasses from '../components/page-bar.module.css'
 import { StatStrip, type Stat } from '../components/stat-strip'
 import { OutageTable } from '../components/outage-table'
 import { CoverageCallout } from '../components/coverage-callout'
@@ -44,7 +47,15 @@ import { downtimeTint, measuredFraction, type ThresholdTint, worstBucketLoss, wo
 import { coverageKind, fmtCoveragePct } from '../lib/coverage'
 import { speedWindowStats } from '../lib/speed-stats'
 import { unmappedVerdictIds } from '../lib/verdict-section'
-import { RANGE_LABEL, type RangeOption, rangeStore, rangeToBucket, rangeToWindow } from '../lib/range'
+import { RANGE_LABEL, type RangeOption, rangeToBucket, rangeToWindow } from '../lib/range'
+import {
+  dashboard,
+  latencyViews,
+  pathViews,
+  speedViews,
+  throughputViews,
+  uptimeViews,
+} from '../lib/dashboard-store'
 import {
   TARGET_LABEL,
   TARGETS,
@@ -84,21 +95,6 @@ const HEATMAP_SPAN_MS = 30 * 86_400_000
 const HEATMAP_BUCKET_SECONDS = AVAILABILITY_BUCKET_SECONDS
 
 /**
- * The half of the search state Zod still owns.
- *
- * `range` moved onto basalt-ui's `createSearchParamStore` (`lib/range.ts`), which gives it a
- * localStorage fallback under the URL and stops an invalid value throwing. `minDuration` cannot
- * follow it: the store is typed `T extends string` over a closed `values` list, and this is an open
- * numeric bound. The two compose by spreading in `validateSearch` below — one route, two param
- * owners, which is the shape the store's own docblock assumes.
- */
-const SearchSchema = z.object({
-  minDuration: z.coerce.number().int().min(0).default(0),
-})
-
-type SearchParams = { range: RangeOption } & z.infer<typeof SearchSchema>
-
-/**
  * The whole dashboard, on one page, as one scroll — and now at a height a reader will actually
  * reach the bottom of.
  *
@@ -109,14 +105,14 @@ type SearchParams = { range: RangeOption } & z.infer<typeof SearchSchema>
  *
  * Three changes make it one to two screens without removing a fact:
  *
- * 1. **The chrome is gone.** No sidebar for a router with one route (see `__root.tsx`); the theme
- *    toggle moved beside the range control, and the header states once, permanently, that the
- *    range governs the page.
+ * 1. **The chrome is gone.** No sidebar for a router with one route (see `__root.tsx`); the range
+ *    control, the live verdict, the density toggle and the theme toggle are all slots on the one
+ *    `PageBar`, which is also what publishes the sticky height every section anchor clears.
  * 2. **The opening seven cards are one bar.** `StatusBar` carries every branch the status banner,
  *    the two live tiles and the four KPI cards carried, in one row of cells.
- * 3. **Each section's disclosure became a view switch.** A named `SegmentedControl` per section
+ * 3. **Each section's disclosure became a view switch.** A named `ViewTabs` in the section header
  *    instead of a chevron that says "Details" — same evidence, constant height, and the reader can
- *    see what is in each cut without opening it. See `components/section.tsx`.
+ *    see what is in each cut without opening it. See `components/dashboard-section.tsx`.
  *
  * Two things are deliberately *unchanged* by all of it. Every conclusion the rule engine reaches
  * still renders in the verdict band, unconditionally, above every section — a finding is never
@@ -126,11 +122,11 @@ type SearchParams = { range: RangeOption } & z.infer<typeof SearchSchema>
  * so on itself.
  */
 export const Route = createFileRoute('/')({
-  validateSearch: (raw: Record<string, unknown>): SearchParams => ({
-    ...rangeStore.validateSearch(raw),
-    ...SearchSchema.parse(raw),
-  }),
-  loaderDeps: ({ search }: { search: SearchParams }) => ({
+  // One store owns both URL params — see `lib/dashboard-store.ts`. It always returns a value for
+  // each, which is what makes a hand-edited `?range=` fall back instead of throwing a `ZodError`
+  // out of here, and what lets every write go through a `FieldHandle` rather than a `navigate`.
+  validateSearch: dashboard.validateSearch,
+  loaderDeps: ({ search }) => ({
     range: search.range,
     minDuration: search.minDuration,
   }),
@@ -154,13 +150,12 @@ export const Route = createFileRoute('/')({
 })
 
 function DashboardPage() {
-  const [compact] = useCompactMode()
+  const [compact] = dashboard.field.compact.use()
+  // The URL is what this page READS both params from, and `validateSearch` has already resolved
+  // each one URL ⊳ localStorage ⊳ fallback — so there is no second reader and no write-only mirror
+  // to keep in step. The two controls that CHANGE them (`RangeFilter`, `MinDurationFilter`) bind the
+  // store's own `FieldHandle`, which owns the navigate and the persist together.
   const search = Route.useSearch()
-  const navigate = useNavigate()
-  // Write-only: the URL is what this page READS the range from (`search.range`), and the store is
-  // only the fallback `validateSearch` reaches for when the URL has none. Taking the stored value
-  // here as well would be a second source of truth for a fact the router already resolved.
-  const [, persistRange] = rangeStore.useStore()
 
   /**
    * Two clocks, and conflating them is what made this page jump every thirty seconds.
@@ -295,13 +290,6 @@ function DashboardPage() {
         }
       : null
 
-  // `resetScroll: false` is not a nicety. Both controls that live in the URL — the range and the
-  // outage duration filter — are router navigations, and the router's default is to scroll to the
-  // top on each one. Filtering the outage table halfway down the page would throw the reader back
-  // to the header. The controls change what is displayed, not where you are in the page.
-  const setSearch = (patch: Partial<SearchParams>) =>
-    void navigate({ to: '/', search: { ...search, ...patch }, resetScroll: false })
-
   const rangeLabel = RANGE_LABEL[search.range]
 
   return (
@@ -309,23 +297,63 @@ function DashboardPage() {
     // the only thing left separating one section's charts from the next's, and at that size it
     // reads as dead space rather than as a boundary — the card edges already do the separating.
     <Stack gap={compact ? 'sm' : 'lg'}>
-      <PageHeader
-        range={search.range}
-        onRangeChange={(range) => {
-          persistRange(range)
-          setSearch({ range })
-        }}
-        version={__APP_VERSION__}
-        live={
-          status === undefined
-            ? null
-            : {
-                internetMs: liveInternet(status.lastSamples).medMs,
-                latestTs: latestSampleTs(status.lastSamples),
-                openOutages: status.ongoingOutages.length,
-                now: nowTick,
-              }
+      {/* The page's only chrome, and every page-level control enters through one of its slots.
+          Sticky at `top: 0` with no shell, and it publishes its own measured height as
+          `--basalt-page-bar-h` in the LAYOUT phase — which is what every section anchor's
+          `scroll-margin-top` clears, so the measure-and-publish effect and the 96px fallback this
+          page used to carry are both gone.
+
+          `barClasses.bleed` is the one thing basalt cannot know: `__root.tsx`'s Container gutters,
+          and whether this bar wants a hairline. See that CSS module.
+
+          `mobile: 'bar'` on the live chip is mandatory rather than decorative — a custom secondary
+          defaults to `'more'`, and the kebab is the one place the verdict word must never be. */}
+      <PageBar
+        title="linewatch"
+        className={barClasses.bleed}
+        filters={
+          <FilterSet>
+            {/* The one cast on this page, and it is a framework gap rather than a shortcut.
+                `RangeFilterProps.field` is typed `FieldHandle<RangeField<P>>`, which pins the
+                unstated `custom` type argument to its default `boolean` — so the control cannot
+                express a range field that declares `custom: false`, and this store declares exactly
+                that (see `dashboard-store.ts` for why the declaration has to stay). Widening here
+                keeps `search.range` honestly typed as `RangeOption` at all eight read sites, which
+                is where being wrong would cost something; the control never writes `'custom'`,
+                because it derives its presets from `field.options` and the codec omits `'custom'`
+                from those unless the field opted in. */}
+            <RangeFilter
+              field={dashboard.field.range as FieldHandle<RangeField<RangeOption>>}
+              label="Range"
+            />
+          </FilterSet>
         }
+        filtersEnd={[{ key: 'version', kind: 'custom', node: <VersionTag />, mobile: 'hidden' }]}
+        actions={{
+          secondary: [
+            {
+              key: 'live',
+              kind: 'custom',
+              mobile: 'bar',
+              node: (
+                <LiveChip
+                  live={
+                    status === undefined
+                      ? null
+                      : {
+                          internetMs: liveInternet(status.lastSamples).medMs,
+                          latestTs: latestSampleTs(status.lastSamples),
+                          openOutages: status.ongoingOutages.length,
+                          now: nowTick,
+                        }
+                  }
+                />
+              ),
+            },
+            { key: 'compact', kind: 'custom', mobile: 'bar', node: <CompactToggle /> },
+            { key: 'theme', kind: 'custom', mobile: 'more', node: <ThemeToggle /> },
+          ],
+        }}
       />
 
       <StatusBar
@@ -366,8 +394,9 @@ function DashboardPage() {
           than into it. Nothing here wants out any more: the two Speed views were the last holdouts
           and they joined when their domain became an instant (see that section). */}
       <Stack gap="xl">
-        <Section
+        <DashboardSection
           id="uptime"
+          field={uptimeViews.field.view}
           meta={
             <Group justify="space-between" align="flex-end" wrap="wrap" gap="sm">
               <StatStrip
@@ -413,10 +442,7 @@ function DashboardPage() {
                   },
                 ]}
               />
-              <MinDurationFilter
-                value={search.minDuration}
-                onChange={(minDuration) => setSearch({ minDuration })}
-              />
+              <MinDurationFilter />
             </Group>
           }
           views={[
@@ -491,8 +517,9 @@ function DashboardPage() {
           ]}
         />
 
-        <Section
+        <DashboardSection
           id="latency"
+          field={latencyViews.field.view}
           meta={
             <StatStrip
               stats={[
@@ -580,8 +607,9 @@ function DashboardPage() {
           ]}
         />
 
-        <Section
+        <DashboardSection
           id="speed"
+          field={speedViews.field.view}
           meta={
             <StatStrip
               stats={[
@@ -651,8 +679,9 @@ function DashboardPage() {
           ]}
         />
 
-        <Section
+        <DashboardSection
           id="throughput"
+          field={throughputViews.field.view}
           meta={
             <StatStrip
               stats={[
@@ -705,8 +734,9 @@ function DashboardPage() {
             reading, which is also why it is the only `collapsible` one. A verdict that points
             here leaves compact first, so the anchor still lands (see `EvidenceLink`). */}
         {compact ? null : (
-        <Section
+        <DashboardSection
           id="path"
+          field={pathViews.field.view}
           meta={<StatStrip stats={pathStats(status?.vantage, nowTick)} />}
           // The one folded section on the page, and the only one whose evidence is mostly
           // reference: an interface name, a media type and a gateway that have not changed since
@@ -788,18 +818,29 @@ function stripTone(tint: ThresholdTint): 'warn' | 'bad' | undefined {
 }
 
 /**
- * The outage-duration filter, out of the view body and onto the section's own header row.
+ * The outage-duration filter, in the Uptime section's own `summary` row rather than in a view body.
  *
  * It lived inside the Outages view — behind a view switch, next to a paragraph, with an `aria-label`
  * and no visible one — so it was a URL parameter with no discoverable control. Here it is visible
  * whichever Uptime view is drawn, and it sits beside the "Outages" count it scopes, which is the
- * only place its effect is legible. It stays in the URL and still navigates with `resetScroll:
- * false`, so filtering from halfway down the page does not throw the reader back to the header.
+ * only place its effect is legible.
+ *
+ * **`dashboard.field.minDuration.use()` owns both lanes**, so there is no `value`/`onChange` and no
+ * `navigate` here: the handle writes the URL (with `resetScroll: false`, which basalt now passes on
+ * every store write — filtering from halfway down the page must not throw the reader back to the
+ * top) and skips the localStorage mirror, because the field declares `persist: false`.
+ *
+ * **It is deliberately NOT in a home slot, and it stays a raw `SegmentedControl` for one reason:**
+ * the value is an open numeric bound, so it is a `field.number`, and every bound basalt control
+ * takes an enum, a multi or a range. Rendered here it reports `basalt/control-outside-home` at
+ * `warn` — the honest reading of law C1, and the fix is a numeric filter upstream rather than an
+ * enum of duration strings that would change the URL's shape to silence a lint rule.
  *
  * The label is visible text, not an `aria-label`. "Ignore under" is what makes it a control a
  * reader can find rather than a row of unexplained durations.
  */
-function MinDurationFilter({ value, onChange }: { value: number; onChange: (value: number) => void }) {
+function MinDurationFilter() {
+  const [minDuration, setMinDuration] = dashboard.field.minDuration.use()
   return (
     <Group gap={6} wrap="nowrap" w={{ base: '100%', sm: 'auto' }}>
       <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}>
@@ -808,13 +849,29 @@ function MinDurationFilter({ value, onChange }: { value: number; onChange: (valu
       <SegmentedControl
         size="xs"
         fullWidth
-        value={String(value)}
-        onChange={(next) => onChange(Number(next))}
+        value={String(minDuration)}
+        onChange={(next) => setMinDuration(Number(next))}
         data={MIN_DURATION_OPTIONS}
         aria-label="Minimum outage duration"
         style={{ flex: 1 }}
       />
     </Group>
+  )
+}
+
+/**
+ * The build the dashboard is serving, on `PageBar.filtersEnd` and desktop-only (`mobile: 'hidden'`),
+ * which is where the old header's `visibleFrom="sm"` version string sat.
+ *
+ * `filtersEnd` rather than a fourth `actions.secondary` entry, and that is not arbitrary: the bar
+ * renders three secondaries inline and folds the rest into a `More` menu, so a fourth would push the
+ * theme toggle behind a dropdown to make room for a version number.
+ */
+function VersionTag() {
+  return (
+    <Text size="xs" c="dimmed" ff="monospace">
+      {__APP_VERSION__}
+    </Text>
   )
 }
 

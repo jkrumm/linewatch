@@ -3,7 +3,7 @@ import { useInViewport } from './use-in-viewport'
 import type { SpeedTest } from '../lib/types'
 import { fmtClock, fmtMs } from '../lib/format'
 import { axisTickValues, runAxisKey, runTickFormat } from '../lib/axis'
-import { useCardTitle } from '../lib/compact'
+import { dashboard } from '../lib/dashboard-store'
 
 const BUFFERBLOAT_HEIGHT = 260
 
@@ -27,11 +27,14 @@ export function BufferbloatChart({
   const ordered = tests.toSorted((a, b) => a.ts - b.ts)
   const points = ordered.map((test) => ({ test, key: runAxisKey(test.ts) }))
   const { ref: viewRef, inView } = useInViewport<HTMLDivElement>()
+  const [compact] = dashboard.field.compact.use()
 
   return (
     <ChartCard
-      title={useCardTitle('Latency under load')}
-      tooltip="Idle ping is measured at rest; loaded latency is measured while the download or upload saturates the line. One point per run, drawn at equal spacing regardless of the gap between runs — so the shared cursor marks the run nearest the moment you are hovering, not the same horizontal position."
+      // Titled in compact only, where there is no section heading to name the block — see
+      // `GuidedChart` for the whole rule.
+      title={compact ? 'Latency under load' : undefined}
+      info="Idle ping is measured at rest; loaded latency is measured while the download or upload saturates the line. One point per run, drawn at equal spacing regardless of the gap between runs — so the shared cursor marks the run nearest the moment you are hovering, not the same horizontal position."
     >
       {/* See `availability-strip.tsx`'s identical wrapper for why this is a floor, not a height. */}
       <div ref={viewRef} style={{ minHeight: BUFFERBLOAT_HEIGHT }}>

@@ -2,8 +2,6 @@ import { describe, expect, test } from 'bun:test'
 import {
   PROBE_CYCLE_MS,
   RANGE_OPTIONS,
-  isRangeOption,
-  rangeStore,
   rangeToBucket,
   rangeToWindow,
   type RangeOption,
@@ -76,20 +74,6 @@ describe('rangeToWindow', () => {
   })
 })
 
-describe('isRangeOption', () => {
-  test('accepts every declared option', () => {
-    for (const range of RANGE_OPTIONS) {
-      expect(isRangeOption(range)).toBe(true)
-    }
-  })
-
-  test('rejects anything else', () => {
-    for (const value of ['', '1H', '12h', '365d', 'ALL', 'undefined']) {
-      expect(isRangeOption(value)).toBe(false)
-    }
-  })
-})
-
 describe('rangeToBucket', () => {
   test('returns the documented bucket seconds per range', () => {
     expect(rangeToBucket('1h')).toBe(60)
@@ -105,20 +89,5 @@ describe('rangeToBucket', () => {
       expect(points).toBeGreaterThanOrEqual(60)
       expect(points).toBeLessThanOrEqual(432) // 'all' at a daily bucket is 365 points
     }
-  })
-})
-
-describe('rangeStore.validateSearch', () => {
-  test('takes a valid range straight out of the URL', () => {
-    expect(rangeStore.validateSearch({ range: '7d' })).toEqual({ range: '7d' })
-  })
-
-  test('falls back instead of throwing on a range the URL invented', () => {
-    // The behaviour change this store bought. `z.enum(RANGE_OPTIONS).default('24h')` only defaults an
-    // ABSENT key — a present-but-invalid one threw a ZodError out of `validateSearch`, so a
-    // hand-edited or stale URL took the whole dashboard down rather than showing the default window.
-    expect(rangeStore.validateSearch({ range: 'nonsense' })).toEqual({ range: '24h' })
-    expect(rangeStore.validateSearch({ range: 42 })).toEqual({ range: '24h' })
-    expect(rangeStore.validateSearch({})).toEqual({ range: '24h' })
   })
 })

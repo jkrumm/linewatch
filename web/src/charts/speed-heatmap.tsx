@@ -4,7 +4,7 @@ import { densifyBuckets } from '../lib/densify'
 import { fmtMbps, fmtPct } from '../lib/format'
 import { CategoryGrid, type GridCell } from './category-grid'
 import { localDayKey, localDayStart, localHourKey } from './local-calendar'
-import { useCardTitle } from '../lib/compact'
+import { dashboard } from '../lib/dashboard-store'
 
 /** One cell is one hour of the reader's own day, matching the availability grid so the two
  * calendars on this dashboard are read the same way — `local-calendar.ts` carries the argument for
@@ -140,17 +140,20 @@ export function SpeedHeatmap({
     }
   })
   const rows = [...new Set(cells.map((c) => c.row))]
+  const [compact] = dashboard.field.compact.use()
 
   return (
     <ChartCard
-      title={useCardTitle("Throughput by hour")}
+      // Titled in compact only, where there is no section heading to name the block — see
+      // `GuidedChart` for the whole rule.
+      title={compact ? 'Throughput by hour' : undefined}
       // Not `` `last ${days} days` `` — the page carries exactly one range control, and restating
       // the selected window's day count here duplicated it whenever the selection was already under
       // `MAX_DAYS`. What this view still has to self-report (the repo's own CLAUDE.md: this is the
       // one block the range does not fully scope) is the structural cap, stated once and
       // unconditionally rather than re-derived from the current selection.
       subtitle={`When the line is slow · never more than the trailing ${MAX_DAYS} days, by hour of your day.`}
-      tooltip="Darker cells averaged lower download throughput that hour; a cell paints full at half the fastest hour in range. Hatched cells either had no run or had one that failed — the tooltip says which."
+      info="Darker cells averaged lower download throughput that hour; a cell paints full at half the fastest hour in range. Hatched cells either had no run or had one that failed — the tooltip says which."
     >
       {/* `ChartFrame` is the one responsive path now — `ResponsiveChart` is gone, and the frame
           measures, reserves the plot rect and renders `ChartPending` in place of the grid while

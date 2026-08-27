@@ -10,7 +10,7 @@ import { useInViewport } from './use-in-viewport'
 import type { SpeedTest } from '../lib/types'
 import { fmtClock, fmtMbps } from '../lib/format'
 import { axisTickValues, runAxisKey, runTickFormat } from '../lib/axis'
-import { useCardTitle, useCompactMode } from '../lib/compact'
+import { dashboard } from '../lib/dashboard-store'
 
 /**
  * It was 260, which was headroom above the download trace rather than resolution in it; 190 —
@@ -99,7 +99,7 @@ export function SpeedChart({
   // releases this line built a pre-formatted, collision-broken label instead, because `MultiLine`
   // forwarded no formatter and the domain value was the only string that reached the axis.
   const points = ordered.map((test) => ({ test, key: runAxisKey(test.ts) }))
-  const [compact] = useCompactMode()
+  const [compact] = dashboard.field.compact.use()
   // ONE array behind both the drawn rules and their captions. `MultiLine` draws `refLines` but
   // names none of them, so the labels ride in their own reference-role legend below the plot —
   // and 1.20.0's widened `basalt/chart-legend-literal` is right that a legend authored beside the
@@ -119,7 +119,9 @@ export function SpeedChart({
 
   return (
     <ChartCard
-      title={useCardTitle('Speed')}
+      // Titled in compact only, where there is no section heading to name the block — see
+      // `GuidedChart` for the whole rule.
+      title={compact ? 'Speed' : undefined}
       // The unit lives here, not on the y ticks. Formatting each tick as `600 Mbps` was the
       // obvious fix for a unitless axis and it made things worse: `MultiLine` draws its axis inside
       // basalt's shared 44 px gutter, sized for bare numbers, so every tick rendered as the bare
@@ -132,7 +134,7 @@ export function SpeedChart({
       // to carry what that costs the shared cursor now that this chart is on it — a reader watching
       // the crosshair land at a different x on this card than on the band above needs the rule,
       // not a guess.
-      tooltip="Ookla runs, one point each, drawn at equal spacing regardless of the gap between them — so the shared cursor marks the run nearest the moment you are hovering, not the same horizontal position. Download and upload share one axis."
+      info="Ookla runs, one point each, drawn at equal spacing regardless of the gap between them — so the shared cursor marks the run nearest the moment you are hovering, not the same horizontal position. Download and upload share one axis."
     >
       {/* See `availability-strip.tsx`'s identical wrapper for why this is a floor, not a height. */}
       <div ref={viewRef} style={{ minHeight: height }}>

@@ -5,7 +5,7 @@ import { PROBE_CYCLE_MS } from '../lib/range'
 import { fmtPct } from '../lib/format'
 import { CategoryGrid, type GridCell } from './category-grid'
 import { localDayKey, localDayStart, localHourKey } from './local-calendar'
-import { useCardTitle } from '../lib/compact'
+import { dashboard } from '../lib/dashboard-store'
 
 /**
  * The bucket size this grid is a grid OF. Exported so the route's query and the chart cannot
@@ -128,12 +128,15 @@ export function AvailabilityHeatmap({
   // true or not, and the grid height below can't jump the moment the query resolves.
   const rows = [...new Set(cells.map((c) => c.row))]
   const gridHeight = Math.max(220, rows.length * 15)
+  const [compact] = dashboard.field.compact.use()
 
   return (
     <ChartCard
-      title={useCardTitle("Availability")}
+      // Titled in compact only, where there is no section heading to name the block — see
+      // `GuidedChart` for the whole rule.
+      title={compact ? 'Availability' : undefined}
       subtitle="Last 30 days, by hour of your day"
-      tooltip="Each cell is one hour's WAN availability, on your own clock — darker means more loss that hour, up to 5% which paints full. Hatched cells were not measured at all, which is not the same as an hour with no loss."
+      info="Each cell is one hour's WAN availability, on your own clock — darker means more loss that hour, up to 5% which paints full. Hatched cells were not measured at all, which is not the same as an hour with no loss."
     >
       {/* `ChartFrame` is the one responsive path now — `ResponsiveChart` is gone, and the frame
           measures, reserves the plot rect and renders `ChartPending` in place of the grid while

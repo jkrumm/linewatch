@@ -32,8 +32,8 @@ import type { ProbeBucketSeconds, TargetName } from './types'
  * millisecond — `prevFrom = from - (to - from)` in the dashboard depends on that.
  *
  * **The cost, stated:** windowed figures can be up to one step (≤5 min) behind wall-clock. The live
- * reading is not: `GET /api/status` is unwindowed, refetches every 30 s, and is what `NowStrip` and
- * the sticky header's status chip draw. The window is history; the strip is now.
+ * reading is not: `GET /api/status` is unwindowed, refetches every 30 s, and is what `StatusBar` and
+ * the page bar's `LiveChip` draw. The window is history; the bar is now.
  *
  * **The trap this creates, and the one rule that keeps it closed:** the returned `to` is NO LONGER
  * "now". `isStale` (`lib/freshness.ts`) uses a 60 s threshold, so feeding a 5-minute-old `to` to it

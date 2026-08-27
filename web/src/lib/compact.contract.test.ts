@@ -5,15 +5,16 @@ const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf
 
 /**
  * Compact mode is allowed to drop supporting detail and forbidden to drop a finding — see
- * `lib/compact.tsx` for the full split and the one judgement call in it.
+ * `dashboard.field.compact` in `lib/dashboard-store.ts` for the full split and the one judgement
+ * call in it.
  *
  * This is a SOURCE test rather than a render test, and that is the only form available: the state
- * lives in `createPersistedState`, which is SSR-safe and therefore always resolves to its `initial`
- * (`false`) under `renderToStaticMarkup`, so a rendering test can only ever observe the non-compact
- * branch — it would pass just as happily if someone gated the critical verdicts tomorrow. Grepping
- * the module is the same idiom `services/router/actions.ts` already uses for the destructive
- * operation names: when the property you need to hold is "this line never acquires that gate",
- * the line is what you assert on.
+ * is a `{ url: false }` store field over `createPersistedState`, which is SSR-safe and therefore
+ * always resolves to its fallback (`false`) under `renderToStaticMarkup`, so a rendering test can
+ * only ever observe the non-compact branch — it would pass just as happily if someone gated the
+ * critical verdicts tomorrow. Grepping the module is the same idiom `services/router/actions.ts`
+ * already uses for the destructive operation names: when the property you need to hold is "this
+ * line never acquires that gate", the line is what you assert on.
  */
 describe('compact mode never hides a finding', () => {
   const panel = read('../components/verdict-panel.tsx')

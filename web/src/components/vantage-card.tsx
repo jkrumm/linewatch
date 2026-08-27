@@ -116,9 +116,9 @@ export function VantageCard({ vantage, now }: { vantage: Vantage | null | undefi
             One column below sm, still. At two-up each card holds ~147px of content against a 24px
             mono hero, and `overflow: hidden` on the card silently cut the longer values. */}
         <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
-          <StatCard label="Interface" value={joined([vantage.pathIf, vantage.pathClass])} />
-          <StatCard label="Link speed" value={linkSpeedValue(vantage)} />
-          <StatCard label="Media" value={joined([vantage.linkMedia, vantage.linkDuplex])} />
+          <StatCard title="Interface" value={joined([vantage.pathIf, vantage.pathClass])} />
+          <StatCard title="Link speed" value={linkSpeedValue(vantage)} />
+          <StatCard title="Media" value={joined([vantage.linkMedia, vantage.linkDuplex])} />
         </SimpleGrid>
 
         <Text size="xs" c="dimmed">

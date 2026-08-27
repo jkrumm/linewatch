@@ -80,3 +80,31 @@ describe('StatusBar threshold rail', () => {
     expect(html).not.toContain('threshold')
   })
 })
+
+/**
+ * Law C8 — every card or table title is a `WidgetHeader` — reached this bar in basalt-ui 1.26.0:
+ * each cell's label was an uppercase micro `Text`, i.e. a string with no structure at all, and is
+ * now a `WidgetHeader tier="widget"` `<h3>`.
+ *
+ * The assertion is per LABEL rather than a count of `<h3>`s, deliberately: the bar renders its cell
+ * list twice (a `SimpleGrid` below `xl`, a divided `Group` above it), so a count pins the responsive
+ * layout rather than the heading contract, and would break on a purely visual change.
+ */
+describe('StatusBar cell labels are headings', () => {
+  const html = renderToStaticMarkup(
+    <MantineProvider>
+      <StatusBar status={{ ongoingOutages: [], lastSamples: [] }} now={NOW} {...KPI_PROPS} />
+    </MantineProvider>,
+  )
+
+  for (const label of ['Status', 'Latest cycle', 'Downtime', 'Ping · internet', 'Download']) {
+    test(`"${label}" is marked up as a heading, not a bare string`, () => {
+      expect(html).toMatch(new RegExp(`<h3[^>]*>(?:<[^>]+>)*${escapeRe(label)}`))
+    })
+  }
+})
+
+/** `Ping · internet` carries no regex metacharacter today; escaping keeps that from mattering. */
+function escapeRe(value: string): string {
+  return value.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)
+}

@@ -7,7 +7,7 @@ import {
   IconWorld,
 } from '@tabler/icons-react'
 import type { ReactNode } from 'react'
-import { DeltaBadge } from 'basalt-ui'
+import { DeltaBadge, WidgetHeader } from 'basalt-ui'
 import { BarSparkline, LineSparkline, VX, useChartSize } from 'basalt-ui/charts'
 import type { LiveReading } from '../lib/live'
 import { liveGateway, liveInternet } from '../lib/live'
@@ -111,8 +111,9 @@ export interface KpiWindow {
  * The page's opening bar: what the line is doing right now, and the four headline numbers over the
  * selected window, in one row of cells.
  *
- * **This is `NowStrip` and `KpiRow` folded into one surface**, and the fold is the whole point. The
- * strip carried three items (verdict, readings, age) distributed by `justify="space-between"`; on a
+ * **This is the old `NowStrip` and `KpiRow` folded into one surface** — neither file survives; this
+ * one is `StatusBar`, and the fold is the whole point. The strip carried three items (verdict,
+ * readings, age) distributed by `justify="space-between"`; on a
  * wide monitor that is ~400px of nothing between each, so the row read as three unrelated fragments
  * rather than one bar. The four KPI cards then repeated the same shape 118px lower with a different
  * card edge. One row of six cells is the same information with no dead space and no second idiom.
@@ -453,7 +454,16 @@ export function StatusBar({
 }
 
 /**
- * One segment of the bar: a micro-caps label over its content, optionally with a threshold rail.
+ * One segment of the bar: a `WidgetHeader` label over its content, optionally with a threshold rail.
+ *
+ * **The label is `WidgetHeader tier="widget"`, not a hand-rolled micro-caps `Text`.** Law C8 —
+ * every section, card or table title is that primitive — and the bar is one card holding six
+ * labelled cells, so each cell's label is a widget title. What changes on screen is the treatment:
+ * the head font at 88%/550 muted, in place of uppercase 11px with a letter-spacing literal. What it
+ * buys is that each cell's label is a real `<h3>`, so the bar has a heading structure a screen
+ * reader can list rather than six unmarked strings — pinned per label in
+ * `status-bar.render.test.tsx`, not by count, because the cell list is rendered twice (see the two
+ * containers in `StatusBar` above).
  *
  * The rail and its `VisuallyHidden` sentence are lifted verbatim from basalt-ui's `StatCard` — see
  * the module docblock for why this bar cannot use the card itself, and why reproducing the
@@ -492,9 +502,7 @@ function Cell({
           />
         </>
       )}
-      <Text fz={VX.text.micro} c="dimmed" tt="uppercase" fw={600} style={{ letterSpacing: '0.06em' }}>
-        {label}
-      </Text>
+      <WidgetHeader tier="widget" title={label} />
       {children}
     </Stack>
   )

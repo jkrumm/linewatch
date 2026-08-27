@@ -1,560 +1,130 @@
 ---
 source: basalt-ui
-description: visx chart conventions — compose basalt-ui primitives/kinds and keep all color in `--vx-*` tokens. Enforced by the oxlint `@visx` ban.
+description: visx chart doctrine — compose CartesianChart (or ChartFrame for a non-single-plot shape), derive legends and tooltip rows from `series`, keep every color in `--vx-*`. Enforced by basalt/hand-rolled-plot, basalt/chart-legend-literal, basalt/chart-in-raw-surface and the two @visx boundary rules.
 paths:
-  - 'src/**/charts/**'
-  - 'apps/**/charts/**'
-  - 'packages/**/charts/**'
+  - '**/charts/**'
 ---
 
-# Basalt Charts — visx Conventions
-
-basalt-ui owns the chart doctrine. Charts are built from low-level [visx](https://airbnb.io/visx)
-primitives so we can build exactly the chart we want; the trade-off is that every chart duplicates
-structure unless we compose shared building blocks. **`CartesianChart` plus a small kind set are
-the contract, not optional polish** — composing `CartesianChart` (single-plot) or `ChartFrame`
-directly (multi-pane/radial/matrix) is mandatory for every chart, mechanically enforced by
-`basalt/hand-rolled-plot` (see "Mechanical enforcement" below). **This file is the contract you
-receive** — the basalt-ui repo's `docs/CHARTS-SPEC.md` is the same argument at length, and it does
-not ship in the package. Read it at
-<https://github.com/jkrumm/basalt-ui/blob/master/docs/CHARTS-SPEC.md> or not at all.
-
-## The boundary (lint-enforced)
-
-The shipped oxlint preset (`basalt-ui/configs/oxlint.json`) enforces two hard rules — they hold in
-downstream apps too:
-
-- **`@visx/*` may only be imported inside a `charts/` directory** (`basalt/visx-boundary`).
-  Everywhere else, compose basalt-ui chart primitives/kinds. If you need a raw visx primitive for a
-  bespoke chart, import it from `basalt-ui/charts` (it re-exports `Group`, `LinePath`, `Bar`,
-  `AreaClosed`, `scaleLinear`, `curveMonotoneX`, …) — keep the dependency declared in one place, and
-  keep your own bespoke chart file under a `charts/` directory so it stays on the right side of the
-  boundary.
-- **`@visx/tooltip` is banned everywhere** (`basalt/visx-tooltip`). Use `ChartTooltipFloat` +
-  `TooltipHeader`/`TooltipRow`/`TooltipBody` from `basalt-ui/charts`.
-
-`basalt-ui/charts` is itself Mantine-free (`basalt/token-layer-boundary`, enforced only inside
-basalt-ui's own repo) — that keeps the token layer it reads from upstream of Mantine
-(`cssVariablesResolver` reads `--vx-*` tokens to bind Mantine's surfaces to them, so a chart
-importing `@mantine/*` directly would fork chrome and charts apart instead of sharing one source),
-AND it means `basalt-ui/charts`/`basalt-ui/tokens` resolve and render with no `@mantine/*`
-installed (real, CI-tested — `scripts/pack-test.sh`'s "charts/tokens-only (no-Mantine) resolution +
-render" step). Neither is something a consumer app maintains: there is no local chart-primitives
-tree to keep Mantine-free and no bridge file to own — `BasaltProvider` already bridges the Mantine
-color scheme to the `--vx-*` CSS variables charts read internally. Just compose the shipped
-primitives/kinds and pull color from `VX.*`/`alpha()` (`basalt-ui/tokens`).
-
-`check-theme`'s `inline-display` and `raw-html-layout` guards don't fire inside a chart file
-either — both remedies point at a Mantine layout primitive (`Flex`/`Grid`/`Group`/`Box`), which the
-Mantine-free boundary above already forbids there, so the finding would be unactionable. Reach for
-`ChartCenter` (below, under "Pending state") when a chart file needs to center something.
-
-## The contract is mandatory (lint-enforced)
-
-Composing `CartesianChart` for a single-plot chart, or `ChartFrame` directly for a multi-pane/
-radial/matrix shape, is not optional — two `basalt` oxlint plugin rules
-(`packages/basalt-ui/configs/oxlint-plugin.js`) make it a lint failure to bypass:
-
-- **`basalt/hand-rolled-plot`** — rendering a chart-assembly primitive (`AxisLeftNumeric`,
-  `AxisRightNumeric`, `AxisBottomDate`, `HoverOverlay`, `Crosshair`) in a file that does not
-  compose `CartesianChart`. **Since 1.20.0 every assembly node is reported and waived on its own**
-  — one comment no longer grants the whole file permanent immunity, which is how a 604-line chart
-  file went unpoliced. To waive ONE node, put `theme-allow hand-rolled-plot — <why>` on it (or on a
-  comment-only line above it). A genuinely non-single-plot shape (multi-pane, radial, matrix, or a
-  strip with no y dimension) declares the whole file with `theme-allow-file hand-rolled-plot —
-<why>`, anywhere in it; basalt's own tree carries three, on `DualPanel`, `BandStrip` and
-  `MirroredBars`. `Donut` and `Heatmap` are non-single-plot too and carry none — they render no
-  assembly primitive, so the rule never fires and there is nothing to waive.
-  **`theme-allow-file` is the 1.21.0 spelling** — at 1.20.0 a node-scoped annotation was silently
-  promoted to a file declaration, so per-node scoping was not expressible; move the one word. The file that DEFINES `CartesianChart` is
-  exempt definitionally (detected by declaration, not by path), since a rule saying "compose X"
-  cannot fire inside X.
-- **`basalt/chart-legend-literal`** — a hand-written array literal passed to `ChartLegend`'s
-  `items`; **since 1.20.0 also a `.map()` over a non-`series` array**, because deriving from AN
-  array is not deriving from THE series. The legend must come from the same `series` the chart
-  draws (`deriveLegend`, or just let `ChartFrame`/`CartesianChart` do it), so it cannot go stale
-  naming a series the plot no longer draws.
-
-Both ship `warn` in the consumer preset (`configs/oxlint.json`) and `error` repo-local, per the
-"Shipping a stricter guard — the grace minor" doctrine in `packages/basalt-ui/CLAUDE.md`. 1.20.0
-WIDENS both, so both restart their grace rather than promoting — the live ledger with the promotion
-note per rule is `PLUGIN_RULE_GRACE`, exported beside the plugin in `configs/oxlint-plugin.js`, and
-a test asserts it against the shipped preset in both directions.
-
-**A documented limit:** `hand-rolled-plot` keys on those visx primitives, so a chart drawn with DOM
-nodes (divs sized in percent, an SVG assembled by hand) is structurally invisible to it. That is a
-deliberate trade — every alternative detector tried either flagged basalt's own `Donut`/`Heatmap` or
-an icon in a card header, and a noisy shipped rule gets switched off. Compose `CartesianChart`
-because it is the contract, not because lint will catch you.
-
-## Maps are not charts
-
-Neither `@visx/geo` nor any map library is among the 9 exact-pinned `@visx/*` peers, and basalt
-ships no map kind.
-
-- **Maps are consumer territory.** A map is a MapLibre/Leaflet/deck.gl component in the consumer's
-  own tree, not a visx chart — build it wherever the rest of that consumer's non-chart UI lives.
-- **The `basalt/visx-boundary` rule doesn't apply.** It constrains `@visx/*` imports only. A map
-  library is not `@visx/*`, so a map component needs no `charts/` path segment and no exemption.
-- **Want `@visx/geo` anyway?** Install it yourself — basalt doesn't pin it — and keep it under a
-  `charts/` segment like every other visx import, same as any bespoke chart.
-- **Style map chrome with `--vx-*` tokens** (`VX.*`/`alpha()`) so it matches the rest of the app.
-- **The guard trap, narrowed at 1.21.0:** `check-theme`'s `inline-spacing` kind is a per-line regex
-  over raw source, not an AST pass. A **unitless** number now only reports inside a style-object
-  context (a `style=`/`sx=`/`css=` attribute, or a const whose name or type says styles), so a map's
-  pixel geometry — `fitBounds({ padding: 48 })`, marker offsets — no longer trips it: an options bag
-  is not CSS. A value carrying a unit is CSS wherever it was written and still reports. Where it
-  does fire on genuine map chrome, scope a `theme-allow inline-spacing — map geometry` comment to
-  it; that's the sanctioned answer, not a bug to file.
-
-## Every chart has
-
-1. **`CartesianChart`** — the primitive every single-plot cartesian chart composes, and composes
-   NOTHING else from this list by hand. `ZonedLine`, `Bars`, `StackedArea`, and `MultiLine` all
-   compose it; a bespoke single-plot chart should too. It owns measured margins, both y scales +
-   domains, the x scale + tick thinning, grid, zones, axes, the shared cursor, the crosshair + its
-   per-series dots, the hover/keyboard overlay, and the derived tooltip. The caller supplies
-   `series` (the single source of truth — see #3) and a `children` render prop that draws ONLY
-   marks:
-
-   ```tsx
-   <CartesianChart
-     data={data} chartId="sessions" getX={(d) => d.date} series={SERIES}
-     y={{ domain: 'auto', format: fmtInt }}
-     height={260}
-   >
-     {({ xScale, yScale, visible }) => visible.map((s) => <LinePath key={s.key} … />)}
-   </CartesianChart>
-   ```
-
-   Reaching past it for an axis, a tooltip, or a margin means the chart has drifted from every
-   other chart. `DualPanel`, `Heatmap`, and `Donut` are the deliberate exception, by shape: they
-   compose `ChartFrame` + `useChartCursor` + `autoMargin` + `ChartTooltipFloat` directly instead —
-   same machinery, different assembly, because their contract isn't a single plot rect with one or
-   two numeric y axes.
-
-2. **ChartCard** wrapper — never a raw `<Card>`. Gives title + info-tooltip + extra slot, consistent
-   margin.
-3. **`series` is the single source of truth.** Legend entries and tooltip rows are DERIVED from it
-   (`deriveLegend` / `deriveTooltipRows`) — a chart cannot show a row or a legend key it doesn't
-   draw. Never hand-author a legend or a tooltip row in parallel. Corollary for mark renderers: draw
-   `ctx.visible` (the `PlotContext` field), never the `series` prop directly — `visible` is `series`
-   minus whatever the legend has toggled off, so drawing `series` would repaint a mark the reader
-   just hid.
-4. **`ChartTooltipFloat`** + `TooltipHeader` + `TooltipRow` + `TooltipBody` — never `@visx/tooltip`
-   directly. `CartesianChart` wires this internally for a single-plot chart; a non-cartesian shape
-   composes it directly (see #1). Portals to `document.body` (SSR-guarded: renders nothing when
-   `document` is undefined), so it can be authored anywhere in the tree, including inside an
-   `<svg>`. A plain `<div>` there mounts in the SVG namespace — accepting every prop,
-   throwing nothing, typechecking, passing lint — and never paint; one consumer shipped eight
-   authored tooltip rows no one had ever seen. The portal also un-breaks `position: fixed` under a
-   transformed ancestor.
-5. **AxisLeftNumeric** / **AxisRightNumeric** + **AxisBottomDate** — never raw
-   `<AxisLeft>`/`<AxisBottom>`/`<AxisRight>` (they miss theme tokens + smart ticks). Enforced by
-   `basalt-ui check-theme` (`raw-visx-axis` guard fails the build on a raw axis in a `/charts/`
-   file; escape via `theme-allow`), not just convention. `AxisBottomDate` takes an optional
-   `tickFormat` (`TickFormatter<string>`, defaults to `fmtAxisDate` — `DD.MM`) — the only supported
-   exit for a sub-day window, where the default collapses every tick to the same label and a raw
-   `<AxisBottom>` isn't an option. `CartesianChart`'s own `formatX` prop is the higher-level way to
-   set this without touching the axis component at all — and every cartesian kind (`Bars`/
-   `MultiLine`/`StackedArea`/`ZonedLine`/`DualPanel`) forwards its own `formatX?: (key) => string`
-   now too, not just `CartesianChart` itself. Without it, the only route to a custom x label was
-   pre-formatting it into the domain key, which makes one string serve as display value, scale
-   identity, AND cursor key simultaneously — and a truncating formatter then collapses two points
-   onto one domain value, silently dropping one from the plot (see #6 below for why that's the
-   cursor's problem too). `Heatmap` is deliberately excluded: its existing `colLabel`/`rowLabel`
-   already are that seam, and a second prop over one concern would fork them.
-   **Which x ticks get painted is a separate seam**, `xTickValues?: (keys, xMax) => readonly
-string[]`, on `CartesianChart` and forwarded by `Bars`/`MultiLine`/`StackedArea`/`ZonedLine`
-   plus both band kinds. Resolution order is explicit VALUES → explicit COUNT (`xTicks`, unchanged)
-   → as many as fit (`smartTicks`); omit both and nothing moves. Reach for it on a dense time axis,
-   because **a count cannot express one**: `smartTicks`/`smartTicksEvery` append the final key
-   unconditionally, so any count that does not land exactly on the last index paints two labels on
-   top of each other at the right edge — at every count, not at an unlucky one.
-   **The x axis is CATEGORICAL, and this is not inferable from the API.** `CartesianChart` builds
-   its x scale as `scalePoint<string>`, so N points are N evenly spaced positions whatever the
-   values behind the keys — there is no linear or time x scale. Correct and invisible for a domain
-   that is already a regular grid (five-minute buckets ARE evenly spaced); wrong for an event-shaped
-   series (speed-test runs, deploys, sessions). Two silent consequences: on a page sharing one
-   cursor, event points draw at equal spacing, so the crosshair marks the right point at a different
-   screen x than a regularly-sampled sibling — the correlation stays legible in the numbers and not
-   in the geometry; and because the domain value must be unique, two events at the same instant
-   collapse onto one position and one stops being drawn. `getX` returning a date string reads like a
-   time axis and is not one. Tracked as issue #52; a chart whose x is a measured quantity currently
-   needs a `basalt/hand-rolled-plot` file declaration.
-
-6. **The cursor is shared by default.** No provider needed — `useChartCursor` reads a module-level
-   external store (`useSyncExternalStore`), so every `CartesianChart`/`ChartFrame`-composed chart on
-   the page shares one cursor out of the box. `ChartCursorScope` **isolates** a subtree onto a
-   private store instead: it opts a subtree OUT of sharing, never into it. Reach for it only when a
-   group must not follow the rest of the page.
-
-   ```tsx
-   <ChartCursorScope>
-     <ChartCard>…</ChartCard>
-     <ChartCard>…</ChartCard>
-   </ChartCursorScope>
-   ```
-
-   **Resolution is domain-aware, not string-equal**, which is what makes sharing safe as a default.
-   Exact-string matching would desync any chart that folds or downsamples its own domain: it stops
-   owning most of the keys its siblings broadcast, so the shared crosshair lands on some hovers and
-   not others, with no rule a reader can infer — worse than no shared cursor at all.
-   `useChartCursor` resolves a broadcast key against a chart's own points by, in order: exact
-   match → nearest parsed-numeric/date match within the chart's own step → `null`. A chart that folds its calendar
-   into weekly buckets still tracks a hover from a sibling plotting daily points, with no extra
-   wiring — `resolveKey` no longer exists because there is nothing left for it to patch.
-
-   `CursorResolution = 'nearest' | 'leading'` (exported from `basalt-ui/charts`) picks WHICH own
-   point wins that resolution, reachable as `cursorResolution` on `CartesianChart`/every cartesian
-   kind/`DualPanel` and as `useChartCursor`'s `resolution` option — default `'nearest'`, unchanged.
-   Reach for `'leading'` when `getX` returns a bucket's LEADING EDGE (a weekly series keyed by its
-   Monday, a monthly series keyed by its 1st): under `'nearest'`, a hover landing in the back half
-   of a bucket resolves to the FOLLOWING bucket instead of the one it's actually inside, so the
-   shared crosshair sits one column right of the data being pointed at — reproducibly, for every
-   back-half hover.
-
-7. **Keyboard-operable by construction.** The hover overlay `CartesianChart` renders is focusable;
-   `←`/`→` scrub the shared cursor one point at a time, `Escape` clears it. The tooltip is
-   `aria-live="polite"`. This comes for free from composing `CartesianChart`/`ChartFrame` — nothing
-   to wire per chart. That's exactly why `ChartFrame`'s outer container uses `role="group"` on its
-   `ariaLabel`, **never** `role="img"`: per the ARIA spec every descendant of a `role="img"`
-   element is presentational, which would erase the hover overlay's `role="slider"` from the
-   accessibility tree entirely — the label still announces, but the keyboard-scrubbable control
-   underneath it becomes unreachable, silently, with no error anywhere. jsdom does not implement
-   that pruning, so no `getByRole` test can ever catch this regression; it is a structural rule, not
-   a test-covered one. Do not "simplify" `ChartFrame`'s container role back to `img` — it looks like
-   a no-op refactor and it is not.
-8. **Theme-aware colors** via `VX.*` tokens + `alpha()`. **Never** a raw hex literal in a chart file.
-   **Never** `localStorage.getItem('theme')` — the scheme resolves via CSS vars (see Dark/light
-   below).
-
-**Exemption:** sparklines (`LineSparkline`, `BarSparkline` — tiny inline charts with no
-legend/tooltip) don't have to compose ChartCard/`CartesianChart`'s legend/tooltip — but still use
-`VX.*` tokens.
-
-## Legend interaction
-
-At ≥2 entries, the derived legend is a toggle by default: clicking an entry hides that series from
-the plot, the tooltip, AND the auto y-domain, together — a stacked chart's axis actually shrinks
-when a band is hidden, it doesn't just leave a dead gap. `legend={{ toggle: false }}` opts a chart
-out. A single-entry legend never toggles (hiding the only series a chart draws is never useful).
-This is exactly why marks must draw `ctx.visible` and never `series` (see "Every chart has" #3) —
-`visible` is what actually reflects a hidden key; the raw `series` prop never changes.
-
-## Tooltip config
-
-`CartesianChart`'s `tooltip` prop (`CartesianTooltipConfig<T>`, or `false` to disable the tooltip
-and its crosshair dots entirely):
-
-- `label?: (d: T) => { text; color } | null` — a right-aligned badge in the header (a status label,
-  a zone name).
-- `prependRows?: (d: T, ctx: { visible; hidden }) => ReactNode` — rows rendered BEFORE the derived
-  per-series rows (a total, a context line). `ctx` is the same `visible`/`hidden` the plot itself
-  draws from, so a hand-authored row tracks legend toggling instead of desyncing from it.
-- `extraRows?: (d: T, ctx: { visible; hidden }) => ReactNode` — rows appended after the derived
-  rows. Same `ctx` as `prependRows`.
-- `follow?: boolean` — default `true`, the tooltip tracks the pointer. `follow: false` anchors it to
-  the crosshair at the plot's top edge instead, which reads better across a column of charts sharing
-  one cursor (every tooltip lines up on the same x). Anchoring costs one `getBoundingClientRect` per
-  hovered frame, which is why following is the default.
-- `formatHeader?: (key, d) => string` — overrides the tooltip header's date text (also
-  `TooltipHeader`'s own `format` prop directly, and the identical seam on `DualPanel`'s
-  `formatHeader`, so the two never diverge). Default: today's `fmtTooltipDate` behavior, unchanged.
-  The seam exists because `fmtTooltipDate` regexes `YYYY-MM-DD` out of the domain key and builds a
-  LOCAL `Date` from it — a UTC ISO key then names a different day than `formatX`, the tooltip badge,
-  and every sibling chart, all of which resolve locally; the only prior workaround was carrying a
-  local-offset ISO key. Receives the raw `getX` key alongside the hovered datum.
-
-Per-series, `SeriesStyle.tooltip: false` means "draw the mark and legend it, but never give it a
-tooltip row" — it lives on the series, not on the kind. `ChartSeries.formatValue` is
-`(v: number, d: T) => string` — a row can cite the hovered datum, not just the plotted number (e.g.
-`97.5 kg (92.5 × 3)`). `Bars` has its own per-key version of the opt-out: `BarsBar.tooltip: false` /
-`BarsLine.tooltip: false` draws and legends a bar series without ever listing it as a tooltip row.
-
-A **stacked** chart needs `cursorValue` too: `CartesianChart`'s crosshair dot defaults to
-`series.getValue(point)`, which is correct for an unstacked line but puts a stacked band's dot at
-its own raw value — somewhere inside the fill, not on the edge the reader is tracking. Pass
-`cursorValue={(point, series, visible) => …}` to place it at the cumulative band top instead;
-`StackedArea` is the reference implementation (`kinds/StackedArea.tsx`).
-
-## Pending state (`isPending`)
-
-"Nothing to draw" is three states, not two: **measured-and-empty**, **measured-and-absent** (a
-genuine coverage gap), and **not-asked-yet** (the query hasn't resolved). The `data ?? []` idiom
-collapses the third into the second — an in-flight query renders as a fully-hatched "not measured"
-window, a positive claim the series was watched and carried nothing. Pass `isPending` instead of
-faking an empty array:
-
-```tsx
-import { Bars } from 'basalt-ui/charts'
-;<Bars
-  data={data ?? []}
-  isPending={query.isPending}
-  chartId="load"
-  getX={(d) => d.date}
-  getValue={(d, key) => d[key]}
-  positiveBars={[{ key: 'load', label: 'Load', color: VX.accent }]}
-/>
-```
-
-All seven kinds accept `isPending` and forward it to `ChartFrame` — `ZonedLine`/`Bars`/
-`StackedArea`/`MultiLine` forward it through `CartesianChart`, which forwards it on to `ChartFrame`
-in turn; `DualPanel`/`Heatmap`/`Donut` compose `ChartFrame` directly and forward it there. Every
-path lands on the same `ChartFrame`, so there's one pending renderer, not seven. `ChartFrame` with
-`isPending` renders `ChartPending` over the plot rect in place of `children`, suppresses the legend
-entirely (a legend naming a "not measured" series with nothing to point at is its own small lie),
-and sets `aria-busy="true"` on the outer container.
-
-`ChartPending` reserves the plot's exact footprint and draws **nothing** that could be mistaken for
-a measurement — no axes, no gridlines, no hatching, no marks, no animation (the motion doctrine
-bans idle pulsing) — just a faint, static, centered label (`ChartPendingProps.label`, default
-`'Loading…'`).
-
-`ChartCenter` (also exported from `./charts`) is the centering primitive `ChartPending` is built
-on — it exists only because chart files can't import Mantine's `Center`/`Flex`. Reach for it
-directly in a bespoke chart file the same way; it's deliberately minimal (`width`, `height`,
-`children`, nothing else), not a general layout system.
-
-## Kinds — the recurring shapes
-
-basalt-ui ships these kinds (declarative props, generic over your point type via `getX` and
-per-series `getValue` accessors on `ChartSeries<T>`):
-
-- **`ZonedLine`** — a single-series line with zone bands, thresholds, x-zones, and reference lines.
-  Composes `CartesianChart`.
-- **`Bars`** — 1+ stacked positive/negative bar series, optional line overlays, zones, ref lines,
-  dual-axis config. Composes `CartesianChart`.
-- **`StackedArea`** — opaque stacked bands, auto cumulative-top y-domain. Composes `CartesianChart`.
-- **`MultiLine`** — N series on a shared y-axis (or two, via `y2`): legend-hover dimming, per-series
-  synced dots, dashed companion (MA) lines, per-point markers (PR stars / status dots), zones +
-  refLines, fixed or auto domain (covers z-score/σ via a fixed symmetric domain + zero refLine).
-  Composes `CartesianChart`. `ChartSeries.getMarker` returns `{ color?, r?, fillOpacity?, ring? }`
-  — `ring` defaults `true` (today's punched-out stroke, unchanged), `ring: false` omits the stroke
-  entirely, `fillOpacity` defaults `1`. Existed because a consumer's plain `fillOpacity: 0.7` dots
-  were unreproducible after moving their chart onto the kind — the old shape had no seam for either.
-- **`DualPanel`** — top line-pane + bottom signed-histogram pane sharing one x-scale and one cursor;
-  optional fill-between two top lines, zones, refLines, per-point markers on the top pane
-  (`ChartSeries.getMarker`). Composes `ChartFrame` directly (two panes, not one plot rect). The
-  bottom pane's tooltip row is `formatBar` (separate from `formatBottom`'s tick labels); its domain
-  is configurable via `bottomYDomain`/`bottomMaxAbsFloor`.
-- **`Heatmap`** — category×category intensity grid (`color-mix` alpha), per-cell tooltip, optional
-  gradient legend strip. Composes `ChartFrame` directly; self-measures, no separate responsive
-  wrapper.
-- **`Donut`** — proportional donut with an optional center-content overlay. Composes `ChartFrame`
-  directly (radial, not cartesian).
-- **`BandStrip`** — 1-D categorical bands over a shared x axis, **no y dimension at all**: one rect
-  per slot, `getBand(d) => { state, fill?, absentFraction?, marker? }`. `series` IS the state set —
-  it drives the legend, each band's fill and the one derived tooltip row, so a strip cannot name a
-  state it does not draw. `absentFraction` paints the share of a folded slot nothing measured as a
-  hatch; `marker` carries a fact that must not be readable off the `fill` ramp. `cursorResolution`
-  defaults `'leading'` here (a band IS a bucket), not `'nearest'`. Composes `ChartFrame` directly —
-  `CartesianChart` renders `AxisLeftNumeric` unconditionally, so this shape could never use it.
-  `BandStripSeries.formatValue` is `(d) => string | null` — `null` renders an em dash, an absent
-  READING, which `''` cannot say (`''` is a state whose label is the whole row).
-- **`MirroredBars`** — two BAR panes over one x scale, mirrored around one baseline, each pane in
-  its own domain. `up`/`down` take `{ key, max?, autoMaxFloor?, ticks?, format }`; `upFraction`
-  (default 0.35) is the up pane's share of the band height, which is where the shared baseline sits;
-  `getAbsentFraction` hatches an unmeasured slot and `getBarOpacity` dims one. A sibling of
-  `DualPanel`, not an extension: `DualPanel`'s top pane is a LINE pane and its bottom takes one
-  SIGNED `getBar` over a symmetric domain. Two independent magnitudes are not one signed quantity.
-  Composes `ChartFrame` directly.
-
-Both band kinds fold their domain by width (`fold: { minBandPx?, merge }`), and `foldBands` is
-exported so a consumer can test their merge against the grouping that will actually run.
-`HatchPattern` / `hatchFill` / `hatchSizeFor` ship the absence fill.
-
-**`merge` does not run on a sub-cap dataset.** `foldBands` returns `[...data]` unchanged when
-`data.length <= cap`, which on a wide viewport is the common case — so any bookkeeping the merge
-adds (how many source buckets a slot folded, how many were unmeasured) is absent exactly where you
-are least likely to look for it. Put that bookkeeping on the datum at CONSTRUCTION and have `merge`
-sum it; do not compute it from `group.length` inside the merge. Summing is also the composable
-form, and it keeps "every source bucket accounted for exactly once" true by construction.
-
-**A band state naming no `series` entry throws in dev.** `series` IS the state set, so an
-unresolvable `state` has no legend entry, no colour and no tooltip row — and the old behaviour,
-skipping the band, drew a coverage GAP, which on a measured/not-measured strip is a false claim
-about the data rather than an "unknown". Where the key comes from decides the treatment:
-
-| Key comes off                                                 | Dev                                      | Production                                                             |
-| ------------------------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------- |
-| the DATUM — `BandSpan.state`, `marker.state`                  | throws, naming the key and the valid set | dashed neutral outline band + an `Unknown state` / `<key>` tooltip row |
-| a PROP — `absentState`, `MirroredBars`' `up.key` / `down.key` | throws                                   | throws                                                                 |
-
-A feed that grows a state basalt has never seen must degrade rather than take a dashboard down; a
-typo, which is the same input, still fails loudly wherever it is written. The dashed neutral outline
-is used by no legend entry and no state fill, so it can never be mistaken for data. Pane keys are
-props, never data-driven — an unresolvable `up.key` used to hide the pane AND its axis, which reads
-as "that half measured zero".
-
-`ZonedLine` and `MultiLine` also accept `xZones?: XZoneSpec[]` — the vertical counterpart to a
-kind's horizontal zone bands, for marking a time window rather than a value range. Each
-`{ from?, to?, fill, align? }` bound is a `getX` **domain key** (the label string the kind's
-`scalePoint<string>` runs over), not a date or timestamp. An omitted bound is the plot edge; a key
-absent from the scale's domain skips that band entirely rather than clamping to an edge. `align`
-defaults `'center'` (a present bound resolves to the point's own center, today's behaviour);
-`align: 'edge'` widens by half a step at each present bound instead — a two-key band covers both
-terminal slots in full, and `from === to` renders one step wide instead of being skipped as
-degenerate. An edge-aligned bound is clamped into the plot range at the first/last sample.
-
-How to add a chart:
-
-1. **Fits an existing kind?** Use it. Pass `data`, `chartId`, `getX`, `series` (or
-   `positiveBars`/`getValue` for `Bars`), an `AxisConfig` per axis (`y`/`y2`), and the declarative
-   zones/thresholds/refLines arrays.
-2. **Second instance of a new recurring shape?** Extract a kind and migrate both call sites
-   (Rule of Three: don't extract on the first, don't wait past the third). Bespoke escape hatches
-   (`tooltip.extraRows`, etc.) are fine but must not grow into god-object configs.
-3. **Genuinely unique (e.g. a dual-panel MACD, or a dual-axis line pair no kind's config surface
-   covers)?** Stay bespoke — compose `CartesianChart` (single-plot) or `ChartFrame` (multi-pane/
-   non-cartesian) directly, drawing only marks in the `children` render prop. Keep it in the page's
-   chart file, not in a shared kind. See `apps/playground/src/demo/ChartsPage.tsx`'s
-   `SessionsRevenueChart` (a dual-axis line pair via `CartesianChart` + `y`/`y2`) and
-   `ChannelVolumeChart` (a role-grouped, `maxRows`-capped legend with a threshold-as-legend-entry
-   trick) for two real bespoke compositions.
-
-**Anti-pattern:** a single `<Chart type="..." config={...} />` that switches by kind. Prefer N small
-kinds.
-
-## Axis config (`AxisConfig<T>`)
-
-One object per axis on `CartesianChart` and every kind that composes it — this collapses the
-`yDomain` / `yAutoMaxFloor` / `yAutoMinCeil` / `yAutoPad` / `numTicksY` /
-`formatYTick` prop soup:
-
-```tsx
-y={{
-  domain: 'auto',        // 'auto' (default) | [min, max] | (data, visible) => [min, max]
-  autoMaxFloor: 100,      // when 'auto': raw upper bound is at least this, clamped BEFORE padding
-  autoMinCeil: 0,         // when 'auto': lower bound is at most this (Infinity = pad from raw min)
-  autoPad: 1.1,           // when 'auto': padding multiplier away from the data
-  ticks: 5,
-  format: (v) => `${v}%`,
-  grid: true,             // horizontal grid rules; default on for `y`, off for `y2`
-  nice: false,            // default false — opt in to d3's scale.nice() domain rounding
-}}
-```
-
-**Behavior change (2026-08-19) — the one item in this doc that can move an existing chart's
-rendering:** `autoMaxFloor` now clamps the raw upper bound BEFORE padding, mirroring `autoMinCeil`,
-which has always clamped first and padded second — two different laws used to live in one function.
-The old order padded the raw max, then applied the floor last, so when the floor won it landed
-exactly on the axis top with zero headroom: a target line sitting at precisely the floor value was
-glued to the plot edge. Measured case: dataMax 3.2, pad 1.1, floor 6 → axis top was 6.0, is now
-6.6. A consumer relying on the old ordering will see their axis top move — lower the floor or pin
-`domain` explicitly to opt back out.
-
-`nice` defaults `false` deliberately: flipping the default would move the domain of every
-already-migrated chart, so it's opt-in per axis.
-
-**Passing `y2` is what makes a chart dual-axis** — it draws the right axis and widens the right
-margin by measurement; nothing else flips it on. A series opts into that axis with `axis: 'right'`
-on its `ChartSeries` entry (`SeriesStyle.axis`, default `'left'`).
-
-`domain` as a function is the seam a stacked chart uses: it receives `(data, visible)`, so a
-domain summed from the VISIBLE series shrinks correctly when the legend toggles a band off
-(`StackedArea`'s `yConfig` is the reference — summing `props.series` there instead would leave a
-permanent gap above the stack once a band is hidden).
-
-## Series color
-
-App-specific series colors are _your_ domain data, not framework data. Declare them once:
-
-```ts
-import { defineSeries, groupTokens } from 'basalt-ui/tokens'
-
-const SERIES = defineSeries({
-  load: { light: '#…', dark: '#…' },
-  recovery: { light: '#…', dark: '#…' },
-})
-const tokens = groupTokens('series', SERIES) // → { load: 'var(--vx-series-load)', ... }
-```
-
-Emit the CSS via `buildPaletteCss({ groups: { 'series-': SERIES } })`. A hue keeps its identity but
-shifts shade across schemes — that's why each entry is a `{ light, dark }` pair, not a single value.
-**Adding a new color** means adding a pair to your series map and rebuilding the palette CSS — never
-inline a hex in a chart.
-
-A series that's invisible in the plot (flat at the domain floor, filtered to zero) can still carry
-an explanation: `SeriesStyle.note` (and so `LegendEntry.note`, via `deriveLegend`) renders a short
-muted qualifier after the legend label — e.g. _"Low cloud — 0% all night"_. Keep it to a clause.
-
-`SeriesStyle.strokeOpacity` dims the plotted stroke (e.g. a faint moving-average companion) — the
-legend swatch honors it too, parity with `fillOpacity`. The tooltip-row swatch and the crosshair
-dot deliberately do NOT honor it: a sub-1 opacity on a 12px value-readout chip reads as a rendering
-bug, not as data.
-
-## Dark/light mode
-
-Theme reactivity is **pure CSS**: the `--vx-*` variables are redeclared under the light/dark color
-scheme, so toggling the scheme restyles every chart with no React re-render. Charts read `VX.*` (var
-refs) directly. Don't branch on color scheme in JS; never read `localStorage.getItem('theme')`.
-
-## Area gradients
-
-Use the `AreaGradient` primitive (a vertical `<linearGradient>` of `color-mix` stops over a `--vx-*`
-color) with the global strength knobs (`--vx-area-top` / `--vx-area-bottom`). Default the fill **on**
-for plain metric lines, **off** when the chart already carries zone/threshold fills (avoid double-fill
-clutter). Keep stacked-area bands opaque — fading them leaks lower bands.
-
-## Responsive sizing
-
-There is exactly one responsive path now — `ChartFrame` (composed either directly, or via
-`CartesianChart`, which composes it internally). `Heatmap` self-measures
-the same way every other kind does, instead of taking `width`/`height` from a separate wrapper.
-Every kind and `CartesianChart` itself resolve their size the same three ways, tried in this order:
-
-```tsx
-<Bars height={260} … />                 // fixed height (most common)
-<Bars aspectRatio={16 / 9} … />         // height = round(measured width / ratio)
-<Bars fill … />                          // fills the parent flex/grid cell's measured height
-```
-
-Reach for `useChartSize` directly only when composing `ChartFrame`/`CartesianChart` yourself in a
-bespoke chart and you need the measured `{ width, height }` for something beyond what those
-primitives already do with it — `ChartFrame` already calls it internally for you in the common case.
-`UseChartSizeResult`: `{ ref, width, height }`; attach `ref` to the container you want measured.
-
-## Margin
-
-Margins are **measured**, not hand-picked. `CartesianChart` runs every configured axis's tick
-labels through `autoMargin`/`measureText` (`basalt-ui/charts`) before laying out the plot, so
-`VX.margin` is a **floor**, not the value — a wide tick label (a long right-axis dollar format, a
-rotated x label) widens its own gutter automatically instead of clipping or needing a hand-tuned
-margin. Passing `y2` to get a dual-axis chart no longer needs a manual margin nudge at all:
-
-```tsx
-// now: nothing — passing y2 is what widens the right margin, measured from what's actually painted
-<CartesianChart data={data} chartId="x" getX={…} series={SERIES} y={{…}} y2={{…}} />
-```
-
-The escape hatch is `margin={{ left: n }}` (`Partial<ChartMargin>`) on `CartesianChart` — a per-side
-override applied LAST, after measurement, so it always wins.
-
-**A band plot has one extra law, because a band axis puts its FIRST tick on the plot's left edge.**
-With no left axis to measure, `autoMargin` stops at `VX.margin.left` and half the first x label
-hangs off the canvas — so `BandStrip` floors its left gutter at half the widest x label, mirroring
-what `autoMargin` already does on the right. Both terminal gutters are then capped (14% of width
-left, 12% right): uncapped, half a `DD.MM HH:MM` label is 48px of a 338px chart. `MirroredBars`
-probes real tick labels from both panes, so it takes the plain measured margin and neither the
-floor nor the cap applies.
-
-**The height law is the number you actually have to compute.** A band row is
-`height − legend − margin.top − margin.bottom`: `ChartFrame` reserves the measured legend band out
-of the plot rect first, then the kind takes the margins out of what is left. There is no
-`bandHeight` prop — to get a 44px band, hand the frame `44 + margins + legend`. `margin={{ top: 0 }}`
-reclaims the whole top gutter, which a 1-D strip draws nothing in; the bottom is not reclaimable,
-`autoMargin` floors it at `VX.margin.bottom`. Derive the constants from `VX.margin` rather than
-restating them — a consumer that copies `30` into three chart files has three silent-drift sites the
-moment the density scale is retuned.
-
-`chartMargin(opts?)` (`basalt-ui/tokens`, also re-exported from `basalt-ui/charts`) still exists,
-but only matters for a bespoke chart that composes `ChartFrame` directly (not `CartesianChart`) and
-needs a right-axis-sized margin without running its own measurement pass — `DualPanel` and `Heatmap`
-don't use it today (neither renders a measured dual numeric axis), so treat it as a fallback, not the
-default path. It returns `VX.margin` widened for `{ rightAxis: true }`, or any side overridden
-directly; returns a new object per call, so memoize it at the call site if you do reach for it.
-
-## Rule of thumb
-
-> If the new chart doesn't fit the primitives, add a kind — don't loosen the primitives.
+<!-- basalt:coverage -->
+<!-- GENERATED from src/surfaces.ts — `basalt-ui check-coverage --write`. Do not hand-edit. -->
+<!-- backed by: guard kinds — chart-missing-aria-label, raw-color-fn, raw-hex, raw-visx-axis, unframed-chart · oxlint rules — basalt/chart-in-raw-surface, basalt/chart-legend-literal, basalt/hand-rolled-plot, basalt/visx-boundary, basalt/visx-tooltip -->
+<!-- not guarded: — -->
+<!-- /basalt:coverage -->
+
+# Basalt Charts — the primitive contract
+
+basalt-ui owns the chart doctrine: charts are assembled from low-level visx primitives, so without a
+shared assembly every chart drifts from every other one. **This file is the contract; the API is not
+here** — read the shipped types and JSDoc, and `llms.txt` at the install directory, for props.
+
+## The one mandatory primitive
+
+**Every single-plot cartesian chart composes `CartesianChart`, and composes nothing else from its job
+list by hand.** It owns the measured margins, both y scales and their domains, the x scale and tick
+thinning, the grid, zones, the axes, the page-shared cursor, the crosshair and its per-series dots,
+the hover/keyboard overlay and the derived tooltip. The caller supplies `series` and a `children`
+render prop that draws **only marks**.
+
+Reaching past it for an axis, a tooltip or a margin means the chart has drifted. `basalt/hand-rolled-plot`
+enforces this per NODE: a chart-assembly primitive rendered in a file that does not compose
+`CartesianChart` is a finding, waived one node at a time with `theme-allow hand-rolled-plot — <why>`.
+
+**Five shipped shapes are the declared exceptions**, by shape, not by preference: `DualPanel` (two
+panes), `MirroredBars` (two bar panes on one baseline), `BandStrip` (no y dimension at all), `Donut`
+(radial) and `Heatmap` (a matrix). They compose `ChartFrame` + `useChartCursor` + `autoMargin` +
+`ChartTooltipFloat` directly. The first three carry a `theme-allow-file hand-rolled-plot — <why>`
+declaration; `Donut` and `Heatmap` render no assembly primitive, so nothing fires and there is
+nothing to waive. A genuinely non-single-plot bespoke shape declares itself the same way — file
+scope, spelled, with a reason. The module that DEFINES `CartesianChart` is exempt definitionally: a
+rule saying "compose X" cannot fire inside X.
+
+**A documented limit:** the rule keys on those visx primitives, so a chart drawn with DOM nodes or a
+hand-assembled `<svg>` is structurally invisible to it. Compose the primitive because it is the
+contract, not because lint will catch you.
+
+## `series` is the single source of truth
+
+Legend entries and tooltip rows are **DERIVED** from `series` (`deriveLegend` / `deriveTooltipRows`,
+or just let `ChartFrame`/`CartesianChart` do it), so a chart cannot show a row or a key it does not
+draw. A hand-written array literal passed to `ChartLegend`'s `items` — or a `.map()` over some OTHER
+array, because deriving from AN array is not deriving from THE series — is
+`basalt/chart-legend-literal`.
+
+**Corollary for mark renderers: draw `ctx.visible`, never the `series` prop.** `visible` is `series`
+minus whatever the legend has toggled off, and the legend toggles by default at two or more entries
+— hiding a series drops it from the plot, the tooltip AND the auto y-domain together. Drawing
+`series` repaints the mark the reader just hid.
+
+## Boundaries (three independent rules, no escape hatch)
+
+- **`@visx/*` only inside a `charts/` path segment** (`basalt/visx-boundary`, shipped AND repo-local).
+  Need a raw visx primitive? Import it from `basalt-ui/charts`, which re-exports the curated set, and
+  keep your bespoke chart file under a `charts/` directory.
+- **`@visx/tooltip` is banned everywhere**, charts included (`basalt/visx-tooltip`) — use
+  `ChartTooltipFloat` + `TooltipHeader`/`TooltipRow`/`TooltipBody`. It portals to `document.body`, so
+  it can be authored anywhere including inside an `<svg>`; a plain `<div>` there mounts in the SVG
+  namespace, typechecks, lints, throws nothing, and never paints.
+- **basalt's own `charts/` and `tokens/` import zero `@mantine/*`** (`basalt/token-layer-boundary`,
+  repo-local by design). That is a framework invariant, not an obligation on your app's own
+  `charts/`-named directory: it keeps the token layer upstream of Mantine and lets
+  `basalt-ui/charts` + `basalt-ui/tokens` resolve with no Mantine installed.
+- Because Mantine layout primitives are unreachable inside a chart file, `inline-display` and
+  `raw-html-layout` deliberately do NOT fire there — the finding would be unactionable. Raw `<div>`
+  is fine in a chart file; `VX.*` tokens are still mandatory. Reach for `ChartCenter` to center.
+- **Maps are not charts.** No map library is a `@visx/*` package, basalt ships no map kind, and the
+  boundary says nothing about one — build it wherever the rest of the app's non-chart UI lives, and
+  style its chrome with `--vx-*` so it matches.
+
+## Color, scheme and margins
+
+- **Never a raw hex in a chart file**, and never `localStorage.getItem('theme')`. Theme reactivity is
+  **pure CSS**: the `--vx-*` variables are redeclared per scheme, so toggling restyles every chart
+  with no React re-render. Don't branch on the color scheme in JS.
+- **Series color is consumer domain data** — one guard-exempt file per app, `defineSeries` →
+  `seriesTokens`/`groupTokens` → `buildPaletteCss` (basalt-tokens.md). A hue keeps its identity and
+  shifts shade across schemes, which is why every entry is a `{ light, dark }` pair.
+- **Margins are MEASURED, not hand-picked.** Every configured axis's tick labels run through
+  `autoMargin`/`measureText` before layout, so `VX.margin` is a floor and a wide label widens its own
+  gutter. Passing `y2` is what makes a chart dual-axis — the right margin widens by measurement, with
+  no manual nudge. `margin={{ side: n }}` is the per-side override, applied last.
+- **Derive constants from `VX.margin`** rather than copying a number into three chart files — those
+  are three silent-drift sites the moment the density scale is retuned.
+- **Never fake an empty dataset for a pending query.** "Nothing to draw" is three states, and
+  `data ?? []` collapses "not asked yet" into "measured and absent", which is a positive claim about
+  data nobody fetched. Pass `isPending`; every kind forwards it to one pending renderer that reserves
+  the plot's footprint and draws nothing that could be mistaken for a measurement.
+- **`ChartFrame`'s container is `role="group"`, never `role="img"`.** Every descendant of a
+  `role="img"` element is presentational, which erases the hover overlay's `role="slider"` from the
+  accessibility tree — silently, and jsdom does not implement the pruning, so no `getByRole` test can
+  catch the regression. Do not "simplify" it back.
+
+## Adding a chart
+
+1. **Fits a shipped kind?** Use it. The kinds are declarative — `data`, `chartId`, `getX`, `series`,
+   one `AxisConfig` per axis, zones/thresholds/refLines as plain arrays.
+2. **Second instance of a shape with no kind?** Extract a kind and migrate both call sites (Rule of
+   Three: not on the first, not past the third). **Prove a new kind by porting real call sites** and
+   shipping the "still cannot express" list with it — a demo page is written against the API that
+   already exists.
+3. **Genuinely unique?** Stay bespoke, composing `CartesianChart` (or `ChartFrame`) directly in the
+   page's chart file, not in a shared kinds directory.
+
+Sparklines are the one exemption from the composition contract (no legend, no tooltip, no
+`CartesianChart`) — they still read `VX.*`.
+
+**Anti-pattern:** a single `<Chart type="…" config={…} />` that switches by kind. Prefer N small
+kinds, and if a chart doesn't fit the primitives, **add a kind — don't loosen the primitives.**
+
+## The x axis is categorical, and the API does not say so
+
+`CartesianChart` builds x as a point scale over domain KEYS: N points are N evenly spaced positions
+whatever the values behind them. Correct and invisible for a regular grid; wrong for an event-shaped
+series, where two consequences are silent — equal spacing means a shared crosshair marks the right
+point at a different screen x than a regularly-sampled sibling, and two events at the same instant
+collapse onto one position with one of them dropped. `getX` returning a date string reads like a time
+axis and is not one. A chart whose x is a measured quantity needs a file declaration today.
+
+The cursor is likewise **shared page-wide by default** with no provider, resolved domain-aware
+(nearest parsed date/number within a chart's own step, not string equality) so a chart that folds its
+domain still tracks a sibling's hover. `ChartCursorScope` ISOLATES a subtree — it opts out of
+sharing, never into it.

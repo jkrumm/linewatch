@@ -19,8 +19,8 @@
   <!-- PATH is load-bearing, not cosmetic: launchd starts this agent with no
        shell profile at all, so an unqualified `ping` or `bun` inside
        probe.ts's Bun.spawn calls would fail to resolve. Includes /sbin,
-       where macOS keeps `ping`. Same class of trap as collie's plist and the
-       mosh-server/~/.zshenv gap (see dotfiles CLAUDE.md). -->
+       where macOS keeps `ping`. Same class of trap as collie's plist and
+       ~/.zshenv (see dotfiles docs/remote-dev.md). -->
   <key>EnvironmentVariables</key>
   <dict>
     <key>LINEWATCH_BUN</key><string>__BUN__</string>

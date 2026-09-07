@@ -79,24 +79,20 @@ an invariant of importing the client.
 
 ## The dashboard runs on basalt-ui, and the guards are the contract
 
-`web/` is a **basalt-ui** app (Mantine v9 + visx). The design system is not a
-component library this repo borrows from — it ships an enforcement layer, and for
-most of this project's life that layer was inert: the package was installed as a
-plain dependency, `basalt-ui init` had never run, and there was no `.oxlintrc.json`,
-no lint script, no hook and no CI. The result was predictable and visible — the
-dashboard grew **two card idioms**, seven hand-rolled `<Card withBorder radius="md"
-padding="lg">` sitting beside `StatCard` with a different edge, a different depth
-and a different height. Nothing was wrong with any one of them; nothing could tell
-anyone they disagreed.
+`web/` is a **basalt-ui** app (Mantine v9 + visx). The stack, the token rule, the
+local-bin rule and the rule precedence are stated once, in the managed block of
+[`web/CLAUDE.md`](web/CLAUDE.md) — this section holds only what is specific to this
+repo. The enforcement layer was inert for most of this project's life (no `init`, no
+lint, no hook, no CI) and the dashboard grew **two card idioms** before anything could
+say they disagreed; the guards below exist so that cannot happen silently again.
 
 - **`cd web && bun run lint` is the gate** — `oxlint . && basalt-ui check-theme`.
   It runs pre-commit (root `lefthook.yml`) and in CI (`.github/workflows/check.yml`).
   Both configs live at the **repo root**, not in `web/`: `basalt-ui init` seeds them
   into the package directory, which is a directory neither GitHub nor lefthook reads.
-- **`--vx-*` tokens and `VX.*` refs are the only colour path.** No raw hex, `rgb()`
-  or `hsl()`; opacity via `alpha(token, a)`, never `rgba()`. No shade-pinned Mantine
-  colours (`c="yellow.7"` is one fixed swatch in both schemes, so a step legible on
-  dark is the one that fails contrast on light) — use `VX.status.*` or a bare hue.
+- **No shade-pinned Mantine colours** (`c="yellow.7"` is one fixed swatch in both
+  schemes, so a step legible on dark is the one that fails contrast on light) — use
+  `VX.status.*` or a bare hue.
 - **One card idiom: `<Card py="xs" px="sm">`.** Never `withBorder` — card depth is
   `--vx-shadow-card`, which already bakes a 1px ring into the shadow, so `withBorder`
   draws a second real edge on top of it. Never an explicit `radius` or `padding`; the
@@ -123,18 +119,14 @@ anyone they disagreed.
   pins that per label rather than by count, because the cell list renders twice (a
   `SimpleGrid` below `xl`, a divided `Group` above it).
 - **After a `basalt-ui` upgrade, run `./node_modules/.bin/basalt-ui sync`** — `sync --check`
-  gates the drift in CI and pre-commit, and `basalt-ui doctor` diagnoses the install.
-  **Never `bunx basalt-ui`**: it fetches its own copy from npm and reuses the cached one without
-  re-resolving, so a hook, a CI job or an agent can enforce a version this repo does not have
-  installed. The hook and the workflow both call the local bin for that reason. Since 1.23.0 the
-  CLI also resolves the package from the **repo root** — a root with no `workspaces` field used to
-  scan zero files and report `tokens-only` at the root while `web/` was fully wired — so
-  `./web/node_modules/.bin/basalt-ui doctor` from the git root now answers for `web/`.
-- **The doctrine lives in `web/.claude/rules/basalt-*.md`**, placed by `init` and
-  refreshed by `sync`. They are managed files: don't hand-edit them, and don't
-  restate them here. `web/DESIGN.md` is this app's own thin delta on top (its series
-  dictionary and any deliberate deviation) — it is **not** [`docs/DESIGN.md`](docs/DESIGN.md),
-  which is the collector and data design and has nothing to do with the visual system.
+  gates the drift in CI and pre-commit. The hook and the workflow both call the local bin
+  (never `bunx`, see `web/CLAUDE.md`). Since 1.23.0 the CLI also resolves the package from
+  the **repo root**, so `./web/node_modules/.bin/basalt-ui doctor` from the git root answers
+  for `web/`.
+- **`web/DESIGN.md` is this app's thin delta** on the managed `web/.claude/rules/basalt-*.md`
+  (its series dictionary and any deliberate deviation) — it is **not**
+  [`docs/DESIGN.md`](docs/DESIGN.md), which is the collector and data design and has nothing
+  to do with the visual system.
 - **A guard finding is fixed at the source, not silenced.** `theme-allow` is for a
   genuine documented exception. Since basalt-ui 1.21.0 the scope is explicit:
   `theme-allow <rule-id> — <reason>` waives **that node/line only**;
@@ -173,54 +165,17 @@ anyone they disagreed.
   framework's and the waivers retired rather than being re-justified. **Do not
   hand-compose a plot again**: if a shape does not fit, the answer is a kind
   upstream, not a waiver here.
-- **`ChartTooltipFloat` portals to `document.body`, and is safe anywhere.** Its
-  predecessor `ChartTooltip` was a plain `<div>`: rendered inside `<svg>`, React
-  created it in the SVG namespace, so it mounted, took its props, threw nothing —
-  and was never painted. `latency-band-chart.tsx` carried eight authored tooltip
-  rows nobody had ever seen, and nothing caught it (it typechecks, it lints, the
-  chart is correct in every other respect).
-  **What the fix surfaced is the part worth keeping in mind:** the first time
-  those rows were reviewed against the marks they name, one disagreed — the
-  vantage row painted an `unknown` verdict amber while the rail draws it neutral.
-  A mark that renders and a legend that does not are not independently reviewable.
-  The structural answer is now the framework's: `series` is the single source of
-  truth, the legend and the per-series tooltip rows are DERIVED from it, and marks
-  draw `ctx.visible` — so a swatch cannot name a colour its mark does not have.
-  `basalt/chart-legend-literal` reports (at `warn`) any `ChartLegend` items array
-  that is not derived from `series` — including, since 1.20.0, a `.map()` over some
-  other array. The two strips' four-STATE legends are `BandStripSeries[]` handed to
-  `BandStrip`, which derives the legend, each band's fill AND the one tooltip row
-  from that same array — so a retuned state cannot leave its swatch behind. The
-  throughput chart's three marks are a `ChartSeries[]` doing the same job on
-  `MirroredBars`. `speed-chart.tsx`'s reference legend —
-  the one legend on this page that `ChartFrame` cannot own, because `MultiLine`
-  draws `refLines` but names none of them — goes through the shipped
-  `deriveLegend(refSeries)` over the same array the rules are drawn from. Delete
-  that block the day `refLines` takes a `label`.
-- **Every chart on the cursor shows a tooltip, and exactly one of them announces
-  it.** For three releases only the pointer's own chart did: this directory drew a
-  value chip on every synced sibling (`charts/synced-tip.tsx`) until the 1.15.0
-  rebuild made tooltips source-only, and hovering a spike then moved a bare line
-  across four charts with numbers on one — the position without the reading.
-  `tooltip.onFollow` (1.18.0) is the shipped answer and **all six charts take it as
-  a prop now** — the app-side `useFollowerTooltip`/`tooltipAnchor`
-  (`charts/follower-anchor.ts`) that reproduced it for the three hand-composed
-  charts is deleted with them. The `aria-live` half came with it: a kind gives the
-  live region to the cursor SOURCE alone, where four hand-composed charts once fired
-  four live regions on every cursor move.
-  **One half is still ours, and it is pinned by `charts/follower-tooltip.test.ts`:**
-  - **A follower off screen renders nothing** (`charts/use-in-viewport.ts`, which
-    tracks the NODE — a version keyed on a `RefObject` ran its effect once on mount
-    and never observed an element that appears later).
-    `ChartTooltipFloat` still has **no viewport gate of its own**, and it keeps a
-    tooltip inside the window, so an unconditional `onFollow: true` does not quietly
-    draw off screen — it draws *clamped into view*, over a tooltip the reader is
-    looking at. Measured: the Throughput chart at y=1501 in an 1100px viewport put
-    its tooltip at y=997, on top of Speed's at y=1015. Every chart therefore passes
-    `onFollow: inView`, never `true`.
-  Source charts still track the pointer; only the latency band anchors as a source
+- **`ChartTooltipFloat` portals to `document.body`; never its predecessor `ChartTooltip`**
+  (a plain `<div>` that mounts silently unpainted inside `<svg>`). `series` is the single
+  source of truth — legends and tooltip rows are DERIVED from it (`basalt/chart-legend-literal`
+  warns otherwise); `speed-chart.tsx`'s reference legend goes through `deriveLegend(refSeries)`
+  until `refLines` takes a `label`.
+- **Every chart takes `tooltip.onFollow: inView`, never `true`** — `ChartTooltipFloat` has no
+  viewport gate of its own and clamps an off-screen follower over the tooltip the reader is
+  looking at; `charts/use-in-viewport.ts` tracks the NODE, and
+  `charts/follower-tooltip.test.ts` pins both halves. Only the latency band anchors as a source
   (`tooltip.follow: false`), because three charts share its column.
-
+  History and measurements: [`docs/dashboard-charts.md`](docs/dashboard-charts.md).
 ## Conventions
 
 - Bearer auth on the five routes that write to the historical record or to the

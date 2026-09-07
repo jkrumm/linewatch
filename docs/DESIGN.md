@@ -4,7 +4,8 @@ Historical record of one internet connection: is it up, when did it drop, how
 long for, and what throughput does it actually deliver. Runs on the Mac mini,
 the only always-on machine on this line.
 
-STATUS: v1 in progress (2026-07-30)
+STATUS: v1 live — collector, heartbeat and watchdog (shadow mode) run under
+launchd; API/UI run in Docker (see CLAUDE.md Shape table).
 
 ## Why this exists rather than a container off the shelf
 

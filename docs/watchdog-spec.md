@@ -3,9 +3,11 @@
 *Why an automated control path was considered, what the record does and does not
 support, and the conditions under which any of it may be armed.*
 
-STATUS (2026-08-01): the measurement, the alerting, the write path and the
-decision function are built and tested. **Nothing runs the decision yet**, and
-nothing has ever acted on its own. §6 is the remaining work.
+STATUS (2026-08-01, still current 2026-09-07): the measurement, the alerting,
+the write path and the decision function are built and tested, and the runner
+has been ticking in shadow mode since 2026-08-01 (§6). **`LINEWATCH_WATCHDOG_ARMED`
+is still unset in the plist, so nothing has ever acted on its own** — every
+rung is a logged `would_*` note, not a real one.
 
 **All times are UTC, which is how they are stored.** The container sets no `TZ`,
 so SQLite's `localtime` renders UTC too. Local wall clock is CEST = UTC+2.

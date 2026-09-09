@@ -1,0 +1,25 @@
+/*
+ * The page gutter, and the ONE place it is stated.
+ *
+ * It used to be `Container px={{ base: 'sm', sm: 'lg' }}` — Mantine's 13/20 — with
+ * `page-bar.module.css`'s `.bleed` restating the same two numbers as negative margins, in its own
+ * media query, because a sticky full-bleed bar has to cancel exactly the gutter its container
+ * applies. Two copies of one number is how they drift, which that file's comment already warned
+ * about.
+ *
+ * basalt-ui 1.30.0 emits the gutter as tokens (`--vx-space-app-shell-inset{,-mobile}` = 20/8) so a
+ * shell-less consumer can reach the same number `BasaltShell` gives every other app's page, instead
+ * of hand-picking Mantine keys next to it. The desktop step was already 20; the phone step was 13,
+ * which is the number that wave measured as too fat on a 390px viewport.
+ *
+ * The step is at Mantine's `sm` (48em) — the same breakpoint `BasaltShell` steps its own gutter at.
+ */
+.page {
+  padding-inline: var(--vx-space-app-shell-inset-mobile);
+}
+
+@media (min-width: 48em) {
+  .page {
+    padding-inline: var(--vx-space-app-shell-inset);
+  }
+}

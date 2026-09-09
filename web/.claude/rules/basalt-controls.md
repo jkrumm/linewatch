@@ -42,8 +42,7 @@ size tier and one persistence binding, and basalt owns all three. The API is in 
 | C15 | Every touch target inside a home clears the `touchControlHeight` floor below `sm`. The mobile `Filters (n)` sheet draws no row of its own — it renders the same `PanelRow` the aside's panel surface does. |
 | C16 | A new guard lands `warn` with a dated `promote` version, and the build fails once the package version reaches it while the rule is still `warn`.                                                           |
 
-C1's cross-file case, a hand-rolled section heading, C11 outside `BasaltDataTable` and C12 are
-**advisory** — the generated header above says so. A green lint run is not evidence they hold.
+A green lint run is not evidence the advisory laws the generated header above lists hold.
 
 ## The three homes
 
@@ -52,12 +51,10 @@ C1's cross-file case, a hand-rolled section heading, C11 outside `BasaltDataTabl
 | `PageBar`                                                                         | `actions`, `sync`, `filters`, `filtersEnd`, `tabs` | `ctl`        | the page's filters, tabs, actions, refresh |
 | `Section`                                                                         | `actions`, `tabs`                                  | `ctl`        | that section's own controls and its count  |
 | `WidgetHeader` / `ChartCard` / `StatCard` / `BasaltDataTable` / `SettingsSection` | `actions`                                          | `ctl`        | that widget's own controls and its count   |
-| `SettingsRow`                                                                     | `control`                                          | Mantine `md` | ONE form field, bound to a setting         |
-| `FormRow` / `FormGroup` (`basalt-ui/forms`)                                       | children                                           | Mantine `md` | ONE form field or a labelled cluster       |
+| `SettingsRow` · `FormRow` / `FormGroup` (`basalt-ui/forms`)                       | `control` · children                               | Mantine `md` | ONE form field, or a labelled cluster      |
 
 - **Inside `BasaltShell`** both `PageBar` rows are portals (header / the band above the scrollport)
   — where you write `<PageBar>` never moves it. Without a shell both rows render in flow, sticky.
-  The header height is a token, never state.
 - **The form row keeps Mantine's own `md` tier** — a raw `Select` in `SettingsRow.control` is the
   right answer, `size` there is load-bearing. Neither `SettingsRow` nor `FormRow`/`FormGroup` is a
   tiered slot; no filter or size rule applies to them.
@@ -76,10 +73,9 @@ C1's cross-file case, a hand-rolled section heading, C11 outside `BasaltDataTabl
 | `touchControlHeight`  | hit area below `sm`                                        | every home                                          |
 | `controlHeight`       | `size="md"`                                                | forms — unchanged                                   |
 
-Each home wraps its **slot** — never its body — in a hoisted theme provider defaulting every
-Mantine control inside it to `size="ctl"`. A raw `Button` in `PageBar.actions` is already the right
-height with no prop; a `size="xs"` typed there is law C5 (`basalt/control-size-literal`). Mantine's
-own `sm`/`xs` are NOT re-pointed elsewhere. Exception: `ChartCard.actions` is Mantine-free, so it
+A home sizes its **slot**, never its body: a raw `Button` in `PageBar.actions` is already the right
+height with no prop, and a `size="xs"` typed there is law C5 (`basalt/control-size-literal`).
+Mantine's own `sm`/`xs` are NOT re-pointed. Exception: `ChartCard.actions` is Mantine-free, so it
 carries only the tier attribute and its controls size themselves.
 
 ## Binding a control to a store
@@ -103,52 +99,56 @@ The store, its fields and their lanes are basalt-state.md. What this file adds: 
 is a tsc error. `ActionGroup`/`OverflowMenu`/`SyncButton` take typed action DATA, never children.
 
 **The date picker is injected, never imported.** `basalt-ui/controls` resolves with no
-`@mantine/dates` installed; `DateRangePicker` comes from `basalt-ui/controls-dates` through
-`RangeFilter.customPicker`. Never import `@mantine/dates` from a shared module or reach for
-`DateInput`/`DatePickerInput` inside a home slot.
+`@mantine/dates`; `DateRangePicker` comes from `basalt-ui/controls-dates` through
+`RangeFilter.customPicker`. Never import it in a shared module or reach for `DatePickerInput`.
 
 ## `FilterSet` owns the responsive story
 
-Do not build one at the call site. Above `sm`, `FilterSet` measures its own children and folds the
-tail into a `+N` pill. Below `sm`, the first `inline` children stay pills and one `Filters (n)`
-pill opens a sheet where every child renders full-width and answers one `Reset all`. **`n` and
-`Reset all` are DERIVED** from whether each field differs from its fallback — adding a filter is
-one JSX line, no count or reset handler to maintain.
+Do not build one at the call site. Above `sm` it measures its own children and folds the tail into
+a `+N` pill. Below `sm` the first `inline` children stay pills and one `Filters (n)` pill opens a
+sheet where every child is full-width and answers one `Reset all`. **`n` and `Reset all` are
+DERIVED** from whether each field differs from its fallback — a filter is one JSX line, no handler.
 
-| Below `sm`       | What basalt does                                                                                                                   |
-| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `PageBar` row 1  | breadcrumb · the `primary` action as an icon · ONE kebab holding every `more` action                                               |
-| `PageBar` row 2  | line 1: `ViewTabs` full-width (a `Select` past three options) · line 2: one inline pill · `Filters (n)` · the aside's `Panel` pill |
-| a section header | title · count · one inline action, the rest in a kebab; tabs past three become a `Select`                                          |
-| a widget header  | value + delta wrap under the title; the sparkline drops to bleed; one `⋯` action                                                   |
+| Below `sm`      | What basalt does                                                                                                               |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `PageBar` row 1 | breadcrumb · the `primary` action as an icon · ONE kebab holding every `more` action                                           |
+| `PageBar` row 2 | line 1: `ViewTabs` full-width (a `Select` past three options) · line 2: one inline pill · `Filters (n)` · the aside's own pill |
 
 Every swap is CSS inside the control (one mount), never a JS media query. Two mounts under
 `visibleFrom`/`hiddenFrom` is `basalt/responsive-twin`.
 
 ## The aside
 
-`PageAside` is a shell REGION, not a fourth home — C1 still names three. Its body IS a home: it
-scopes children to the `panel` surface, so the same `SelectFilter` that is a pill in the page bar
-is a ROW in the aside — never two components, the surface is read from where it's mounted.
+`PageAside` is a shell REGION, not a fourth home — C1 still names three, and its body IS one:
+children scope to the `panel` surface, so a `SelectFilter` renders its ROW form there, not a pill.
 
-| In the aside     | Write                                                                             |
+```tsx
+<PageAside title="Composition" persistKey="composition">
+  <PanelRow label="Weight">…</PanelRow>
+</PageAside>
+```
+
+| In a `PageAside` | What it is                                                                        |
 | ---------------- | --------------------------------------------------------------------------------- |
+| `title`          | REQUIRED — the header text AND the region's accessible name; omitted, it THROWS   |
+| `persistKey`     | persists the fold at `basalt:aside:<persistKey>`; omitted the fold is per-mount   |
+| `defaultFolded`  | the fold on first render, honoured only while nothing is persisted                |
+| `classNames`     | the three boxes it paints — `root` / `header` / `body`                            |
 | an inspector row | `PanelRow` — label above, optional `hint`, mono `readout`, `end` slot             |
 | a bound slider   | `SliderControl` — min/max/step come off the handle, never props                   |
 | a facet list     | `MultiSelectFilter` + `counts` (and `max`, past which the tail folds)             |
 | a group of rows  | `Section` — flush inside the aside, which draws the rhythm itself                 |
 | a choice         | `PanelChoice` — a track only while ≤3 options AND every label fits, else `Select` |
 
-- ONE `PageAside` per page, written AFTER the main content — it portals into the region from `sm`
-  up, its tree position is reading order, not layout.
-- Below `sm` it projects into `PageBar` row 2 as one `Panel` pill; with no row 2 — or shell-less —
-  it renders in flow. One node either way (C9).
+- ONE per page, written AFTER the main content — tree position is reading order, not layout.
+- Below `sm` it projects into `PageBar` row 2 as one pill carrying its own `title`, and that row
+  exists ONLY when the bar has `tabs`, `filters` or filter-end actions — without one, or with no
+  shell, it renders in flow at the BOTTOM of the page. One node either way (C9).
 - A bound control outside all of this is `basalt/bound-control-outside-home` — a slot prop, a
   `FilterSet`, a `PageAside` or a `PanelRow` is a home; nothing else is.
 
 ## Sidebar blocks
 
 A non-destination list, a progress meter or a bespoke node in the sidebar is a `SidebarBlock` —
-declared data, three kinds (`list`/`progress`/`custom`), placed `'nav'`/`'bottom'`. Because it's
-data, basalt owns what a `ReactNode` slot couldn't: a rail dot/ring when collapsed, a persisted
-fold, one More-sheet row per block. A `custom` block is desktop-only, by design.
+declared data, three kinds (`list`/`progress`/`custom`), placed `'nav'`/`'bottom'`; the rail and
+More-sheet projections are basalt's from there (C13). A `custom` block is desktop-only, by design.

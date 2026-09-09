@@ -299,7 +299,12 @@ say they disagreed; the guards below exist so that cannot happen silently again.
   Two consumer-side facts: the full bleed across `__root.tsx`'s Container gutters
   and the hairline under the bar arrive through `PageBar.className`
   (`components/page-bar.module.css`) because they are the only part of the layout
-  basalt cannot know, and the bar renders **three** secondary actions inline before
+  basalt cannot know. **The gutter itself is basalt's, stated once**: since 1.30.0
+  `--vx-space-app-shell-inset{,-mobile}` (20/8) are emitted for exactly this
+  shell-less case, so `routes/root-layout.module.css` sets the Container's
+  `padding-inline` from them and `.bleed` cancels the same var at the same 48em
+  step — never a second copy of the number, and never a Mantine spacing key. And
+  the bar renders **three** secondary actions inline before
   folding the rest into a `More` dropdown — which is why the version string sits on
   `filtersEnd` rather than becoming a fourth.
 - **Axis label vs. scale key are different things.** Bucketed charts key on the

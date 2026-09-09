@@ -55,8 +55,10 @@ export default defineConfig({
 ```
 
 Then `BasaltShell` with a `useNav(NAV)` spread (basalt-state.md), `PageBar` per page
-(basalt-controls.md), and `<first basalt.root>/lib/series.ts` as the app's one guard-exempt series
-source (`/basalt-charts`). There is no Tailwind.
+(basalt-controls.md), `PageAside` on any page that needs a right-hand inspector — a region a ROUTE
+claims rather than a shell prop, so it never appears in `BasaltShell`'s props — and
+`<first basalt.root>/lib/series.ts` as the app's one guard-exempt series source (`/basalt-charts`).
+There is no Tailwind.
 
 ## 3. Verify the wiring took
 

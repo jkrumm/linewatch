@@ -1,6 +1,7 @@
 import { createRootRouteWithContext, Outlet } from '@tanstack/react-router'
 import type { QueryClient } from '@tanstack/react-query'
 import { Box, Container } from '@mantine/core'
+import classes from './root-layout.module.css'
 
 /**
  * No shell.
@@ -20,6 +21,10 @@ import { Box, Container } from '@mantine/core'
  * So the root is a container and an outlet. `size={1600}` rather than a Mantine named size: the
  * charts are time series read across, and the wide ones (the availability strip, the 30-day
  * heatmap) get materially more resolution per hour at 1600 px than at `xl`'s 1320.
+ *
+ * The gutter is `px={0}` plus a class, not a `px` prop: it is stated once in
+ * `root-layout.module.css` on basalt's own page-gutter tokens, which `page-bar.module.css` cancels
+ * by name rather than by a second copy of the numbers.
  */
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   component: RootLayout,
@@ -28,7 +33,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
 function RootLayout() {
   return (
     <Box mih="100dvh">
-      <Container size={1600} px={{ base: 'sm', sm: 'lg' }} pb="xl">
+      <Container size={1600} px={0} className={classes.page} pb="xl">
         <Outlet />
       </Container>
     </Box>

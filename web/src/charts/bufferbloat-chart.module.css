@@ -1,0 +1,23 @@
+/*
+ * The collapse floor for the bufferbloat chart's wrapper, stepped at the same place its
+ * `ResponsiveChartHeight` steps. The component explains why the floor exists and why it cannot stay
+ * at one number; this file only performs it.
+ *
+ * A stylesheet rather than Mantine's `mih={{ base, sm }}`, because `basalt-ui/charts` is
+ * Mantine-free and `pending.render.test.tsx` renders this chart with no `MantineProvider` — a `Box`
+ * here fails the suite. Both heights arrive as custom properties from the component's own
+ * constants, so there is no second copy of either number to drift.
+ *
+ * 48em is Mantine's `sm`, the step `root-layout.module.css` and `page-bar.module.css` already read,
+ * and the viewport equivalent of the 768px of MEASURED container width the chart's own height
+ * resolves at — equivalent because every card on this page is full width.
+ */
+.floor {
+  min-height: var(--linewatch-bufferbloat-floor-phone);
+}
+
+@media (min-width: 48em) {
+  .floor {
+    min-height: var(--linewatch-bufferbloat-floor);
+  }
+}

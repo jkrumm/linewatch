@@ -1,11 +1,43 @@
+import type { CSSProperties } from 'react'
 import { ChartCard, MultiLine, VX } from 'basalt-ui/charts'
 import { useInViewport } from './use-in-viewport'
 import type { SpeedTest } from '../lib/types'
 import { fmtClock, fmtMs } from '../lib/format'
 import { axisTickValues, runAxisKey, runTickFormat } from '../lib/axis'
 import { dashboard } from '../lib/dashboard-store'
+import classes from './bufferbloat-chart.module.css'
 
+/**
+ * The one chart on this page tall enough to be worth shrinking on a phone — and the candidate the
+ * 1.30.0 upgrade named and could not act on, because `ResponsiveChartHeight` was declared on
+ * `ChartFrame` alone and `basalt/hand-rolled-plot` forbids composing that here. basalt-ui 1.30.1
+ * widens the kinds, so the intent finally reaches a compliant call site.
+ *
+ * `base` is 190 and not lower because 190 is this app's floor for the "lines over a window" idiom:
+ * `latency-band-chart` draws at it, and `speed-chart`'s docblock records 190 being one step too far
+ * for a chart whose traces have to sit clear of horizontal references. Three latency lines with no
+ * references have the room 190 leaves.
+ *
+ * The step is `sm` — 768px of MEASURED container width, not viewport. Every card here is full width
+ * inside `__root.tsx`'s 1600 Container, so the two coincide and the short height is reached by real
+ * phones and portrait tablets only.
+ *
+ * Nothing else on the page earns this. The two heatmaps derive their height from their row count,
+ * the two strips are already ~90px, and the latency band and throughput bars are the charts
+ * `speed-chart`'s docblock names as the ones that must NOT lose height — spikes and gaps are their
+ * content. `speed-chart` itself is 220 and already has a shorter variant under `compact`, chosen by
+ * the reader rather than by the viewport.
+ */
 const BUFFERBLOAT_HEIGHT = 260
+const BUFFERBLOAT_HEIGHT_PHONE = 190
+
+/** Both heights as a `ResponsiveChartHeight` (basalt-ui 1.30.1) and as the wrapper's floor, from
+ * one pair of constants. */
+const BUFFERBLOAT_RESPONSIVE_HEIGHT = { base: BUFFERBLOAT_HEIGHT_PHONE, sm: BUFFERBLOAT_HEIGHT }
+const FLOOR_VARS = {
+  '--linewatch-bufferbloat-floor-phone': `${BUFFERBLOAT_HEIGHT_PHONE}px`,
+  '--linewatch-bufferbloat-floor': `${BUFFERBLOAT_HEIGHT}px`,
+} as CSSProperties
 
 /** Idle vs loaded latency, per DESIGN.md's "Speed" view ("loaded-vs-idle latency"). The chart
  * plots the three stored measurements and names none of them a verdict: whether the gap between
@@ -36,8 +68,10 @@ export function BufferbloatChart({
       title={compact ? 'Latency under load' : undefined}
       info="Idle ping is measured at rest; loaded latency is measured while the download or upload saturates the line. One point per run, drawn at equal spacing regardless of the gap between runs — so the shared cursor marks the run nearest the moment you are hovering, not the same horizontal position."
     >
-      {/* See `availability-strip.tsx`'s identical wrapper for why this is a floor, not a height. */}
-      <div ref={viewRef} style={{ minHeight: BUFFERBLOAT_HEIGHT }}>
+      {/* See `availability-strip.tsx`'s identical wrapper for why this is a floor, not a height.
+          Here it has to STEP with the chart: a floor left at 260 would hold a 260px box around a
+          190px plot and make the responsive height inert. */}
+      <div ref={viewRef} className={classes.floor} style={FLOOR_VARS}>
         <MultiLine
           data={points}
           chartId="speed-loaded-latency"
@@ -84,7 +118,7 @@ export function BufferbloatChart({
           // each other. Margins are measured from the labels actually painted as of 1.15.0, so the
           // clipped-gutter hazard that argument used to carry is gone.
           y={{ domain: 'auto', format: fmtMs }}
-          height={BUFFERBLOAT_HEIGHT}
+          height={BUFFERBLOAT_RESPONSIVE_HEIGHT}
         />
       </div>
     </ChartCard>

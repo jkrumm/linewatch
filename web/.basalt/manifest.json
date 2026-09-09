@@ -1,14 +1,14 @@
 {
   "version": 1,
   "files": {
-    ".claude/rules/basalt-mantine.md": "c9d5ebce7cb416ab28086e6590bc0076985952f545783e0aa801d4093969b690",
-    ".claude/rules/basalt-charts.md": "5965fbdf23158d2a952489507e99f3c23dad6f1cd1d507d873f392135499af3e",
-    ".claude/rules/basalt-tokens.md": "dd221ad68bae1b136955d18afc4e7e332e994bd23e5bd0bb9d62810ec72a3899",
-    ".claude/rules/basalt-state.md": "a04c9e1c12baa02ab0fa3ed640d8bd022ca2a3741240e7711f21ab6ab8107015",
-    ".claude/skills/basalt-app/SKILL.md": "f6e43ec5effdffa25e6e093ff5a19b4bbc8e42a75a28ea3f0bbc7df75f6cefdb",
+    ".claude/rules/basalt-mantine.md": "7de280dc1dd8ab0fc90d2a27ca076064fa652944c988d0647e3b50767faff3d5",
+    ".claude/rules/basalt-charts.md": "9e08ca8a52866fe938db1d7d4539368dbea41f3f9f7bbd60cf479f7611ea5cc1",
+    ".claude/rules/basalt-tokens.md": "06829cfd92e41658d421344f2fd54f730d1459ea7c75139c6936395b376973a1",
+    ".claude/rules/basalt-state.md": "9289f8e65b55a48e1e1b303747428b12d9f9e644f020108ba689d7dcfda2f8ee",
+    ".claude/skills/basalt-app/SKILL.md": "9797c65dd0a137894f7e29cb64ee42871fd72668e33fda68bcfa5f3badb1aba7",
     ".claude/skills/basalt-design/SKILL.md": "989ce7b4dbb7f94309459428c1b83de47d9aca2233aebbd68adb0b6cbaccfc42",
     ".claude/skills/basalt-charts/SKILL.md": "29c7c8e8844e607c027b40088f3e833975071952f954718a263c12e917e21b9a",
-    "CLAUDE.md": "f14d2d9498459b3c34bf4774ce28f01283b879c863b3bdee256873d03e02a220",
+    "CLAUDE.md": "f2e2714444b6d26b4dae3e18d1398b458be566be873bc644f884ee37edcbd619",
     "DESIGN.md": "5bbf20edb4483682e5ff5564c446e3b8335947917545af708b671957286256b1",
     ".oxfmtrc.json": "45c6ab68a6bc0e5dd6bb8b4106c71fe4af6f3e68309f112c0df382bce57e8cdb",
     "lefthook.yml": "38174437df9d4f0c1af6fc3ff7b0a96e820f9b88758ffd4dba29c5ed738681c0",
@@ -16,10 +16,10 @@
     ".oxlintrc.json": "e7237e982c1d2528ecc4ab5ae7bc6737591a60a66ad28df8ddf5c0ffadeea803",
     "src/query-client.ts": "5efb420731453ee1e0279a4501bf6536b066b595f14886ba3d7329336eae09c1",
     "src/routes/__root.tsx": "439fb91cf26ee51eb56ae6415556970d323dae6049d10415970709b79c0373e0",
-    ".claude/rules/basalt-batteries.md": "89555bd71d0d4be5f52522d55ed8e3ba363ab2ed39a464cd2baf52f42211cce6",
-    ".claude/rules/basalt-controls.md": "e6f31bccf28fda4b7b27c4e5d719adec9178455414748222f29dfe681f307a76"
+    ".claude/rules/basalt-batteries.md": "2303de24358da0463ec123828dd9ec2a3d0863a42ab2d21c95b910ec4e1a5f85",
+    ".claude/rules/basalt-controls.md": "b8e8665f8b795a426a84de50e5df9ccaab0341533ba3abd7865ca567f27a00a4"
   },
-  "basaltVersion": "1.27.0",
+  "basaltVersion": "1.29.2",
   "spacingScale": {
     "xs": 11,
     "sm": 13,

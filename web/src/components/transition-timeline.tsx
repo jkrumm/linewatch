@@ -112,7 +112,7 @@ export function TransitionTimeline({
         icon={<IconEyeOff size={30} />}
         title={empty.title}
         description={empty.description}
-        variant="section"
+        tier="section"
       />
     )
   }

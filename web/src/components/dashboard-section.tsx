@@ -129,6 +129,10 @@ export function DashboardSection<T extends string>({
       {...(meta !== undefined && { summary: meta })}
       {...(views.length > 1 && {
         tabs: (
+          // theme-allow bound-control-outside-home — this IS the `tabs` slot, basalt's own declared
+          // home for ViewTabs. The rule reads slots off JSXAttribute nodes, and under
+          // `exactOptionalPropertyTypes` a conditional prop has to be written as an object spread,
+          // so `tabs` is an ObjectExpression property here and the ancestry walk never sees it.
           <ViewTabs
             field={field}
             options={views.map((candidate) => ({ value: candidate.key, label: candidate.label }))}

@@ -36,6 +36,8 @@ own `.oxlintrc.json` costs.
 ```tsx
 // main.tsx — CSS order is load-bearing: every @mantine/*/styles.layer.css, THEN basalt's
 import '@mantine/core/styles.layer.css'
+import '@mantine/notifications/styles.layer.css' // one per MOUNTED battery: notifications, spotlight…
+import '@mantine/spotlight/styles.layer.css'
 import 'basalt-ui/styles.css'
 import { BasaltProvider, createBasaltTheme } from 'basalt-ui'
 import { BasaltOverlays } from 'basalt-ui/commands'

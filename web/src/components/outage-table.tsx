@@ -44,7 +44,7 @@ export function OutageTable({ outages, isPending }: { outages: Outage[]; isPendi
         icon={<IconCircleCheck size={30} />}
         title="No outages in range"
         description="Nothing crossed the minimum-duration filter for the selected period."
-        variant="section"
+        tier="section"
       />
     )
   }

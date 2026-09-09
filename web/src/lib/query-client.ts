@@ -1,4 +1,4 @@
-import { createBasaltQueryClient } from 'basalt-ui/query'
+import { createBasaltQueryClient } from 'basalt-ui'
 
 export const queryClient = createBasaltQueryClient({
   defaultOptions: {

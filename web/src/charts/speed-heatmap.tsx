@@ -149,7 +149,7 @@ export function SpeedHeatmap({
       title={compact ? 'Throughput by hour' : undefined}
       // Not `` `last ${days} days` `` — the page carries exactly one range control, and restating
       // the selected window's day count here duplicated it whenever the selection was already under
-      // `MAX_DAYS`. What this view still has to self-report (the repo's own CLAUDE.md: this is the
+      // `MAX_DAYS`. What this view still has to self-report (the repo's own AGENTS.md: this is the
       // one block the range does not fully scope) is the structural cap, stated once and
       // unconditionally rather than re-derived from the current selection.
       subtitle={`When the line is slow · never more than the trailing ${MAX_DAYS} days, by hour of your day.`}

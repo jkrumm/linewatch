@@ -83,7 +83,7 @@ The guard no-ops for any path outside `<repo>/data`, so tests (`:memory:` via
 `src/db/test-db.ts`, or a temp path) and `bun run dev` (which points
 `LINEWATCH_DB` at a throwaway `./.dev-data/linewatch.db`) are unaffected. It runs
 *before* the migration — which matters, because migration is an invariant of
-importing the client in this repo and must not be deferred (see CLAUDE.md, "Boot
+importing the client in this repo and must not be deferred (see AGENTS.md, "Boot
 order trap").
 
 The `data/MOVED-TO-DOCKER-VOLUME` marker still exists, written by both `make up`

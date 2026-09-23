@@ -258,12 +258,12 @@ export const DOWNTIME_BAD_FRACTION = 0.005
  * a downtime figure of exactly zero looked at first like the obvious place to spend it — until a
  * second look at where `WindowDowntime` comes from: `windowDowntime` sums `outage` rows, and an
  * `outage` row only ever exists because `services/outage-detector.ts` opened one off an INGESTED
- * probe cycle (see the repo `CLAUDE.md`'s "Outages are materialised on write" note). A collector that
+ * probe cycle (see the repo `AGENTS.md`'s "Outages are materialised on write" note). A collector that
  * ingested nothing for the whole window opens no outage either, and `windowDowntime` returns the
  * identical `{ seconds: 0, openCount: 0 }` a genuinely clean window does. Coalescing that to
  * `'good'` would be this project's founding failure mode wearing a badge instead of a banner — the
  * same reason `GET /api/status`'s own `up` field cannot drive the Uptime Kuma heartbeat (see
- * `linewatch/CLAUDE.md`'s "Alerting is a missed heartbeat" section) is why a defined zero cannot
+ * `linewatch/AGENTS.md`'s "Alerting is a missed heartbeat" section) is why a defined zero cannot
  * drive a green rail on its own.
  *
  * So `'good'` is gated on `coverage` — the share of the window, 0–1, that was actually measured —

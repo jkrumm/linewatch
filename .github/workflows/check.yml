@@ -23,7 +23,7 @@ on:
     branches: [master]
 
 jobs:
-  # macOS, not ubuntu. This is not a preference — CLAUDE.md's first line is "Mac mini only", and
+  # macOS, not ubuntu. This is not a preference — AGENTS.md's first line is "Mac mini only", and
   # the collector shells out to `route -n get default`, `ifconfig -m`, `netstat`, `networksetup`
   # and `ipconfig` with no npm deps in between. `collector/vantage.test.ts` stubs `route` through
   # PATH injection but runs the rest for real, so on a Linux runner those parses return null and

@@ -15,7 +15,7 @@ import { getRouterExecutor, getRouterPoller, pollOnDemand } from '../services/ro
  * The bearer is the same one `POST /api/probes` and `POST /api/interventions`
  * use — these write to the historical record too, and one of them writes to the
  * line itself. `grep -rn hasValidBearer src/` is the source of truth for that
- * list and `CLAUDE.md` follows it, not the other way round.
+ * list and `AGENTS.md` follows it, not the other way round.
  *
  * The second gate is `LINEWATCH_ROUTER_WRITE`, unset by default, which turns the
  * executor into a `NullExecutor` for the whole process. It exists because the

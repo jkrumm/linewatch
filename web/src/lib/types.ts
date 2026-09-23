@@ -412,7 +412,7 @@ export type RouterEthPort = {
 /** `HostSchema` in `src/routes/router.ts` — the router's own view of the collector host: is this
  * address still attached, over which medium, and how fresh is that. No MAC and no device name:
  * no schema table stores either, and this router's default names are MACs with the separators
- * stripped (see CLAUDE.md — this is a public repo). */
+ * stripped (see AGENTS.md — this is a public repo). */
 export type RouterHost = {
   id: number
   ts: number

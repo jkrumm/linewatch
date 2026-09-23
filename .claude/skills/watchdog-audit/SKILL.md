@@ -314,10 +314,10 @@ trains the reader to ignore it.
 
 ```bash
 grep -rn "if (!hasValidBearer" src/ | tee /dev/stderr | wc -l
-grep -n "routes that write to the historical record" CLAUDE.md
+grep -n "routes that write to the historical record" AGENTS.md
 ```
 
-The `grep` is authoritative; CLAUDE.md follows it, never the reverse.
+The `grep` is authoritative; AGENTS.md follows it, never the reverse.
 
 **6f — An append with no bound.** `spoolMaxLines` was declared in `watchdog.ts`
 and read by nothing, so a wrong push URL would have grown

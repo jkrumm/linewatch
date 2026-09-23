@@ -1,6 +1,6 @@
 # Dashboard charts — tooltip, legend, axis, cursor and card history
 
-*Moved verbatim from `CLAUDE.md` (the "dashboard runs on basalt-ui" section) to keep
+*Moved verbatim from `AGENTS.md` (then `CLAUDE.md`; the "dashboard runs on basalt-ui" section) to keep
 that file under its size budget. The one-line rules stay there; this is the why.*
 
 - **`ChartTooltipFloat` portals to `document.body`, and is safe anywhere.** Its

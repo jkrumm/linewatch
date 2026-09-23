@@ -147,7 +147,7 @@ export interface KpiWindow {
  * **The verdict column preserves the rule that green requires evidence, not the absence of an outage
  * row.** The outage state machine only advances when a cycle is *ingested* (`src/routes/probes.ts`),
  * so a dead collector opens no outage row and `ongoingOutages` stays empty forever — reading that as
- * "up" is the container-ICMP failure mode CLAUDE.md forbids, reproduced at the UI layer. So
+ * "up" is the container-ICMP failure mode AGENTS.md forbids, reproduced at the UI layer. So
  * `reporting` (a non-stale newest sample) gates green, a stalled collector still gets its own yellow
  * line, and — because "the line was down when we last heard" and "we stopped hearing" are two facts,
  * not two options — a stalled collector alongside an open outage renders BOTH lines.

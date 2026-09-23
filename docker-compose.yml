@@ -12,7 +12,7 @@ services:
     restart: unless-stopped
     ports:
       # Loopback only. The local Caddy dev-proxy / tailnet door front this
-      # (see dotfiles CLAUDE.md "Two dev-server doors") — publishing 0.0.0.0
+      # (see dotfiles AGENTS.md "Two dev-server doors") — publishing 0.0.0.0
       # here would make the bearer-gated write routes reachable from
       # anywhere on the LAN.
       - '127.0.0.1:7731:7731'

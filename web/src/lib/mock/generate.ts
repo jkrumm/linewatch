@@ -956,7 +956,7 @@ function routerPart<T>(observedAt: number, value: T) {
  * router writes no `role: wan` row while the LAN bridge keeps updating, so a snapshot whose parts
  * all share one age would let the dashboard be built without ever meeting the case the per-part
  * envelope exists for. Every value here is fictional — no real ISP, hostname or address (public
- * repo, see CLAUDE.md).
+ * repo, see AGENTS.md).
  */
 export function generateRouterSnapshot(): RouterSnapshot {
   const lineTs = NOW - 2 * 60_000

@@ -1,7 +1,7 @@
 import { Badge, Card, Group, Skeleton, SimpleGrid, Stack, Text, Title } from '@mantine/core'
 import { StatCard } from 'basalt-ui'
 import { Callout } from 'basalt-ui/content'
-import { CONTAINER_CLASSES } from '../lib/container-classes'
+import { CONTAINER_CLASSES } from 'basalt-ui/tokens'
 import type { Vantage } from '../lib/types'
 import { homeLineChip } from '../lib/vantage'
 import { fmtDateTime, fmtRelative } from '../lib/format'

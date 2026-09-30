@@ -1,7 +1,7 @@
 {
   "version": 1,
   "files": {
-    ".claude/rules/basalt-mantine.md": "8104a9016a74c985a1cd84dc66bd63dca61adc53e329a1fafb3d3c8e08e34a84",
+    ".claude/rules/basalt-mantine.md": "308cd548224f59274e40d288b5434d2468d6ef631e76396952482af57896b8c9",
     ".claude/rules/basalt-charts.md": "9e08ca8a52866fe938db1d7d4539368dbea41f3f9f7bbd60cf479f7611ea5cc1",
     ".claude/rules/basalt-tokens.md": "06829cfd92e41658d421344f2fd54f730d1459ea7c75139c6936395b376973a1",
     ".claude/rules/basalt-state.md": "9289f8e65b55a48e1e1b303747428b12d9f9e644f020108ba689d7dcfda2f8ee",
@@ -19,7 +19,7 @@
     ".claude/rules/basalt-batteries.md": "2303de24358da0463ec123828dd9ec2a3d0863a42ab2d21c95b910ec4e1a5f85",
     ".claude/rules/basalt-controls.md": "07603bc9253e84019fa80879108885673e092cd788e513e712d8bff4ab4eb4e7"
   },
-  "basaltVersion": "1.32.0",
+  "basaltVersion": "1.32.1",
   "spacingScale": {
     "xs": 11,
     "sm": 13,

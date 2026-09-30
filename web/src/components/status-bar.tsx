@@ -8,7 +8,7 @@ import {
 } from '@tabler/icons-react'
 import type { ReactNode } from 'react'
 import { DeltaBadge, WidgetHeader } from 'basalt-ui'
-import { CONTAINER_CLASSES } from '../lib/container-classes'
+import { CONTAINER_CLASSES } from 'basalt-ui/tokens'
 import { BarSparkline, LineSparkline, VX, useChartSize } from 'basalt-ui/charts'
 import type { LiveReading } from '../lib/live'
 import { liveGateway, liveInternet } from '../lib/live'

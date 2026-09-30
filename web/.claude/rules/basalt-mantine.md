@@ -97,8 +97,8 @@ Depth-tier law (which token for which surface, why static, why the ring is inset
   clears the iOS zoom threshold via an `!important` floor (`sub-16-input-font` flags a smaller one).
 - **Charts measure themselves** — pass `height`/`aspectRatio`/`fill` only; never `useElementSize`
   in a chart file (Mantine is banned there), never raw `@visx/responsive` outside `charts/**`.
-- **A page's own layout keys on its container, not the viewport** — Mantine's `type="container"`
-  grids on `CONTAINER_CLASSES`; `useSizeClass()` is shell chrome only. Recipes: `MIGRATING.md`.
+- **A page's layout keys on its container, not the viewport** (`type="container"` grids, `CONTAINER_CLASSES`).
+  `useSizeClass()`: shell chrome, overlay form, `ViewTabs only: 'sm-down'` partners. Recipes: `MIGRATING.md`.
 
 ## Scroll regions
 

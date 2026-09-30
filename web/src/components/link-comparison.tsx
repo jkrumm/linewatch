@@ -1,7 +1,7 @@
 import { Card, Group, Skeleton, SimpleGrid, Stack, Text, Title } from '@mantine/core'
 import { StatCard } from 'basalt-ui'
 import { Callout } from 'basalt-ui/content'
-import { CONTAINER_CLASSES } from '../lib/container-classes'
+import { CONTAINER_CLASSES } from 'basalt-ui/tokens'
 import type { RouterSnapshot, StatusSpeedTest, Vantage } from '../lib/types'
 import type { RateReading } from '../lib/vantage'
 import { compareCarrierHost } from '../lib/vantage'

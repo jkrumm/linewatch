@@ -25,9 +25,9 @@
   border-bottom: 1px solid var(--vx-surface-hairline);
 }
 
-/* Mantine's `sm` breakpoint (48em) — where `root-layout.module.css` steps to the wide gutter, and
+/* The `medium` size class (52.5em) — where `root-layout.module.css` steps to the wide gutter, and
  * where `BasaltShell` steps its own. */
-@media (min-width: 48em) {
+@media (min-width: 52.5em) {
   .bleed {
     margin-inline: calc(-1 * var(--vx-space-app-shell-inset));
     padding-inline: var(--vx-space-app-shell-inset);

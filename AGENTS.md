@@ -298,11 +298,11 @@ say they disagreed; the guards below exist so that cannot happen silently again.
   its `96px` fallback are all gone; do not reintroduce a measured header height.
   Two consumer-side facts: the full bleed across `__root.tsx`'s Container gutters
   and the hairline under the bar arrive through `PageBar.className`
-  (`components/page-bar.module.css`) because they are the only part of the layout
+  (`shell/page-bar.module.css`) because they are the only part of the layout
   basalt cannot know. **The gutter itself is basalt's, stated once**: since 1.30.0
   `--vx-space-app-shell-inset{,-mobile}` (20/8) are emitted for exactly this
-  shell-less case, so `routes/root-layout.module.css` sets the Container's
-  `padding-inline` from them and `.bleed` cancels the same var at the same 48em
+  shell-less case, so `shell/root-layout.module.css` sets the Container's
+  `padding-inline` from them and `.bleed` cancels the same var at the same 52.5em
   step — never a second copy of the number, and never a Mantine spacing key. And
   the bar renders **three** secondary actions inline before
   folding the rest into a `More` dropdown — which is why the version string sits on

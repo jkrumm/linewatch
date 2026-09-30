@@ -12,13 +12,16 @@
  * of hand-picking Mantine keys next to it. The desktop step was already 20; the phone step was 13,
  * which is the number that wave measured as too fat on a 390px viewport.
  *
- * The step is at Mantine's `sm` (48em) — the same breakpoint `BasaltShell` steps its own gutter at.
+ * The step is at the `medium` size class (52.5em, Mantine's `sm` since basalt-ui 1.31.0) — the same
+ * boundary `BasaltShell` steps its own gutter at. A width `@media` is only legal under `shell/**`,
+ * which is why this file (and `page-bar.module.css`) live here: a shell-less app's gutter and sticky
+ * bar ARE its shell chrome.
  */
 .page {
   padding-inline: var(--vx-space-app-shell-inset-mobile);
 }
 
-@media (min-width: 48em) {
+@media (min-width: 52.5em) {
   .page {
     padding-inline: var(--vx-space-app-shell-inset);
   }

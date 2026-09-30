@@ -1,7 +1,7 @@
 import { createRootRouteWithContext, Outlet } from '@tanstack/react-router'
 import type { QueryClient } from '@tanstack/react-query'
 import { Box, Container } from '@mantine/core'
-import classes from './root-layout.module.css'
+import classes from '../shell/root-layout.module.css'
 
 /**
  * No shell.

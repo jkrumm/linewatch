@@ -1,0 +1,30 @@
+/*
+ * The table ↔ card-list swap `outage-table.tsx` and `transition-timeline.tsx` share, keyed on the
+ * swap's OWN width rather than the viewport (basalt-ui 1.32.0 `basalt/raw-breakpoint`: a page
+ * swapping its own layout is a container decision).
+ *
+ * The step is `CONTAINER_CLASSES.wide` (800px), not `regular` (480): both tables carry a
+ * `minWidth` (520/560) that a 480px container could not hold without a horizontal scroll, and the
+ * card list exists precisely so a narrow reader never scrolls sideways. `BasaltDataTable renderCard`
+ * is the shipped answer, but it swaps at 480 and both tables are hand-composed Mantine `Table`s with
+ * explicit column widths, so the swap is performed here instead.
+ */
+.swap {
+  container: basalt-grid / inline-size;
+}
+
+/* One query, not a max/min pair: container widths are fractional, and a 799.9/800 pair leaves a
+ * sub-pixel band where neither matches and both bodies render. Narrow is the default. */
+.table {
+  display: none;
+}
+
+@container basalt-grid (min-width: 800px) {
+  .table {
+    display: block;
+  }
+
+  .cards {
+    display: none;
+  }
+}

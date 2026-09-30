@@ -87,7 +87,8 @@ describe('StatusBar threshold rail', () => {
  * now a `WidgetHeader tier="widget"` `<h3>`.
  *
  * The assertion is per LABEL rather than a count of `<h3>`s, deliberately: the bar renders its cell
- * list twice (a `SimpleGrid` below `xl`, a divided `Group` above it), so a count pins the responsive
+ * list twice (a `SimpleGrid` below 1368px of its own width, a divided `Group` from there — a
+ * container query in `status-bar.module.css`), so a count pins the responsive
  * layout rather than the heading contract, and would break on a purely visual change.
  */
 describe('StatusBar cell labels are headings', () => {

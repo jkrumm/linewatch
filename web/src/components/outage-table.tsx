@@ -1,6 +1,7 @@
 import { Badge, Box, Divider, Group, Skeleton, Stack, Table, Text } from '@mantine/core'
 import { IconCircleCheck } from '@tabler/icons-react'
 import { EmptyState } from 'basalt-ui'
+import swap from './table-card-swap.module.css'
 import type { Outage, TargetName } from '../lib/types'
 import { TARGET_LABEL } from '../lib/types'
 import { fmtDateTime, fmtDuration } from '../lib/format'
@@ -50,8 +51,8 @@ export function OutageTable({ outages, isPending }: { outages: Outage[]; isPendi
   }
 
   return (
-    <>
-      <Table.ScrollContainer minWidth={520} type="native" visibleFrom="sm">
+    <Box className={swap.swap}>
+      <Table.ScrollContainer minWidth={520} type="native" className={swap.table}>
         <Table verticalSpacing="xs" highlightOnHover>
           <Table.Thead>
             <Table.Tr>
@@ -86,7 +87,7 @@ export function OutageTable({ outages, isPending }: { outages: Outage[]; isPendi
         </Table>
       </Table.ScrollContainer>
 
-      <Stack gap={0} hiddenFrom="sm">
+      <Stack gap={0} className={swap.cards}>
         {outages.map((outage, i) => (
           <Box key={outage.id}>
             {i > 0 && <Divider />}
@@ -109,6 +110,6 @@ export function OutageTable({ outages, isPending }: { outages: Outage[]; isPendi
           </Box>
         ))}
       </Stack>
-    </>
+    </Box>
   )
 }

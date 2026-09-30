@@ -8,7 +8,7 @@ paths:
 
 <!-- basalt:coverage -->
 <!-- GENERATED from src/surfaces.ts — `bun scripts/check-coverage.ts --write`. Do not hand-edit. -->
-<!-- backed by: guard kinds — card-with-border, hidden-inline-style, in-body-page-title, inline-display, inline-spacing, mantine-shade-index, raw-form-control, raw-html-layout, raw-motion-value, raw-spacing, sub-16-input-font · oxlint rules — basalt/card-inset, basalt/deprecated-export, basalt/hand-rolled-shell, basalt/in-body-page-title, basalt/no-import-meta-env, basalt/page-bar-budget, basalt/provider-above-router, basalt/raw-scroll-container, basalt/shadow-basalt-export -->
+<!-- backed by: guard kinds — card-with-border, hidden-inline-style, in-body-page-title, inline-display, inline-spacing, mantine-shade-index, raw-form-control, raw-html-layout, raw-media-query, raw-motion-value, raw-spacing, sub-16-input-font · oxlint rules — basalt/card-inset, basalt/deprecated-export, basalt/hand-rolled-shell, basalt/in-body-page-title, basalt/no-import-meta-env, basalt/page-bar-budget, basalt/provider-above-router, basalt/raw-breakpoint, basalt/raw-scroll-container, basalt/shadow-basalt-export -->
 <!-- not guarded: no second cssVariablesResolver — don't hand-build createTheme or re-add the resolver basalt already installs -->
 <!-- /basalt:coverage -->
 
@@ -48,8 +48,7 @@ single mount (`basalt/hand-rolled-shell` fires on `AppShell.*` parts or a `Burge
 does not render it). The sub-components are exported for a genuinely divergent layout; prefer the
 shell, which already wires collapse persistence, the mobile breakpoint and the breadcrumb.
 
-Every extension point is **declared data, not a `ReactNode` slot**, so basalt owns the mobile
-projection:
+Extension points are **declared data, not `ReactNode` slots**, so basalt owns the mobile projection:
 
 | Prop                | Shape                                | What basalt then owns                                                                  |
 | ------------------- | ------------------------------------ | -------------------------------------------------------------------------------------- |
@@ -98,6 +97,8 @@ Depth-tier law (which token for which surface, why static, why the ring is inset
   clears the iOS zoom threshold via an `!important` floor (`sub-16-input-font` flags a smaller one).
 - **Charts measure themselves** — pass `height`/`aspectRatio`/`fill` only; never `useElementSize`
   in a chart file (Mantine is banned there), never raw `@visx/responsive` outside `charts/**`.
+- **A page's own layout keys on its container, not the viewport** — Mantine's `type="container"`
+  grids on `CONTAINER_CLASSES`; `useSizeClass()` is shell chrome only. Recipes: `MIGRATING.md`.
 
 ## Scroll regions
 
@@ -105,8 +106,7 @@ Depth-tier law (which token for which surface, why static, why the ring is inset
 it draws its own bar inside its root, so the bar floats instead of reflowing the column
 (`AppSidebar`'s nav is the reference: `type="hover"`, `scrollbars="y"`). Raw `overflow: auto` stays
 correct only where a library owns the node (`BasaltStickToBottom`, `BasaltVirtualList`) and for a
-table body (`Table.ScrollContainer type="native"` — a `ScrollArea` viewport would break a sticky
-`<thead>`'s positioning context).
+table body (`Table.ScrollContainer type="native"` — a `ScrollArea` viewport breaks a sticky `<thead>`).
 
 ## Interaction feedback and motion
 

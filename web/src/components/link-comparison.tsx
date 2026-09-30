@@ -1,6 +1,7 @@
 import { Card, Group, Skeleton, SimpleGrid, Stack, Text, Title } from '@mantine/core'
 import { StatCard } from 'basalt-ui'
 import { Callout } from 'basalt-ui/content'
+import { CONTAINER_CLASSES } from '../lib/container-classes'
 import type { RouterSnapshot, StatusSpeedTest, Vantage } from '../lib/types'
 import type { RateReading } from '../lib/vantage'
 import { compareCarrierHost } from '../lib/vantage'
@@ -66,7 +67,7 @@ export function LinkComparison({
           </Callout>
         ) : (
           <>
-            <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
+            <SimpleGrid type="container" cols={{ base: 1, [`${CONTAINER_CLASSES.wide}px`]: 3 }} spacing="md">
               <ReadingCard reading={comparison.carrier} now={now} />
               <ReadingCard reading={comparison.host} now={now} />
               <ReadingCard reading={comparison.throughput} now={now} />

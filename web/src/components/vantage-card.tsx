@@ -1,6 +1,7 @@
 import { Badge, Card, Group, Skeleton, SimpleGrid, Stack, Text, Title } from '@mantine/core'
 import { StatCard } from 'basalt-ui'
 import { Callout } from 'basalt-ui/content'
+import { CONTAINER_CLASSES } from '../lib/container-classes'
 import type { Vantage } from '../lib/types'
 import { homeLineChip } from '../lib/vantage'
 import { fmtDateTime, fmtRelative } from '../lib/format'
@@ -113,9 +114,10 @@ export function VantageCard({ vantage, now }: { vantage: Vantage | null | undefi
             its path class does not say whether this is even the home line, and a negotiated rate
             without the adapter's ceiling cannot tell a cable fault from a 100 Mbit NIC.
 
-            One column below sm, still. At two-up each card holds ~147px of content against a 24px
-            mono hero, and `overflow: hidden` on the card silently cut the longer values. */}
-        <SimpleGrid cols={{ base: 1, sm: 3 }} spacing="md">
+            One column below the grid's own `wide` class (800px), still — never two-up. At two-up
+            each card holds ~147px of content against a 24px mono hero, and `overflow: hidden` on
+            the card silently cut the longer values. */}
+        <SimpleGrid type="container" cols={{ base: 1, [`${CONTAINER_CLASSES.wide}px`]: 3 }} spacing="md">
           <StatCard title="Interface" value={joined([vantage.pathIf, vantage.pathClass])} />
           <StatCard title="Link speed" value={linkSpeedValue(vantage)} />
           <StatCard title="Media" value={joined([vantage.linkMedia, vantage.linkDuplex])} />

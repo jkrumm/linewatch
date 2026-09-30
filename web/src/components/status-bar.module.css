@@ -1,0 +1,30 @@
+/*
+ * The bar's two layouts — a wrapping grid, and one row of six weighted cells — swapped on the bar's
+ * OWN width, not the viewport (basalt-ui 1.32.0 `basalt/raw-breakpoint`).
+ *
+ * The row needs more room than any `CONTAINER_CLASSES` step names: `wide` (800px) is the largest,
+ * and six cells at 800 is ~130px each against a Download badge that already ellipsised at an even
+ * sixth of ~1370px (see `status-bar.tsx`'s cell-weight docblock). 1368px is the bar width the row
+ * used to open at: Mantine's pre-1.31 `xl` (88em = 1408px viewport) minus the two 20px page
+ * gutters. basalt-ui 1.31.0 collapsed `xl` to 75em (1200px), which would have opened the row ~200px
+ * narrower than it was ever measured at — so the number is stated here instead of borrowed from a
+ * key that moved.
+ */
+.bar {
+  container: basalt-grid / inline-size;
+}
+
+/* One query, not a max/min pair — see `table-card-swap.module.css`. The grid is the default. */
+.row {
+  display: none;
+}
+
+@container basalt-grid (min-width: 1368px) {
+  .row {
+    display: flex;
+  }
+
+  .grid {
+    display: none;
+  }
+}

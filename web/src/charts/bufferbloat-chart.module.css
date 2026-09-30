@@ -8,15 +8,19 @@
  * here fails the suite. Both heights arrive as custom properties from the component's own
  * constants, so there is no second copy of either number to drift.
  *
- * 48em is Mantine's `sm`, the step `root-layout.module.css` and `page-bar.module.css` already read,
- * and the viewport equivalent of the 768px of MEASURED container width the chart's own height
- * resolves at — equivalent because every card on this page is full width.
+ * A container query, not a viewport one: the chart's `wide` height step is 800px of the frame's own
+ * measured width (`CONTAINER_CLASSES.wide`), and `.frame` is exactly that width, so the floor steps
+ * with the plot instead of approximating it through the viewport.
  */
+.frame {
+  container: basalt-grid / inline-size;
+}
+
 .floor {
   min-height: var(--linewatch-bufferbloat-floor-phone);
 }
 
-@media (min-width: 48em) {
+@container basalt-grid (min-width: 800px) {
   .floor {
     min-height: var(--linewatch-bufferbloat-floor);
   }

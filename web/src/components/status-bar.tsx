@@ -8,6 +8,7 @@ import {
 } from '@tabler/icons-react'
 import type { ReactNode } from 'react'
 import { DeltaBadge, WidgetHeader } from 'basalt-ui'
+import { CONTAINER_CLASSES } from '../lib/container-classes'
 import { BarSparkline, LineSparkline, VX, useChartSize } from 'basalt-ui/charts'
 import type { LiveReading } from '../lib/live'
 import { liveGateway, liveInternet } from '../lib/live'
@@ -31,6 +32,7 @@ import {
   type ThresholdTint,
 } from '../lib/kpi'
 import { fmtDateTime, fmtDuration, fmtMbps, fmtMinutes, fmtMs, fmtPct, fmtRelative } from '../lib/format'
+import classes from './status-bar.module.css'
 
 /**
  * A sparkline sized to the cell it sits in.
@@ -426,22 +428,34 @@ export function StatusBar({
 
   return (
     <Card py="xs" px="sm">
-      <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="md" verticalSpacing="sm" hiddenFrom="xl">
-        {cells.map((c) => (
-          <Box key={c.key}>{c.node}</Box>
-        ))}
-      </SimpleGrid>
+      {/* Two-up from the bar's own `wide` class, and never three-up in the grid: at `regular`
+          (480) a cell is ~230px and at three-up over 800 ~260px, both under the width at which the
+          Download badge cut its period ("…vs 24h befo"). No container class sits between 800 and
+          the row's 1368. */}
+      <Box className={classes.bar}>
+        <SimpleGrid
+          type="container"
+          cols={{ base: 1, [`${CONTAINER_CLASSES.wide}px`]: 2 }}
+          spacing="md"
+          verticalSpacing="sm"
+          className={classes.grid}
+        >
+          {cells.map((c) => (
+            <Box key={c.key}>{c.node}</Box>
+          ))}
+        </SimpleGrid>
 
-      <Group align="stretch" wrap="nowrap" gap="sm" visibleFrom="xl">
-        {cells.map((c, i) => (
-          <Group key={c.key} align="stretch" wrap="nowrap" gap="sm" flex={c.flex} miw={0}>
-            {i > 0 && <Divider orientation="vertical" />}
-            <Box flex={1} miw={0}>
-              {c.node}
-            </Box>
-          </Group>
-        ))}
-      </Group>
+        <Group align="stretch" wrap="nowrap" gap="sm" className={classes.row}>
+          {cells.map((c, i) => (
+            <Group key={c.key} align="stretch" wrap="nowrap" gap="sm" flex={c.flex} miw={0}>
+              {i > 0 && <Divider orientation="vertical" />}
+              <Box flex={1} miw={0}>
+                {c.node}
+              </Box>
+            </Group>
+          ))}
+        </Group>
+      </Box>
 
       {!plottablePending && allSeries === null && (
         <Text size="xs" c="dimmed" mt="xs">

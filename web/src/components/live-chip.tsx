@@ -1,4 +1,5 @@
 import { Box, Group, Text } from '@mantine/core'
+import { useSizeClass } from 'basalt-ui'
 import { VX } from 'basalt-ui/charts'
 import { isStale } from '../lib/freshness'
 import { fmtMs, fmtRelative } from '../lib/format'
@@ -38,8 +39,10 @@ export interface HeaderLive {
  * whether the line is up behind a tap on the one viewport that can see the least of the page at
  * once — the exact thing the shedding order below exists to prevent.
  *
- * It sheds from the least load-bearing end: the age goes first (below `md`), then the ping (below
- * `sm`), and the coloured dot with its word is what is left at 360px. The verdict is never dropped.
+ * It sheds from the least load-bearing end: the age goes first (below the `expanded` size class),
+ * then the ping (at `compact`), and the coloured dot with its word is what is left at 360px. The
+ * verdict is never dropped. `useSizeClass()`, not `visibleFrom`: this is page-bar chrome, the one
+ * place the viewport is the right axis (basalt-ui 1.32.0 `basalt/raw-breakpoint`).
  *
  * **`reporting` is checked before `openOutages`, not after.** `openOutages > 0` used to win
  * outright, so a collector that died mid-outage kept the chip red "Outage" forever off a frozen
@@ -61,6 +64,7 @@ export function LiveChip({
    * `StatusBar`'s verdict column enforces and the reason `reporting` gates green there. */
   live: HeaderLive | null
 }) {
+  const sizeClass = useSizeClass()
   if (live === null) {
     return (
       <Text size="sm" c="dimmed" ff="monospace">
@@ -101,18 +105,16 @@ export function LiveChip({
       {/* Struck through and dimmed once stale — the same treatment `status-bar.tsx`'s `Reading`
           gives the identical figure a few rows down. Undimmed, a collector dead for three days
           still showed "12.4 ms" with nothing on the figure itself saying it was three days old. */}
-      <Text
-        size="sm"
-        ff="monospace"
-        c="dimmed"
-        td={reporting ? undefined : 'line-through'}
-        visibleFrom="sm"
-      >
-        {fmtMs(live.internetMs)}
-      </Text>
-      <Text size="xs" ff="monospace" c="dimmed" visibleFrom="md">
-        {live.latestTs === null ? 'no data' : fmtRelative(live.latestTs, live.now)}
-      </Text>
+      {sizeClass !== 'compact' && (
+        <Text size="sm" ff="monospace" c="dimmed" td={reporting ? undefined : 'line-through'}>
+          {fmtMs(live.internetMs)}
+        </Text>
+      )}
+      {sizeClass === 'expanded' && (
+        <Text size="xs" ff="monospace" c="dimmed">
+          {live.latestTs === null ? 'no data' : fmtRelative(live.latestTs, live.now)}
+        </Text>
+      )}
     </Group>
   )
 }

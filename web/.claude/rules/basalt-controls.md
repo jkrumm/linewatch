@@ -23,24 +23,24 @@ size tier and one persistence binding, and basalt owns all three. The API is in 
 
 ## The laws
 
-| #   | Law                                                                                                                                                                                                        |
-| --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| C1  | A control lives in exactly ONE of three homes — the page bar, a section/widget header, or a form row — entered only through a slot prop.                                                                   |
-| C2  | A basalt filter or tab has no `value`/`onChange`; it takes `field` and owns both the URL write and the localStorage mirror.                                                                                |
-| C3  | Tab and filter state never lives in `useState` — it derives from a store field on the URL lane or the local lane.                                                                                          |
-| C4  | Every field declares its lanes once, at definition, and resolves URL ⊳ localStorage ⊳ fallback uniformly for every field kind.                                                                             |
-| C5  | The HOME sets the size tier; an element inside a home slot carries no `size`, `w`, `fullWidth`, `visibleFrom` or `hiddenFrom`.                                                                             |
-| C6  | A page has one `PageBar`; its `actions` hold ≤5 entries and exactly one `primary`; a `Section` holds ≤3.                                                                                                   |
-| C7  | A home never scrolls horizontally and never wraps — overflow folds into a `More` menu or a `Filters (n)` sheet, computed by basalt from typed data.                                                        |
-| C8  | Every section, card or table title is a `WidgetHeader`; the page title is the breadcrumb (or `PageBar.title` with no shell). An in-body h1/h2 is an error.                                                 |
-| C9  | A responsive swap belongs to the control — rendering the same control twice under `visibleFrom`/`hiddenFrom` is an error.                                                                                  |
-| C10 | A nav link carrying a store field passes `store.linkSearch` by reference; a `search:` literal in a nav definition, or a literal `useSearch({ from })`, is an error.                                        |
-| C11 | Every table or list inside a section states its count in its header.                                                                                                                                       |
-| C12 | Refresh/sync has ONE shape, `SyncButton`, whose `scope` picks the home (`global` → the shell header, `page` → `PageBar.sync`).                                                                             |
-| C13 | Sidebar blocks are declared data (`SidebarBlock[]`), never `ReactNode` slots, so rail and More-sheet projection stay basalt's.                                                                             |
-| C14 | An empty home renders nothing, so no route pays for a reserved row.                                                                                                                                        |
-| C15 | Every touch target inside a home clears the `touchControlHeight` floor below `sm`. The mobile `Filters (n)` sheet draws no row of its own — it renders the same `PanelRow` the aside's panel surface does. |
-| C16 | A new guard lands `warn` with a dated `promote` version, and the build fails once the package version reaches it while the rule is still `warn`.                                                           |
+| #   | Law                                                                                                                                                                                                       |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| C1  | A control lives in exactly ONE of three homes — the page bar, a section/widget header, or a form row — entered only through a slot prop.                                                                  |
+| C2  | A basalt filter or tab has no `value`/`onChange`; it takes `field` and owns both the URL write and the localStorage mirror.                                                                               |
+| C3  | Tab and filter state never lives in `useState` — it derives from a store field on the URL lane or the local lane.                                                                                         |
+| C4  | Every field declares its lanes once, at definition, and resolves URL ⊳ localStorage ⊳ fallback uniformly for every field kind.                                                                            |
+| C5  | The HOME sets the size tier; an element inside a home slot carries no `size`, `w`, `fullWidth`, `visibleFrom` or `hiddenFrom`.                                                                            |
+| C6  | A page has one `PageBar`; its `actions` hold ≤5 entries and exactly one `primary`; a `Section` holds ≤3.                                                                                                  |
+| C7  | A home never scrolls horizontally and never wraps — overflow folds into a `More` menu or a `Filters (n)` sheet, computed by basalt from typed data.                                                       |
+| C8  | Every section, card or table title is a `WidgetHeader`; the page title is the breadcrumb (or `PageBar.title` with no shell). An in-body h1/h2 is an error.                                                |
+| C9  | A responsive swap belongs to the control — rendering the same control twice under `visibleFrom`/`hiddenFrom` is an error.                                                                                 |
+| C10 | A nav link carrying a store field passes `store.linkSearch` by reference; a `search:` literal in a nav definition, or a literal `useSearch({ from })`, is an error.                                       |
+| C11 | Every table or list inside a section states its count in its header.                                                                                                                                      |
+| C12 | Refresh/sync has ONE shape, `SyncButton`, whose `scope` picks the home (`global` → the shell header, `page` → `PageBar.sync`).                                                                            |
+| C13 | Sidebar blocks are declared data (`SidebarBlock[]`), never `ReactNode` slots, so rail and More-sheet projection stay basalt's.                                                                            |
+| C14 | An empty home renders nothing, so no route pays for a reserved row.                                                                                                                                       |
+| C15 | Every touch target inside a home clears `--vx-hit` (44px under a coarse pointer). The mobile `Filters (n)` sheet draws no row of its own — it renders the same `PanelRow` the aside's panel surface does. |
+| C16 | A new guard lands `warn` with a dated `promote` version, and the build fails once the package version reaches it while the rule is still `warn`.                                                          |
 
 A green lint run is not evidence the advisory laws the generated header above lists hold.
 
@@ -70,7 +70,7 @@ A green lint run is not evidence the advisory laws the generated header above li
 | `controlHeightTag`    | count-tag `Badge`                                          | inline chip, table cell                             |
 | `controlHeightWidget` | `--ai-size-icon` (explicit `size="icon"`, ActionIcon only) | sidebar search actions — no home defaults to it     |
 | `controlHeightCtl`    | `size="ctl"`                                               | `PageBar`, `Section`, table toolbar, sidebar blocks |
-| `touchControlHeight`  | hit area below `sm`                                        | every home                                          |
+| `--vx-hit`            | hit area, 44px under `(pointer: coarse)`                   | every home                                          |
 | `controlHeight`       | `size="md"`                                                | forms — unchanged                                   |
 
 A home sizes its **slot**, never its body: a raw `Button` in `PageBar.actions` is already the right

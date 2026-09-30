@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Badge, Box, Divider, Group, Pagination, Skeleton, Stack, Table, Text, Tooltip } from '@mantine/core'
 import { IconEyeOff } from '@tabler/icons-react'
 import { EmptyState } from 'basalt-ui'
+import swap from './table-card-swap.module.css'
 import type { LinewatchEvent } from '../lib/types'
 import { EVENT_KIND_LABEL, eventSourceLabel, summariseEventDetail, timelineEmptyState } from '../lib/events'
 import { fmtDateTime } from '../lib/format'
@@ -125,8 +126,8 @@ export function TransitionTimeline({
   const shown = events.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE)
 
   return (
-    <>
-      <Table.ScrollContainer minWidth={560} type="native" visibleFrom="sm">
+    <Box className={swap.swap}>
+      <Table.ScrollContainer minWidth={560} type="native" className={swap.table}>
         <Table verticalSpacing="xs" highlightOnHover>
           <Table.Thead>
             <Table.Tr>
@@ -189,7 +190,7 @@ export function TransitionTimeline({
         </Table>
       </Table.ScrollContainer>
 
-      <Stack gap={0} hiddenFrom="sm">
+      <Stack gap={0} className={swap.cards}>
         {shown.map((event, i) => {
           const source = eventSourceLabel(event.source)
           return (
@@ -244,6 +245,6 @@ export function TransitionTimeline({
           />
         )}
       </Group>
-    </>
+    </Box>
   )
 }

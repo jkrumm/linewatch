@@ -1,6 +1,6 @@
 @AGENTS.md
 
-<!-- basalt:begin 1.34.0 -->
+<!-- basalt:begin 1.36.0 -->
 
 ## basalt-ui (managed — do not hand-edit)
 

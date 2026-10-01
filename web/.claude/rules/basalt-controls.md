@@ -51,7 +51,7 @@ A green lint run is not evidence the advisory laws the generated header above li
 | `PageBar`                                                                         | `actions`, `sync`, `filters`, `filtersEnd`, `tabs` | `ctl`        | the page's filters, tabs, actions, refresh |
 | `Section`                                                                         | `actions`, `tabs`                                  | `ctl`        | that section's own controls and its count  |
 | `WidgetHeader` / `ChartCard` / `StatCard` / `BasaltDataTable` / `SettingsSection` | `actions`                                          | `ctl`        | that widget's own controls and its count   |
-| `SettingsRow` · `FormRow` / `FormGroup` (`basalt-ui/forms`)                       | `control` · children                               | Mantine `md` | ONE form field, or a labelled cluster      |
+| `SettingsRow` · `FormRow` / `FormGroup` (`basalt-ui/controls`)                    | `control` · children                               | Mantine `md` | ONE form field, or a labelled cluster      |
 
 - **Inside `BasaltShell`** both `PageBar` rows are portals (header / the band above the scrollport)
   — where you write `<PageBar>` never moves it. Without a shell both rows render in flow, sticky.

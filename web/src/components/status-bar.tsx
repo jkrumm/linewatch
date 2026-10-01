@@ -139,9 +139,10 @@ export interface KpiWindow {
  * card.
  *
  * **Two explicit layouts, not one wrapping row.** Six cells need ~1400px to sit side by side, so the
- * single-row `Group` (with the vertical hairlines that make it read as a bar) is `visibleFrom="xl"`
- * only. Below that the same six cells go into a `SimpleGrid` and the hairlines come off — a divider
- * between grid cells that wrap is a rule to nowhere. A single `wrap="wrap"` row was tried first and
+ * single-row `Group` (with the vertical hairlines that make it read as a bar) only opens once the
+ * bar itself is 1368px wide (`status-bar.module.css`, a container query). Below that the same six
+ * cells go into a `SimpleGrid` and the hairlines come off — a divider between grid cells that wrap
+ * is a rule to nowhere. A single `wrap="wrap"` row was tried first and
  * rejected for the reason it was rejected on the strip: *which* cells share a line moves with the
  * verdict's own width (one line vs two, with vs without an open outage), so cells drift between
  * renders for a reason that has nothing to do with the data.

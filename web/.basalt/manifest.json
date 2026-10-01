@@ -1,7 +1,7 @@
 {
   "version": 1,
   "files": {
-    ".claude/rules/basalt-mantine.md": "308cd548224f59274e40d288b5434d2468d6ef631e76396952482af57896b8c9",
+    ".claude/rules/basalt-mantine.md": "047fc612f50d76097d6cfc3ad8a38973d3d5650f5a4646f6a214f9dedc5acfae",
     ".claude/rules/basalt-charts.md": "9e08ca8a52866fe938db1d7d4539368dbea41f3f9f7bbd60cf479f7611ea5cc1",
     ".claude/rules/basalt-tokens.md": "d00157313739d8f49e9bfd937b3215ee7dcfcee2f57973b31d133f01c77344a2",
     ".claude/rules/basalt-state.md": "44c46219d0f7c2a491b1ffadd80811fc19463f6e08d66ba4d7a97fa6f0f80e9b",
@@ -17,9 +17,9 @@
     "src/query-client.ts": "5efb420731453ee1e0279a4501bf6536b066b595f14886ba3d7329336eae09c1",
     "src/routes/__root.tsx": "439fb91cf26ee51eb56ae6415556970d323dae6049d10415970709b79c0373e0",
     ".claude/rules/basalt-batteries.md": "2303de24358da0463ec123828dd9ec2a3d0863a42ab2d21c95b910ec4e1a5f85",
-    ".claude/rules/basalt-controls.md": "07603bc9253e84019fa80879108885673e092cd788e513e712d8bff4ab4eb4e7"
+    ".claude/rules/basalt-controls.md": "1b0f3adb94c350c5b4aa6abd2d996077c6396e97bb0378c11d5267d2d734b14a"
   },
-  "basaltVersion": "1.34.0",
+  "basaltVersion": "1.36.0",
   "spacingScale": {
     "xs": 11,
     "sm": 13,

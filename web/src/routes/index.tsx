@@ -75,8 +75,9 @@ import {
   THROUGHPUT_COPY,
 } from '../lib/guides'
 
+/** No `Any` row: "no filter" is the field's fallback (0), reached through `clearable`'s `Clear`
+ * (basalt-ui 1.33.0), and the pill reads the filter's label while no preset matches. */
 const MIN_DURATION_OPTIONS = [
-  { label: 'Any', value: 0 },
   { label: '≥1m', value: 60 },
   { label: '≥5m', value: 300 },
   { label: '≥10m', value: 600 },
@@ -321,6 +322,7 @@ function DashboardPage() {
               field={dashboard.field.minDuration}
               label="Min duration"
               options={MIN_DURATION_OPTIONS}
+              clearable
             />
           </FilterSet>
         }

@@ -9,7 +9,7 @@ paths:
 
 <!-- basalt:coverage -->
 <!-- GENERATED from src/surfaces.ts — `bun scripts/check-coverage.ts --write`. Do not hand-edit. -->
-<!-- backed by: guard kinds — css-raw-surface, inline-font-size, off-identity-accent, off-system-surface-var, raw-color-fn, raw-font-family, raw-hex, raw-radius, raw-surface, surface-shadow-override, theme-allow-unscoped · oxlint rules — basalt/no-raw-font-size, basalt/raw-size-literal, basalt/token-layer-boundary -->
+<!-- backed by: guard kinds — css-raw-surface, inline-font-size, off-identity-accent, off-system-surface-var, raw-color-fn, raw-font-family, raw-hex, raw-radius, raw-surface, surface-shadow-override, theme-allow-unscoped, unknown-vx-token · oxlint rules — basalt/no-raw-font-size, basalt/raw-size-literal, basalt/token-layer-boundary -->
 <!-- not guarded: — -->
 <!-- /basalt:coverage -->
 

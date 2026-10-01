@@ -76,8 +76,8 @@ export const analytics = createSearchStore({
   hand-count either.
 - **A reset UNSETS.** `useReset()`/`field.clear()` DELETE the persisted key, never write
   `fallback` (which would pin a thunk fallback as a value nobody chose).
-- **`set(next, { patch })`** merges sibling params the store does NOT own into the same navigate; a
-  key another field of the same store owns throws in dev.
+- **`set(next, { patch })`** merges params the store does NOT own into the same navigate; store-level
+  `resets: ['page']` does it on every URL-lane write (never a `useEffect`: it snaps Back/Forward).
 
 ## Nav links carry the store BY REFERENCE
 

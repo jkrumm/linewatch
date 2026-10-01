@@ -8,7 +8,7 @@ import {
 } from '@tabler/icons-react'
 import type { ReactNode } from 'react'
 import { DeltaBadge, WidgetHeader } from 'basalt-ui'
-import { CONTAINER_CLASSES } from 'basalt-ui/tokens'
+import { CONTAINER_KEYS } from 'basalt-ui/tokens'
 import { BarSparkline, LineSparkline, VX, useChartSize } from 'basalt-ui/charts'
 import type { LiveReading } from '../lib/live'
 import { liveGateway, liveInternet } from '../lib/live'
@@ -435,7 +435,7 @@ export function StatusBar({
       <Box className={classes.bar}>
         <SimpleGrid
           type="container"
-          cols={{ base: 1, [`${CONTAINER_CLASSES.wide}px`]: 2 }}
+          cols={{ base: 1, [CONTAINER_KEYS.wide]: 2 }}
           spacing="md"
           verticalSpacing="sm"
           className={classes.grid}

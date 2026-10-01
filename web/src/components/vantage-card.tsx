@@ -1,7 +1,7 @@
 import { Badge, Card, Group, Skeleton, SimpleGrid, Stack, Text, Title } from '@mantine/core'
 import { StatCard } from 'basalt-ui'
 import { Callout } from 'basalt-ui/content'
-import { CONTAINER_CLASSES } from 'basalt-ui/tokens'
+import { CONTAINER_KEYS } from 'basalt-ui/tokens'
 import type { Vantage } from '../lib/types'
 import { homeLineChip } from '../lib/vantage'
 import { fmtDateTime, fmtRelative } from '../lib/format'
@@ -117,7 +117,7 @@ export function VantageCard({ vantage, now }: { vantage: Vantage | null | undefi
             One column below the grid's own `wide` class (800px), still — never two-up. At two-up
             each card holds ~147px of content against a 24px mono hero, and `overflow: hidden` on
             the card silently cut the longer values. */}
-        <SimpleGrid type="container" cols={{ base: 1, [`${CONTAINER_CLASSES.wide}px`]: 3 }} spacing="md">
+        <SimpleGrid type="container" cols={{ base: 1, [CONTAINER_KEYS.wide]: 3 }} spacing="md">
           <StatCard title="Interface" value={joined([vantage.pathIf, vantage.pathClass])} />
           <StatCard title="Link speed" value={linkSpeedValue(vantage)} />
           <StatCard title="Media" value={joined([vantage.linkMedia, vantage.linkDuplex])} />

@@ -27,9 +27,11 @@ once and yours forever. Claude Code cannot load rules or skills out of `node_mod
 only reason anything is copied at all; everything a MACHINE reads is an `extends` reference into
 `node_modules/basalt-ui/configs/`, so the toolchain auto-updates with the package.
 
-**`init` on an existing app is a lint-debt event, not a no-op** — read
-`.claude/rules/basalt-batteries.md` § "App bootstrapping" for what it turns on and what keeping your
-own `.oxlintrc.json` costs.
+**`init` on an existing app is a lint-debt event, not a no-op** — `.claude/rules/basalt-batteries.md`
+§ "App bootstrapping" says what it turns on. Too much at once? Extend `configs/oxlint-basalt.json`
+(the basalt/\* guards alone, no generic jsx-a11y/unicorn set) first, `configs/oxlint.json` later —
+the full one pairs with the shipped `tsconfig.react-app.json` (ES2023 lib: `unicorn/no-array-sort`
+steers to `toSorted()`).
 
 ## 2. Wire the runtime (the CLI scaffolds files, not your app's composition)
 

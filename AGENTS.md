@@ -66,17 +66,6 @@ cannot open it.** Read it with `make db-counts` / `make db-shell`, never by
 opening the file — [`docs/storage.md`](docs/storage.md) has the rule, the
 corruption that forced it, and the backup/restore targets.
 
-## Boot order trap, already hit once
-
-`src/db/client.ts` runs migrations **at module load**, not from a statement in
-`src/index.ts`. ES imports are evaluated before any statement in the importing
-module's body, so a `runMigrations()` call at the top of `index.ts` still runs
-after every transitively imported module — including
-`services/outage-detector-instance.ts`, which queries at module scope. On a fresh
-database that ordering crashed the process with `no such table: outage`, and the
-test suite did not catch it because tests use a pre-migrated DB. Keep migration
-an invariant of importing the client.
-
 ## The dashboard runs on basalt-ui, and the guards are the contract
 
 `web/` is a **basalt-ui** app (Mantine v9 + visx). The stack, the token rule, the
@@ -337,7 +326,7 @@ say they disagreed; the guards below exist so that cannot happen silently again.
   Implementation history and the measurements behind all seven rules above:
   [`docs/dashboard-charts.md`](docs/dashboard-charts.md).
 
-## Validation
+## Validate
 
 `make check` (typecheck + `bun test`). The ping parser is tested against real
 macOS `ping` output fixtures — including the 100%-loss case, where `ping` **exits
@@ -346,3 +335,47 @@ not an error; never gate on the exit code.
 
 Drive containers via `make`, never raw `docker` (the global docker-makefile rule,
 and a hook enforces it).
+
+## Deploy
+
+The merged `master` ships by **rollhook CD on push** — the API, SQLite store,
+router poller and dashboard in the container (`docs/DESIGN.md`). There is no local
+step in that path, so `make deploy` only reports it. `make up` is the *local*
+equivalent: it builds and starts the working tree on the mini and waits for
+`/health`, which is not the same as shipping the merged branch. The native
+collector, heartbeat and watchdog are launchd agents with their own `make
+*-setup` / `make *-teardown`; a change under `collector/` reaches the mini through
+those, never through rollhook.
+
+## Verify & Monitor
+
+- **Health URL:** `http://127.0.0.1:7731/health` — `GET /health`, the endpoint the
+  container's own healthcheck probes (`docker-compose.yml`); the port is published
+  on loopback only. `make verify` curls it and exits non-zero when the stack is not
+  answering.
+- **Uptime Kuma:** the line monitor is `Home Line - Push`, fed every 60 s by
+  `collector/heartbeat.ts`, 240 s to DOWN. **Silence is the alert** — it runs on the
+  homelab's different WAN, so a severed push is the home-line outage signature. A
+  second push monitor, `Home Line - Watchdog`, carries the watchdog's own liveness.
+  `make heartbeat-status` prints the verdict without pushing.
+- **OTel `service.name`:** none — this repo carries no OpenTelemetry
+  instrumentation and exports no traces, metrics or logs. The Uptime Kuma
+  heartbeat above is the whole monitoring surface; there is no OTel resource to key
+  a dashboard on.
+
+## Gotchas
+
+- **Migrations run at module load, and the import order is load-bearing.**
+  `src/db/client.ts` migrates as a side effect of being imported, not from a
+  statement in `src/index.ts`: ES imports are evaluated before any statement in the
+  importing module's body, so a `runMigrations()` call at the top of `index.ts`
+  still runs *after* `services/outage-detector-instance.ts`, which queries at module
+  scope. On a fresh database that ordering crashed the process with `no such table:
+  outage`, and the test suite missed it because tests use a pre-migrated DB. Keep
+  migration an invariant of importing the client.
+- **`make logs` is a bounded tail now** (`--tail=200`, then exits). It no longer
+  follows; `make logs-follow` does. `make collector-logs` / `heartbeat-logs` /
+  `watchdog-logs` are unchanged and still follow their host-side logs.
+- **Container ICMP is fabricated** — see "The one fact that must not be forgotten"
+  at the top. The collector stays native; a containerised probe reports a flawless
+  line forever.

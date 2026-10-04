@@ -1,4 +1,4 @@
-.PHONY: help env up down rebuild logs collector-setup collector-teardown collector-logs check \
+.PHONY: help env up deploy down rebuild logs logs-follow verify collector-setup collector-teardown collector-logs check \
 	heartbeat-setup heartbeat-teardown heartbeat-status heartbeat-logs router-reconnect router-reboot \
 	watchdog-setup watchdog-teardown watchdog-status watchdog-logs watchdog-arm watchdog-disarm \
 	watchdog-readiness watchdog-state \
@@ -267,8 +267,28 @@ up: env marker ## THE deploy: token + .env + volume, build (API and dashboard), 
 down: ## Stop the stack
 	docker compose down
 
-logs: ## Tail container logs
+logs: ## Show the last 200 lines of container logs, then exit (bounded — no follow)
+	docker compose logs --tail=200
+
+logs-follow: ## Follow container logs until interrupted (blocking)
+	@# What `make logs` used to do. Kept under its own name so the canonical `logs`
+	@# target can be a bounded, scriptable tail that exits.
 	docker compose logs -f
+
+verify: ## Probe the running stack's health endpoint; exits non-zero if it is not live
+	@# The production health URL. Loopback-only (docker-compose.yml publishes
+	@# 127.0.0.1:7731), so this is only meaningful on the mini itself.
+	@curl -fsS http://127.0.0.1:7731/health \
+		&& echo "  ✓ live and healthy — http://127.0.0.1:7731/health" \
+		|| { echo "  ✗ no healthy answer from http://127.0.0.1:7731/health — is the stack up? (make up)"; exit 1; }
+
+deploy: ## Report how the merged default branch ships (rollhook CD on push); no local action
+	@# The API, router poller and dashboard ship by rollhook CD when a change lands
+	@# on master (docs/DESIGN.md). There is no local step in that path, so
+	@# this target is informational — `make up` deploys the *working tree* on the
+	@# mini, which is not the same thing.
+	@echo "  · deployed by CI on push — rollhook CD ships the merged master branch."
+	@echo "    This is not 'make up', which builds and starts the working tree locally."
 
 rebuild: ## Refresh pinned base images (docker compose build --pull), then same as `up`
 	docker compose build --pull

@@ -11,7 +11,7 @@
 # job is never considered. Measured on the Mac mini 2026-08-06:
 #
 #     com.jkrumm.linewatch-collector   Parent Identifier: Jarred Sumner      -> disallowed
-#     com.jkrumm.sideclaw-server       Parent Identifier: Unknown Developer  -> allowed
+#     com.jkrumm.agent-gateway       Parent Identifier: Unknown Developer  -> allowed
 #
 # argv[0] being an unsigned shell script attributes to "Unknown Developer",
 # which BTM allows. That is the entire job of this file.
@@ -20,7 +20,7 @@
 # per-user "disabled override", addressed with `launchctl enable`). That is a
 # DIFFERENT database from BTM: `launchctl enable` cannot clear a BTM disallow, so
 # it never fixed this and the agent kept coming back late via KeepAlive rescue
-# (+2m48s after boot on 2026-08-01, +3m06s/+3m42s observed for sideclaw) rather
+# (+2m48s after boot on 2026-08-01, +3m06s/+3m42s observed for agent-gateway) rather
 # than at RunAtLoad. The enable call is kept as cheap idempotent insurance.
 #
 # LINEWATCH_BUN is set by the plist (rendered from `command -v bun` by the

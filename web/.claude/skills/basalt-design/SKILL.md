@@ -5,7 +5,7 @@ when_to_use: User is building or restyling charts, dashboards or metric UIs in a
 ---
 
 `/basalt-design` is the METHOD. The law is the `basalt-*` rules plus this app's `DESIGN.md`, and the
-managed `CLAUDE.md` block states which wins — read them, do not re-derive them here. This skill is
+managed `AGENTS.md` block states which wins — read them, do not re-derive them here. This skill is
 the sequence to follow and the loop to run.
 
 ## 1. Load the law before touching code

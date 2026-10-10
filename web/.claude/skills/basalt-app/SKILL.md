@@ -17,7 +17,7 @@ bunx basalt-ui init                        # the ONE command that legitimately p
 ```
 
 `init` writes the managed doctrine (`.claude/rules/basalt-*.md`, `.claude/skills/basalt-*/SKILL.md`,
-the `CLAUDE.md` block), the seeds you then own (`DESIGN.md`, `.oxlintrc.json`, `.oxfmtrc.json`,
+the `AGENTS.md` block), the seeds you then own (`DESIGN.md`, `.oxlintrc.json`, `.oxfmtrc.json`,
 `lefthook.yml`, CI, optional scaffolds), and `.basalt/manifest.json` — a sha256 per managed unit so
 `sync` can three-way diff. It also patches `basalt.roots` and a `lint:basalt` script.
 

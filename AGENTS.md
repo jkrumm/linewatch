@@ -70,7 +70,7 @@ corruption that forced it, and the backup/restore targets.
 
 `web/` is a **basalt-ui** app (Mantine v9 + visx). The stack, the token rule, the
 local-bin rule and the rule precedence are stated once, in the managed block of
-[`web/CLAUDE.md`](web/CLAUDE.md) — this section holds only what is specific to this
+[`web/AGENTS.md`](web/AGENTS.md) — this section holds only what is specific to this
 repo. The enforcement layer was inert for most of this project's life (no `init`, no
 lint, no hook, no CI) and the dashboard grew **two card idioms** before anything could
 say they disagreed; the guards below exist so that cannot happen silently again.
@@ -100,7 +100,7 @@ say they disagreed; the guards below exist so that cannot happen silently again.
   [`docs/dashboard-charts.md`](docs/dashboard-charts.md).
 - **After a `basalt-ui` upgrade, run `./node_modules/.bin/basalt-ui sync`** — `sync --check`
   gates the drift in CI and pre-commit. The hook and the workflow both call the local bin
-  (never `bunx`, see `web/CLAUDE.md`). Since 1.23.0 the CLI also resolves the package from
+  (never `bunx`, see `web/AGENTS.md`). Since 1.23.0 the CLI also resolves the package from
   the **repo root**, so `./web/node_modules/.bin/basalt-ui doctor` from the git root answers
   for `web/`.
 - **`web/DESIGN.md` is this app's thin delta** on the managed `web/.claude/rules/basalt-*.md`

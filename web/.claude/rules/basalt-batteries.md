@@ -29,7 +29,7 @@ fails a build if you re-roll one of these seams by hand; follow the doctrine bel
 works but leaves in a stated `removeIn` minor (autofix renames the import, keeps your local
 binding). The replacement and removal minor are always in `MIGRATING.md` § Unreleased the moment
 the deprecation ships — that file, not the warning text, is where you confirm what to migrate to.
-Maintainer mechanics: package `CLAUDE.md` § Deprecation lifecycle.
+Maintainer notes (`MAINTAINING.md` in the repo, not shipped): § Deprecation lifecycle.
 
 ## Query — `createBasaltQueryClient`/`unwrap` (root barrel, C1: `./query` dropped)
 

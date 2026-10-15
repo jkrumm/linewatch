@@ -286,7 +286,6 @@ deploy: ## Report how master ships: `make up` on the mini from an up-to-date mas
 	@# There is no CD for this repo (only check.yml). The container ships by `make up`
 	@# from an up-to-date master checkout on the mini.
 	@echo "  · no CD — ship with: git checkout master && git pull && make up (on the mini)"
-	@echo "    This is not 'make up', which builds and starts the working tree locally."
 
 rebuild: ## Refresh pinned base images (docker compose build --pull), then same as `up`
 	docker compose build --pull

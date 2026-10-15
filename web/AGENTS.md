@@ -9,7 +9,7 @@ Before UI work, read [`DESIGN.md`](DESIGN.md) — this app's delta on the shippe
 `basalt-*` rules in `.claude/rules/`. The basalt-ui managed block (stack, token rule,
 local-bin rule, precedence) sits at the end of this file, written by `basalt-ui sync`.
 
-<!-- basalt:begin 2.9.1 -->
+<!-- basalt:begin 2.10.0 -->
 
 ## basalt-ui (managed — do not hand-edit)
 

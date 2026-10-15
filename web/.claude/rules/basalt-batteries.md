@@ -1,97 +1,42 @@
 ---
 source: basalt-ui
-description: The adapter batteries — query, forms, notifications, commands, data, content, agent — plus app bootstrapping (vite preset, CSS layer order, init/sync). One doctrine each: use the shipped seam, don't re-roll it.
+description: The adapter batteries — query, forms, table, content, agent. Use the shipped seam.
 paths:
   - 'src/**'
   - 'apps/**/src/**'
-  - '**/vite.config.ts'
-  - '**/index.html'
 ---
 
 <!-- basalt:coverage -->
 <!-- GENERATED from src/surfaces.ts — `bun scripts/check-coverage.ts --write`. Do not hand-edit. -->
-<!-- backed by: guard kinds — none · oxlint rules — basalt/agent-no-raw-usechat, basalt/agent-resume-guard, basalt/ai-sdk-major, basalt/forms-field-key, basalt/query-fn-unwrap -->
+<!-- backed by: guard kinds — none · oxlint rules — basalt/agent-no-raw-usechat, basalt/ai-sdk-major, basalt/forms-field-key, basalt/query-fn-unwrap -->
 <!-- not guarded: — -->
 <!-- /basalt:coverage -->
 
-# Basalt Batteries — the adapter surfaces
+# Basalt Batteries
 
-Each battery is a subpath with **one** doctrine: the shipped seam is the seam, re-rolling it is the
-failure this rule prevents. Every peer is OPTIONAL — install before importing. Full API: the
-shipped types, JSDoc and `llms.txt` at the install directory — this file is only what a reader gets
-wrong without being told.
+`.` requires react, Mantine and TanStack Router/Query; install a battery's own peer before importing its subpath.
 
-**Not guarded, honestly**: `forms`, `notifications`, `commands`, `data` and `content` carry zero
-guard kinds or oxlint rules — the `not guarded: —` line above is real, not aspirational. Nothing
-fails a build if you re-roll one of these seams by hand; follow the doctrine below on trust.
+## Query
 
-**Deprecation, as a consumer sees it.** A `basalt/deprecated-export` warn means the export still
-works but leaves in a stated `removeIn` minor (autofix renames the import, keeps your local
-binding). The replacement and removal minor are always in `MIGRATING.md` § Unreleased the moment
-the deprecation ships — that file, not the warning text, is where you confirm what to migrate to.
-Maintainer notes (`MAINTAINING.md` in the repo, not shipped): § Deprecation lifecycle.
+- Wrap every API-client `queryFn` response in `unwrap()` from `basalt-ui` (it throws on the error branch and on `null` data); a mock returning plain data needs none, and the lint sees only an inline `queryFn` calling `fetch(`. [basalt/query-fn-unwrap]
+- The client comes from `createBasaltRouter`; extend it via its `query:` option. [type createBasaltRouter]
+- Register every kind in `defineNotifications` (augment `BasaltRegister` `notifications`) before calling `emit('kind', payload)`; an unregistered kind is a type error. [type emit]
 
-## Query — `createBasaltQueryClient`/`unwrap` (root barrel, C1: `./query` dropped)
+## Forms
 
-`unwrap()` throws on the error branch AND on a `null` data with no error — both are caller bugs.
-Render with `QueryState`, never a hand-written switch (precedence: error-without-data → empty →
-loading → children). One factory per resource via `queryOptions`, never a raw string key.
+- A field is two calls: `key={fieldKey(form, path)}` and `{...inputProps(form, path)}`, from `basalt-ui/forms`. [basalt/forms-field-key] A boolean field (`Checkbox`/`Switch`) adds `{ type: 'checkbox' }`; read a field error as `inputProps(form, path).error`, never `form.errors.x` (TS4111), and hand it to `FormRow error` only for a raw control. [type inputProps]
+- `useBasaltForm` takes a Standard Schema validator, not a `ZodSchema`. [type useBasaltForm]
 
-## Eden Treaty — three silent `any`s (stated once)
+## Table
 
-Reaches both `unwrap` and `./agent`'s transport: an un-chained route, mismatched tsconfig path
-aliases, and a response schema on a streaming route (Eden #231) all silently degrade inference to
-`any`. Check these three first when Eden types regress.
+- Tables are `BasaltDataTable` with columns from `createColumnHelper` (`basalt-ui/table`, TanStack Table v9: `sortFn`, not v8's `sortingFn`); column `meta` is `{ align, numeral }`; a streamed table's fallback is the same table with `isLoading` and `skeletonRows`. [type createColumnHelper] [type BasaltDataTable]
 
-## `./forms` — `@mantine/form`
+## Content
 
-`useBasaltForm` (`mode: 'uncontrolled'`, `StandardSchemaV1` never `ZodSchema`) +
-`useFormSubmit`/`useFieldArray`/`FormErrorSummary`/`useFormDraft`. A field is two calls, never one
-object (`basalt/forms-field-key` guards + autofixes it) — dropping `key` keeps stale text through
-`form.reset()`.
+- Render model or agent output with `contentTrust="untrusted"`; `streaming` is a rendering mode, not a trust claim. [type Markdown]
 
-## `./notifications` — `@mantine/notifications`
+## Agent
 
-`notify({ intent, message })` — intent, never a raw color, drives the Mantine color AND the aria
-`role`. `defineNotifications`/`emit` is the typed registry; only persisted-history calls
-(`notify`/`notifyPromise`) reach the bell/center. `notifyUndo` owns the undo-window contract.
-
-## `./commands` — the command bus
-
-`defineCommands`/`runCommand`, `defineOverlays`/`overlays.open` — call each factory once, at app
-boot. Project via `toSpotlightActions`/`toShortcutList`/`toHotkeyBindings`, never a hand-authored
-second list. `overlays.confirm`/`confirmDelete` need no registry entry.
-
-## `./data/table` + `./data/virtual` — TanStack Table + Virtual (C1: no bare `./data`)
-
-Read the props before hand-rolling anything (facets, pagination, `meta.align`/`meta.numeral`).
-`manualPagination` imposes a contract on sorting/filtering/count — unresolved, it throws in dev.
-`BasaltVirtualList` above a few hundred rows only.
-
-## `./content` — prose, markdown, MDX
-
-`Prose`/`Markdown`/`mdxComponents` share one typography layer. `streaming` is a rendering mode, not
-a trust claim — any surface rendering agent/model output pins `contentTrust="untrusted"`. Every
-optional peer degrades gracefully except the sanitizer, which is always on.
-
-## `./agent` + `./agent-chat` — streaming chat
-
-`./agent` is headless/Mantine-free; `./agent-chat` is the chrome. Every `AgentPart` switch ends
-`default: return assertNever(part)`. `useAgentStream` runs one turn, `useAgentThreadRuns` runs N by
-thread id. Stream resumption reconnects a MOUNT (page reload mid-stream), it never continues a
-click — `retry()`/`regenerate()` always start a fresh stream from the cached input.
-
-**Why the three lint guards exist** (a consumer's build fails on one of these; all honour
-`basalt-agent-allow`, never `theme-allow`): `basalt/agent-resume-guard` — an unguarded
-`resumeStream()`/`useChat({ resume: true })` re-fires under StrictMode with no dedup, use
-`useAgentThreadRuns` instead. `basalt/agent-no-raw-usechat` — bypassing the basalt hooks loses the
-unmount-abort and supersede guards. `basalt/ai-sdk-major` (+ `doctor`'s `ai-major-parity`) — a v5
-stream parsed by a v7 reader throws; nothing else pins the `ai` major across packages.
-
-## App bootstrapping — `./vite`, CSS order, `init`
-
-`basaltViteConfig` is config-only; spread `basaltAppPlugin` into your own `plugins`. CSS layer
-order is load-bearing: every `@mantine/*/styles.layer.css` first, then `basalt-ui/styles.css` — an
-unlayered Mantine import outranks `@layer basalt` regardless of specificity. `init` on an existing
-app is a lint-debt event, not a no-op — triage the new findings, don't blanket-disable a plugin.
-Run `doctor` after and read it to the last line (`SKIPPED` exits non-zero on its own).
+- Chat uses `basalt-ui/agent` (`useAgentThreadRuns`, `ThreadFeed`, `Composer`); never `useChat` or `Chat` from `@ai-sdk/react`. A turn is live only while `runs.get(id)?.status` is `'submitted'` or `'streaming'`; a failed turn keeps its entry as `'error'`. [basalt/agent-no-raw-usechat] [type ThreadRunState]
+- Keep `ai` and `@ai-sdk/*` on one major across packages; an intentional split is waived with `basalt-agent-allow`, never `theme-allow`. [basalt/ai-sdk-major]
+- End every switch over `AgentPart` with `default: return part satisfies never`. [type AgentPart]

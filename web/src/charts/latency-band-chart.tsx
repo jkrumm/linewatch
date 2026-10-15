@@ -61,7 +61,7 @@ const HOME_LINE_LABEL: Record<HomeLineVerdict, string> = {
 }
 
 /** Where the marker ramp steps from amber to red, named once because the legend entries
- * (`loss-partial` / `loss-heavy`) and the gate that decides which dot to draw both read it; `getMarker` reads `lossColor` for the cursor dot. The
+ * (`loss-partial` / `loss-heavy`) and the gate that decides which dot to draw both read it. The
  * *Solid* variants, not `VX.good`/`VX.warn`/`VX.bad`: those are area-fill tokens mixed down to
  * 8–18% opacity, right behind a line and invisible on a 3 px marker. */
 const HEAVY_LOSS_PCT = 20
@@ -246,9 +246,10 @@ export function LatencyBandChart({
         // colours a `cursorValue` dot here: `CartesianChart` draws no always-on markers for
         // consumer `marks`, so the loss dots under the line are `latencyMarks`' own.
         cursorValue: (p) => p.bucket?.medianMs ?? null,
+        // `lossColor` is the one ramp the dots and this cursor dot share.
         getMarker: (p) => {
           const loss = p.bucket?.maxLossPct ?? 0
-          if (loss <= 0 || p.bucket?.medianMs == null) return null
+          if (loss <= 0 || p.bucket === null || p.bucket.medianMs === null) return null
           return { color: lossColor(loss), r: 3, ring: false }
         },
       },

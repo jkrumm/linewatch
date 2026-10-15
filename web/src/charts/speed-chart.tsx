@@ -6,7 +6,7 @@ import { slotExtent } from '../lib/densify'
 import type { ProbeBucketSeconds, SpeedTest } from '../lib/types'
 import { fmtMbps } from '../lib/format'
 import { runTickFormat } from '../lib/axis'
-import { runHeader, runX, toRuns, type Run } from '../lib/speed-runs'
+import { runHeader, runX, toRuns, withLoneRunMarker, type Run } from '../lib/speed-runs'
 import { dashboard } from '../lib/dashboard-store'
 
 /**
@@ -99,6 +99,7 @@ export function SpeedChart({
   isPending?: boolean
 }) {
   const points = useMemo(() => toRuns(tests), [tests])
+  const series = useMemo(() => withLoneRunMarker(SERIES, points.length), [points.length])
   const xDomain = useMemo(() => slotExtent({ from, to, bucketSeconds }), [from, to, bucketSeconds])
   const [compact] = dashboard.field.compact.use()
   const { ref: viewRef, inView } = useInViewport<HTMLDivElement>()
@@ -139,7 +140,7 @@ export function SpeedChart({
           data={points}
           x={runX}
           xDomain={xDomain}
-          series={SERIES}
+          series={series}
           refLines={refs}
           formatX={runTickFormat}
           y={{ domain: 'auto' }}

@@ -76,7 +76,8 @@ export function failureReason(failures: SpeedTest[]): string {
   const raw = failures.find((f) => f.error !== null)?.error
   // First line with a letter in it: the CLI's licence banner opens with a rule of `=` characters, an
   // unbreakable run that squeezes the tooltip's label column to one character a line.
-  const line = raw?.split('\n').find((l) => /[A-Za-z]/.test(l))?.trim()
+  const lines = raw?.split('\n') ?? []
+  const line = (lines.find((l) => /[A-Za-z]/.test(l)) ?? lines.find((l) => l.trim() !== ''))?.trim()
   if (!line) return ''
   return ` — ${line.length > REASON_MAX_CHARS ? `${line.slice(0, REASON_MAX_CHARS - 1)}…` : line}`
 }

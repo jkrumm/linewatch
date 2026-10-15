@@ -200,8 +200,6 @@ describe('downtimeTint', () => {
   })
 })
 
-
-
 describe('windowDownloadMedian', () => {
   test('takes the median of the runs that reported throughput', () => {
     expect(windowDownloadMedian([{ downloadMbps: 100 }, { downloadMbps: 300 }, { downloadMbps: 200 }])).toBe(200)

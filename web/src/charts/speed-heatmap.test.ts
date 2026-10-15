@@ -109,6 +109,10 @@ test('failureReason skips a banner rule and keeps the first line with words', ()
   )
 })
 
+test('failureReason falls back to the first non-blank line when none has a letter', () => {
+  expect(failureReason([run(1, { ok: false, error: '\n429\n' })])).toBe(' — 429')
+})
+
 test('failureReason keeps one short line of a long multi-line error', () => {
   const long = `${'x'.repeat(200)}\nsecond line`
   const reason = failureReason([run(1, { ok: false, error: long })])

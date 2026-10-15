@@ -41,9 +41,14 @@ export default defineConfig(
       // Owns the `<meta name="theme-color">` pair, which used to be two hand-copied hexes in
       // `index.html`. They had already rotted — `#EDEFF2`/`#242424` against the palette's actual
       // `SURFACE.bg` of `#f2f2f5`/`#27272a` — which is exactly the drift the plugin exists to
-      // stop, and what `check-theme`'s `raw-hex` now reports on markup. No manifest and no icon
-      // links: this is a tailnet dashboard with no `public/` tree and nothing to install.
-      ...basaltAppPlugin({ name: 'linewatch', manifest: false, icons: false }),
+      // stop, and what `check-theme`'s `raw-hex` now reports on markup. No manifest (a tailnet
+      // dashboard, nothing to install); the one icon is `public/favicon.svg`, and the plugin owns its
+      // `<link>` — without it the browser asks for `/favicon.ico`, which the server rightly 404s.
+      ...basaltAppPlugin({
+        name: 'linewatch',
+        manifest: false,
+        icons: [{ src: '/favicon.svg', sizes: 'any', type: 'image/svg+xml', rel: 'icon' }],
+      }),
     ],
   }),
 )

@@ -162,35 +162,51 @@ bundle bytes against baseline, screens of the non-chart surfaces.
 4. `foldBands` still absent from 2.8.1 `dist` (Wave 1 friction 1 / ledger row 80, unchanged).
 
 
-## Wave 3 — Non-chart surfaces: shell, stores, controls, content <!-- status: active -->
+## Wave 3 — Non-chart surfaces: shell, stores, controls, content <!-- status: done -->
 
 Depth and verification on a base that already compiles. Surfaces: `BasaltProvider`/router,
 `PageBar`, `Section`/`ViewTabs`, the search store and its three fields, `RangeFilter`/`NumberFilter`/
 `FilterSet`, `StatCard`/`DeltaBadge`/`WidgetHeader`, `Callout`/`GuideLink`, `EmptyState`.
 
-- [ ] Verify what compiled but may differ (MIGRATING §§ 2.0.0–2.7.3, read for each symbol):
+- [x] Verify what compiled but may differ (MIGRATING §§ 2.0.0–2.7.3, read for each symbol):
       `createSearchStore` field semantics in `basalt-ui/state` — URL lane drops a value equal to the
       definition's default; `?range=nonsense` still falls back instead of throwing; the
       `field.range` explicit `custom: false` overload still needed (or now fixed — then delete the
       cast in `routes/index.tsx` and the AGENTS.md paragraph); `persist: false` on `minDuration`;
       `url: false` on `compact`; `createPersistedState` for section views.
-- [ ] Shell-less page chrome: `PageBar` still publishes `--basalt-page-bar-h`, still folds past three
+- [x] Shell-less page chrome: `PageBar` still publishes `--basalt-page-bar-h`, still folds past three
       secondary actions into `More` (now the `actions` tuple's max of five), and
       `shell/page-bar.module.css` / `root-layout.module.css` still hold against the 2.x gutter
       tokens (`--vx-space-app-shell-inset{,-mobile}`). Confirm `createBasaltRouter` works without
       `BasaltShell`/`nav` for a one-page app; if it does not, that is a ledger row, not a local shim.
-- [ ] `StatCard.tone` rails + `VisuallyHidden` sentence, `status-bar.tsx`'s hand-rolled cells
+- [x] `StatCard.tone` rails + `VisuallyHidden` sentence, `status-bar.tsx`'s hand-rolled cells
       (`WidgetHeader tier="widget"`, `DeltaBadge`) and the `CONTAINER_KEYS` / `useSizeClass`
       container tiers against the 2.x surface; `status-bar.render.test.tsx` green except its
       sparkline cells (Wave 6).
-- [ ] Screens of every non-chart region against the baseline, both schemes, both viewports, compact on
+- [x] Screens of every non-chart region against the baseline, both schemes, both viewports, compact on
       and off; `compact.contract.test.ts` untouched and green (a verdict is never gated).
-- [ ] Docs that describe non-chart 1.x facts: `web/DESIGN.md` delta, AGENTS.md § basalt-ui bullets
+- [x] Docs that describe non-chart 1.x facts: `web/DESIGN.md` delta, AGENTS.md § basalt-ui bullets
       that name deleted symbols (`createBasaltQueryClient`, `PageBar` bookkeeping, `Zod is gone`
       stays), in the same commit as the code.
 
 **Evidence:** `w3.md` — screens vs baseline for the non-chart regions, store behaviour table (URL,
 localStorage, fallback), friction rows filed.
+
+**Left behind:**
+- Gates green on the branch: `make check` (577 root), `cd web && bun test` 280 pass / 66 skip / 0 fail, lint 0 errors / 10 warnings, `sync --check`, `doctor`, `check-theme --audit-allows` (1 live pre-existing waiver, 0 new), build. `/review` 0 blocking. Wave 4 inherits a green tree; nothing under `collector/` changed.
+- **Two layout defects fixed** (neither is basalt's): the root `Container` had `px={0}` beating the gutter class (no gutter, bar overshot the viewport by 20 px on 1.41, 16 on 2.x — the "overflow" Wave 1 recorded as a baseline oddity), and 2.x `Section`'s anchor clears 12 px, not the sticky bar, so a verdict link landed the heading under it (now `ANCHOR_STYLE` → `--basalt-page-bar-h`). Both are pinned by tests.
+- Store behaviour table is in `w3.md`: URL always carries `range` and `minDuration`; a URL visit does not write the mirror, a control write does; `?range=nonsense` falls back; `minDuration` is never persisted; `compact` is local-only. The `field.range` cast / `custom: false` paragraph was stale since 1.27.0 and is removed from AGENTS.md (the AGENTS.md chrome paragraph is rewritten for 2.x: shell-less `PageBar`, `actions` tuple, 16/8 gutter, the `Section` anchor).
+- Observed vs 1.41, kept: live chip (primary action) renders at the right end of row 1; `NumberFilter` at its default prints its label `Min duration` where 1.41 printed `Any`; the status-bar grid is two-up at 1280 where 1.41 drew three-up (the code says two-up). Owner may want either reverted; not done.
+- Bundle: entry `index-*.js` 824704 B raw / 252209 gz (baseline 760277 / 231954); initial load on `/` is entry + route chunk only (978250 / 300634); the 32 other chunks are lazy and not requested on `/`. Details in `w3.md`.
+- The throwaway server and browser context are torn down. Process slip, disclosed: three baseline `s-*` PNGs were overwritten and re-captured from the live 1.41 container (same served asset); values moved, layout did not.
+- Wave 4 does not inherit the `status-bar.render` sparkline cells (Wave 6), the 66 `MIGRATION-STUB` skips, or the `react(only-export-components)` warnings on stubbed chart files.
+
+**basalt friction** (to file in basalt-ui `docs/waves/argo-friction.md` as `linewatch W3 …`; basalt-ui not edited):
+1. `Section`'s anchor offset is `--vx-space-sticky-header-clearance` (12 px) only. `PageBar` publishes `--basalt-page-bar-h` for the shell-less case and `Section` does not read it, so the documented shell-less single-page shape (PageBar + Section) lands every `#anchor` under its own sticky bar. Consumers need a per-`Section` `style` override; `Section` could read `var(--basalt-page-bar-h, var(--vx-space-sticky-header-clearance))`.
+2. No public handle on a `Section`'s persisted fold: `createPersistedState` returns a hook, so opening a section from a hash needs a dynamically chosen hook (`react(hooks)` warning in `dashboard-section.tsx`), and `writePersistedValue` is `@internal`. A controlled `open`/`onOpenChange` on `Section`, or an exported opener, would remove it.
+3. `NumberFilter`'s pill prints only a value; at a default that matches no option it prints the `label`, so a "no filter" state cannot be named (`Any` on 1.x). Candidate `emptyLabel`.
+4. The shipped oxlint preset's `react(only-export-components)` warns on every TanStack file route (`Route` + component in one file); the preset could exempt `routes/**` or that rule could take `allowExportNames: ['Route']`.
+5. MIGRATING row for `PageBar` does not say the primary action moved to the end of row 1 (observed), nor that `Section`'s anchor no longer clears a shell-less bar (friction 1).
 
 ## Wave 4 — Charts A: strips and bars (l1, l7, l8) <!-- status: pending -->
 

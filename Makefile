@@ -282,12 +282,10 @@ verify: ## Probe the running stack's health endpoint; exits non-zero if it is no
 		&& echo "  ✓ live and healthy — http://127.0.0.1:7731/health" \
 		|| { echo "  ✗ no healthy answer from http://127.0.0.1:7731/health — is the stack up? (make up)"; exit 1; }
 
-deploy: ## Report how the merged default branch ships (rollhook CD on push); no local action
-	@# The API, router poller and dashboard ship by rollhook CD when a change lands
-	@# on master (docs/DESIGN.md). There is no local step in that path, so
-	@# this target is informational — `make up` deploys the *working tree* on the
-	@# mini, which is not the same thing.
-	@echo "  · deployed by CI on push — rollhook CD ships the merged master branch."
+deploy: ## Report how master ships: `make up` on the mini from an up-to-date master checkout (no CD)
+	@# There is no CD for this repo (only check.yml). The container ships by `make up`
+	@# from an up-to-date master checkout on the mini.
+	@echo "  · no CD — ship with: git checkout master && git pull && make up (on the mini)"
 	@echo "    This is not 'make up', which builds and starts the working tree locally."
 
 rebuild: ## Refresh pinned base images (docker compose build --pull), then same as `up`

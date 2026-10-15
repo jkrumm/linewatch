@@ -338,14 +338,14 @@ and a hook enforces it).
 
 ## Deploy
 
-The merged `master` ships by **rollhook CD on push** — the API, SQLite store,
-router poller and dashboard in the container (`docs/DESIGN.md`). There is no local
-step in that path, so `make deploy` only reports it. `make up` is the *local*
-equivalent: it builds and starts the working tree on the mini and waits for
-`/health`, which is not the same as shipping the merged branch. The native
-collector, heartbeat and watchdog are launchd agents with their own `make
-*-setup` / `make *-teardown`; a change under `collector/` reaches the mini through
-those, never through rollhook.
+There is **no CD**: `.github/workflows/` holds only `check.yml`, and no rollhook webhook ships
+this repo (verified 2026-10-15 — a merged fix stayed undeployed until `make up`). The API, SQLite
+store, router poller and dashboard (`docs/DESIGN.md`) ship by **`make up` on the mini from an
+up-to-date `master` checkout**: it builds and recreates the container, waits for `/health` and
+proves the container is the working tree. So pull `master` first; never `make up` from a feature
+branch or a dirty tree. `make deploy` only prints this. The native collector, heartbeat and
+watchdog are launchd agents with their own `make *-setup` / `make *-teardown`; a change under
+`collector/` reaches the mini through those.
 
 ## Verify & Monitor
 

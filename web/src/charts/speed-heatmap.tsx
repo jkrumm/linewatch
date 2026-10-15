@@ -67,11 +67,16 @@ function mergeHours(a: HourRow | null, b: HourRow | null): HourRow | null {
   }
 }
 
-/** The first stored error, when there is one. A failed run with no `error` text stays a bare count
- * rather than borrowing another run's reason. */
-function failureReason(failures: SpeedTest[]): string {
-  const reason = failures.find((f) => f.error !== null)?.error
-  return reason ? ` — ${reason}` : ''
+const REASON_MAX_CHARS = 80
+
+/** The first stored error's first line, capped. A failed run with no `error` text stays a bare count
+ * rather than borrowing another run's reason. The cap is not cosmetic: the speedtest CLI's
+ * licence-prompt failure stores ~2 KB of multi-line text, which broke the tooltip's layout. */
+export function failureReason(failures: SpeedTest[]): string {
+  const raw = failures.find((f) => f.error !== null)?.error
+  const line = raw?.split('\n').find((l) => l.trim() !== '')?.trim()
+  if (!line) return ''
+  return ` — ${line.length > REASON_MAX_CHARS ? `${line.slice(0, REASON_MAX_CHARS - 1)}…` : line}`
 }
 
 /**
@@ -162,7 +167,10 @@ export function speedCellRows(c: SpeedCell): ChartTooltipRow[] {
 const getRow = (c: SpeedCell): string => c.row
 const getCol = (c: SpeedCell): string => c.col
 const getValue = (c: SpeedCell): number | null => c.deficitPct
-const formatValue = (v: number): string => `${fmtPct(v)} below fastest hour`
+// Short on purpose: the gradient legend prints this at every step, and "50.0% below fastest hour"
+// collided with its neighbour (measured, 42 px overlap at 1280). The unit's meaning rides on the
+// legend `label`; the tooltip's `Value` row reads "1.8%" under the same caption.
+const formatValue = (v: number): string => fmtPct(v)
 const formatRow = (row: string): string => DAY_FORMAT.format(localDayStart(row))
 const TOOLTIP = { rows: speedCellRows }
 
@@ -198,7 +206,10 @@ export function SpeedHeatmap({
   // range-relative ramp was the lie itself. While pending `state` conceals the legend, so the
   // "No successful run" a `fastest` of `null` would print is never readable over an unanswered query.
   const legend = {
-    label: fastest === null ? 'No successful run' : `Fastest hour ${fmtMbps(fastest)}`,
+    label:
+      fastest === null
+        ? 'No successful run'
+        : `% below the fastest hour (${fmtMbps(fastest)}) — full colour at ${FULL_INTENSITY_DEFICIT_PCT}%`,
   }
 
   return (

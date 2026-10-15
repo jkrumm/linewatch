@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { FULL_INTENSITY_DEFICIT_PCT, speedCellRows, speedCells } from './speed-heatmap'
+import { FULL_INTENSITY_DEFICIT_PCT, failureReason, speedCellRows, speedCells } from './speed-heatmap'
 import type { SpeedTest } from '../lib/types'
 
 const HOUR_MS = 3_600_000
@@ -91,6 +91,14 @@ describe('speedCellRows — the tooltip is what separates failed from absent', (
       expect.objectContaining({ label: 'No run', value: 'Not measured' }),
     ])
   })
+})
+
+test('failureReason keeps one short line of a long multi-line error', () => {
+  const long = `${'x'.repeat(200)}\nsecond line`
+  const reason = failureReason([run(1, { ok: false, error: long })])
+  expect(reason.length).toBeLessThanOrEqual(84)
+  expect(reason).not.toContain('second line')
+  expect(failureReason([run(1, { ok: false, error: null })])).toBe('')
 })
 
 test('a range longer than the cap is clamped to the trailing 30 days', () => {

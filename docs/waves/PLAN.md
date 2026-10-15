@@ -333,26 +333,41 @@ cells in `status-bar.tsx` (`Sparkline`, `mark: 'line' | 'bar'`). 20 of the probe
 2. `Sparkline` exposes no measured width, so per-cell point pooling is a fixed ceiling.
 3. Faint reference lines on light at 1000 Mbit (the legend swatch is fine).
 
-## Wave 7 — Charts D: heatmaps, the bespoke grid goes (l2, l5) <!-- status: active -->
+## Wave 7 — Charts D: heatmaps, the bespoke grid goes (l2, l5) <!-- status: done -->
 
 `availability-heatmap.tsx` (216), `speed-heatmap.tsx` (253), `category-grid.tsx` (313; the bespoke
 grid that only exists because the 1.x `Heatmap` kind had no consumers). 18 errors plus the grid's
 bespoke tooltip (`ChartTooltipFloat`/`TooltipBody` deleted).
 
-- [ ] Both heatmaps on `Heatmap`: absolute intensity, gradient legend, per-cell `rows`, no cursor
+- [x] Both heatmaps on `Heatmap`: absolute intensity, gradient legend, per-cell `rows`, no cursor
       (heatmaps join none), the 30-day clamp, three states (measured / failed / absent). `null`
       is "a flat neutral cell, never a zero" in 2.x — that matches the repo's rule; verify the
       *failed* state is still distinguishable from *absent* (D2).
-- [ ] Delete `category-grid.tsx`, its tooltip and hit-testing; the `ChartFrame`/`Group`/
+- [x] Delete `category-grid.tsx`, its tooltip and hit-testing; the `ChartFrame`/`Group`/
       `HatchPattern` imports leave with it. `availability-heatmap.render.test.tsx` rewritten.
-- [ ] `Heatmap` x-label striding (2.2.0 `Heatmap` strides to the container class's tick count)
+- [x] `Heatmap` x-label striding (2.2.0 `Heatmap` strides to the container class's tick count)
       against the 30-day layout at 390 px.
-- [ ] Compare against baseline: cell counts, intensity ramp endpoints, the absent/failed cells,
+- [x] Compare against baseline: cell counts, intensity ramp endpoints, the absent/failed cells,
       tooltip content per state.
 
 **Evidence:** `w7.md` — before/after, state matrix, deleted-file list.
 
-## Wave 8 — No stub left; the guard layer and the docs <!-- status: pending -->
+**Left behind:**
+- `basalt-ui` **2.10.0** exact. Rows 89/81/91/92/93 taken (details in `evidence/w7.md`): pending legends no longer withheld locally, throughput absent share is amber via `absentState` (`THROUGHPUT_ABSENT_COLOR`, because `ABSENT_COLOR` is the accent = its download hue), `NumberFilter` label via `.labels()`. Rows 94–101: nothing in 2.10.0, no workaround added.
+- Both heatmaps on `Heatmap`; `category-grid.tsx` deleted; `grep MIGRATION-STUB web/src` is empty. `follower-tooltip.test.ts` still lists six charts (heatmaps join none — no crosshair). Every in-window hour is given a datum (absent ones with `value: null`) so it keeps a tooltip.
+- **Decision for D2:** failed (speed) and absent share one flat fill; only the tooltip separates them. Not worked around. The card `info` copy says "grey cells either had no run or failed — the tooltip says which".
+- Wave 8 inherits stale prose: AGENTS.md / `docs/dashboard-charts.md` still describe `ChartTooltipFloat`, `CategoryGrid`/hatch, `basalt/hand-rolled-plot`; the speed legend is now one `label` + short step labels (`% below the fastest hour (…)`).
+- `/review` findings declined: (a) query failure renders as empty data on both heatmaps — true page-wide (every chart takes `data ?? []` + `isPending`), pre-dates the port, needs a page-level error design, not a heatmap patch; (b) dedupe of the two grids' scaffolding (`ROW_PX`, `FRAME_CHROME_PX`, fold loop) — two call sites, left; (c) fall-back-hour merge tests — owed (testGaps), not added.
+- Gates: see `evidence/w7.md`. Not re-screenshotted after the last two commits (zero-Mbps fix; short legend format + 80-char failure reason) — unit-tested instead; Wave 9's matrix covers them.
+
+**basalt friction** (for the orchestrator to file as `linewatch W7 …`; basalt-ui not edited):
+1. `Heatmap` hover on a position with no datum (before the window, after `now`) snaps to the neighbouring row's cell: tooltip titled "16. Sept. · 00" with that hour's data over the 15 Sept track. A decorative cell should be inert.
+2. `Heatmap` has no per-cell state: a `null` value is one fill, so failed and absent are visually identical; a row-level `state`/`fill` per datum would fix it.
+3. The gradient legend prints `formatValue` at every one of its 8 steps and shares it with the tooltip `Value` row: a unit-bearing format ("50.0% below fastest hour") overlaps its neighbour. A separate `formatLegend` (or ends-only) would do. Tooltip `Value` row label is fixed "Value".
+4. Lowest ramp step (14 % alpha) vs the flat absent fill (12 %) differ by ΔE ≈ 4 on the speed grid — a near-baseline hour is barely distinguishable from an unmeasured one.
+5. `NumberFilter` with `.labels({0:'Any'})` writes `minDuration=0` into the URL on load and after Clear (the default is not elided).
+
+## Wave 8 — No stub left; the guard layer and the docs <!-- status: active -->
 
 - [ ] `grep -rn MIGRATION-STUB web/src` empty; `grep -n "@visx" web/bun.lock web/package.json` empty;
       no `theme-allow`/`oxlint-disable` naming a deleted rule id (a deleted id waives nothing).

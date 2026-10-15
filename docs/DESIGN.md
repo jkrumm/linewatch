@@ -55,8 +55,8 @@ launchd (native, macOS)              Docker (Colima)
 │  ping ×20 per target   │ ───────► │  ingest → outage state machine│
 │  30s cycle + vantage   │  batch   │  Ookla CLI, hourly            │
 │  spools on failure     │          │  SQLite (Drizzle)             │
-└────────────────────────┘          │  static UI (basalt-ui + visx) │
-                                    └──────────────────────────────┘
+└────────────────────────┘          │  static UI (basalt-ui + TanStack) │
+                                    └───────────────────────────────────┘
 ```
 
 The collector is the only native piece: ~870 lines across `probe.ts`,
@@ -445,7 +445,7 @@ monitoring down with it.
 
 ## Dashboard
 
-basalt-ui (Mantine v9) + visx. The visual law is `web/.claude/rules/basalt-*.md` + `web/DESIGN.md`, worked through `/basalt-design` — not the generic `/dataviz` skill.
+basalt-ui (Mantine v9) + TanStack Charts. The visual law is `web/.claude/rules/basalt-*.md` + `web/DESIGN.md`, worked through `/basalt-design` — not the generic `/dataviz` skill.
 
 **One page, one range control, no navigation chrome.** This was five routes, then
 one route with four tabs, then one route with five stacked sections each hiding a

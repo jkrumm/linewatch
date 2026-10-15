@@ -68,7 +68,7 @@ corruption that forced it, and the backup/restore targets.
 
 ## The dashboard runs on basalt-ui, and the guards are the contract
 
-`web/` is a **basalt-ui** app (Mantine v9 + visx). The stack, the token rule, the
+`web/` is a **basalt-ui** app (Mantine v9 + TanStack Charts). The stack, the token rule, the
 local-bin rule and the rule precedence are stated once, in the managed block of
 [`web/AGENTS.md`](web/AGENTS.md) — this section holds only what is specific to this
 repo. The enforcement layer was inert for most of this project's life (no `init`, no
@@ -120,24 +120,31 @@ say they disagreed; the guards below exist so that cannot happen silently again.
   so it tracks a retune; `manifest`/`icons` stay off (tailnet dashboard, no
   `public/`). `check-theme` reads `index.html` as of 1.20.0, so a hex put back
   there fails the build.
-- **A single-plot cartesian chart composes `CartesianChart` and draws only marks —
-  lint-enforced (`basalt/hand-rolled-plot`), not a preference.** Every chart on this
-  page is now on a shipped kind (`CartesianChart`, `BandStrip`, `MirroredBars`) and
-  the waivers are gone. **Do not hand-compose a plot again**: if a shape doesn't fit,
-  the answer is a kind upstream, not a waiver here. History:
-  [`docs/dashboard-charts.md`](docs/dashboard-charts.md).
-- **`ChartTooltipFloat` portals to `document.body`; never its predecessor `ChartTooltip`**
-  (a plain `<div>` that mounts silently unpainted inside `<svg>`). `series` is the single
-  source of truth — legends and tooltip rows are DERIVED from it (`basalt/chart-legend-literal`
-  warns otherwise); `speed-chart.tsx`'s reference legend goes through `deriveLegend(refSeries)`
-  until `refLines` takes a `label`.
-- **Every chart takes `tooltip.onFollow: inView`, never `true`** — `ChartTooltipFloat` has no
-  viewport gate of its own and clamps an off-screen follower over the tooltip the reader is
-  looking at; `charts/use-in-viewport.ts` tracks the NODE, and
-  `charts/follower-tooltip.test.ts` pins both halves. There is no `tooltip.follow` on 2.x and
-  none is needed: the tooltip is anchored to the cursor's column (`anchor: 'group-center'`), so
-  every chart sharing it, the latency band included, lines up on the instant being read.
-  History and measurements: [`docs/dashboard-charts.md`](docs/dashboard-charts.md).
+- **Charts are basalt's kinds; the app draws marks, never a plot.** Every chart is on a shipped
+  2.x kind — `CartesianChart` (latency band, with consumer `marks`), `Lines` (speed,
+  bufferbloat, status-bar `Sparkline`s), `BandStrip` (both strips), `MirroredBars`
+  (throughput), `Heatmap` (both heatmaps). Engine marks come only from the allowed
+  `@tanstack/charts/*` subpaths (`basalt/chart-engine-boundary`, lint-enforced); a second chart
+  host in one file is `basalt/chart-host-single`. `@visx/*` is gone from the lockfile. The 1.x
+  rules `hand-rolled-plot` and `chart-legend-literal` are retired — a `theme-allow` naming a
+  retired id is a dead waiver (`--audit-allows` reports it). `series` / `states` stay the single
+  source of truth: legend, fill and tooltip rows derive from them, so retune the array, never a
+  swatch. **If a shape does not fit a kind, the answer is a kind upstream, not a waiver.**
+- **Absent is a flat fill in its own colour, legended, and never a measured state's.**
+  `charts/band-shared.ts` `ABSENT_COLOR` (`VX.accent`, at `ABSENT_ALPHA`) is the strips' and the
+  latency band's; throughput passes `absentState` with `THROUGHPUT_ABSENT_COLOR` (`VX.status.warn`)
+  because `ABSENT_COLOR` is its download hue. Each is pinned by a test. The 1.x hatch is gone with
+  `CategoryGrid`; on the speed heatmap *failed* and *absent* share one flat fill and only the
+  tooltip separates them (D2, accepted — `docs/waves/evidence/w7.md`).
+- **Every chart takes `tooltip.onFollow: inView`, never `true`.** `onFollow` is basalt's
+  boolean (a follower shows its tooltip while a sibling owns the cursor); `inView` is
+  `charts/use-in-viewport.ts`, which tracks the NODE, so an off-screen chart does not draw over
+  the tooltip the reader is looking at. `charts/follower-tooltip.test.ts` pins it as a source
+  test (a follower state needs a sibling's live cursor, which `renderToStaticMarkup` cannot
+  produce). The gate was measured against 1.x's clamping float; 2.x's behaviour without it is
+  not re-measured, so it stays as the cheap precaution. There is no `tooltip.follow` and none is
+  needed: the tooltip anchors to the cursor's column, so every chart sharing it lines up on the
+  instant being read. History: [`docs/dashboard-charts.md`](docs/dashboard-charts.md).
 ## Conventions
 
 - Bearer auth on the five routes that write to the historical record or to the
@@ -303,8 +310,9 @@ say they disagreed; the guards below exist so that cannot happen silently again.
   instant as a `Date` — a bucket's start (`formatX`/`bucketTickFormat`) or a run's `ts`
   (`runTickFormat`). Never a pre-formatted display string as the domain key — it collapses distinct buckets/runs onto one x position and drops a
   measurement. Same rule for the tooltip header.
-- **Every chart shares one cursor, keyed on the instant.** All six charts sit in one
-  `ChartCursorScope`. A `Date` x is a proportional time scale over the data's OWN extent,
+- **Every chart shares one cursor, keyed on the instant.** All six charts share the default
+  `chartCursor()` group (no provider; `ChartCursorScope` is gone — `cursorGroup` is the
+  opt-out, and nothing here uses it). A `Date` x is a proportional time scale over the data's OWN extent,
   so the speed and bufferbloat charts (first run to last run) put the crosshair at a
   different pixel column than the bucketed charts (the whole window) — same instant,
   different x; expected until basalt takes an x domain. Heatmaps join no cursor (hit-test per cell, never broadcast).

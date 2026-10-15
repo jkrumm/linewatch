@@ -62,8 +62,10 @@ cleanly and read as loud as the red had.
 
 **The fix was the grey, not a hue.** `VX.line2` (`#a1a1aa`, 5.5:1) is the mid grey; `VX.line`
 (`#e4e4e7`, 11.1:1) is the brightest value on a dark panel and was never the right secondary. Blue
-against a mid grey separates all three (never-measured is the light grey AND hatched) and no series
-is earned. Add a row only when a chart draws two or more series that must be told apart by colour
+against a mid grey separated all three on 1.x (never-measured was the light grey AND hatched). 2.x
+has no hatch: never-measured is a flat fill, legended, in a colour no measured state uses —
+`ABSENT_COLOR` (`VX.accent`) on the strips and latency band, `VX.status.warn` on throughput
+(`THROUGHPUT_ABSENT_COLOR`, because the accent is its download hue). No series is earned. Add a row only when a chart draws two or more series that must be told apart by colour
 **and the neutral ramp genuinely cannot do it** — and never inline a hex to do it.
 
 | Series name | Light hex | Dark hex | `defineSeries` key | Role / earned reason |

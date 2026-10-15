@@ -391,11 +391,9 @@ function DashboardPage() {
       )}
 
 
-      {/* No provider, and now no scope either. As of basalt-ui 1.15.0 the cursor lives in a
-          module-level store, so every chart on this page shares one out of the box —
-          `ChartHoverSync` is gone and its successor, `ChartCursorScope`, opts a subtree OUT rather
-          than into it. Nothing here wants out any more: the two Speed views were the last holdouts
-          and they joined when their domain became an instant (see that section). */}
+      {/* No provider and no scope: every chart shares basalt's default `chartCursor()` group, and
+          `cursorGroup` would opt one OUT. Nothing here wants out — the Speed views joined when
+          their domain became an instant (see that section). */}
       <Stack gap="xl">
         <DashboardSection
           id="uptime"

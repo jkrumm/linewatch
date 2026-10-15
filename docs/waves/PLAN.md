@@ -367,24 +367,33 @@ bespoke tooltip (`ChartTooltipFloat`/`TooltipBody` deleted).
 4. Lowest ramp step (14 % alpha) vs the flat absent fill (12 %) differ by ΔE ≈ 4 on the speed grid — a near-baseline hour is barely distinguishable from an unmeasured one.
 5. `NumberFilter` with `.labels({0:'Any'})` writes `minDuration=0` into the URL on load and after Clear (the default is not elided).
 
-## Wave 8 — No stub left; the guard layer and the docs <!-- status: active -->
+## Wave 8 — No stub left; the guard layer and the docs <!-- status: done -->
 
-- [ ] `grep -rn MIGRATION-STUB web/src` empty; `grep -n "@visx" web/bun.lock web/package.json` empty;
+- [x] `grep -rn MIGRATION-STUB web/src` empty; `grep -n "@visx" web/bun.lock web/package.json` empty;
       no `theme-allow`/`oxlint-disable` naming a deleted rule id (a deleted id waives nothing).
-- [ ] Rewrite AGENTS.md § "The dashboard runs on basalt-ui" for 2.x: drop `basalt/hand-rolled-plot`,
+- [x] Rewrite AGENTS.md § "The dashboard runs on basalt-ui" for 2.x: drop `basalt/hand-rolled-plot`,
       `ChartTooltipFloat` and `charts/follower-tooltip.test.ts` as written, `withBorder`/card idiom
       stays, `onFollow: inView`, the one-cursor rule, the `axisTickValues` rule — each only if it is
       still true; add what Waves 4–7 learned. Update `docs/dashboard-charts.md`, `web/DESIGN.md`
       (series dictionary), `web/AGENTS.md` managed block via `basalt-ui sync`.
-- [ ] `basalt-ui check-theme --audit-allows` exits 0; `basalt-ui sync --check`, `doctor`,
+- [x] `basalt-ui check-theme --audit-allows` exits 0; `basalt-ui sync --check`, `doctor`,
       `make check`, `bun test` and the build green on the merged head; bundle bytes recorded against
       baseline (the 2.x charts runtime is a new chunk — note, don't fix).
-- [ ] Confirm every ledger row filed in Waves 1–7 has either an upstream fix landed or a named
+- [x] Confirm every ledger row filed in Waves 1–7 has either an upstream fix landed or a named
       stub/decision recorded; list the open ones for the cutover review.
 
 **Evidence:** `w8.md` — grep outputs, `doctor`/`check-theme` output, bundle table.
 
-## Wave 9 — Visual check against the baseline, BEFORE deploy <!-- status: pending -->
+**Left behind:**
+- `basalt-ui` stays **2.10.0** (latest on npm). Stub, visx and retired-waiver greps are empty; `lint` 0 errors, `--audit-allows` exit 0, `sync --check` / `doctor` clean, `make check` green (577 root, web 375 pass / 0 skip), build green. Bundle in `w8.md`: JS 2649714 B raw / 617464 gz (W2: 2374287 / 525353).
+- AGENTS.md, `docs/dashboard-charts.md`, `web/DESIGN.md`, `docs/DESIGN.md` describe the 2.x code; `web/AGENTS.md` needed no `sync` change. Row 106 is closed by design (orchestrator): AGENTS.md's "the URL states its defaults" stands.
+- **Not re-measured on 2.x, stated as such in the docs:** whether `onFollow: inView` still prevents an off-screen follower drawing over a visible tooltip (the gate stays as a precaution); whether the strips and throughput need `cursorResolution="leading"` like the latency band (no test pins it). Wave 9's tooltip captures can answer both.
+- No `/review` run: the diff is prose plus one comment in `routes/index.tsx`; no code path changed.
+- Open ledger rows for the cutover review are tabled in `w8.md`: 94–105 (upstream-pending, no workarounds).
+
+**basalt friction:** none new.
+
+## Wave 9 — Visual check against the baseline, BEFORE deploy <!-- status: active -->
 
 Nothing ships. Run from `make up` on the working tree (the local equivalent; AGENTS.md § Deploy) so
 the check sees the container build, not only vite.

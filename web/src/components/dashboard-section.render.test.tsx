@@ -6,15 +6,13 @@ import { uptimeViews } from '../lib/dashboard-store'
 import { DashboardSection } from './dashboard-section'
 
 /**
- * `Section`'s own anchor clears 12px, because a shell's page-bar band sits outside the shell's
- * scrollport. This page's bar is sticky in the document scroll, so the anchor has to clear the bar's
- * measured height or a verdict link lands the section heading under it.
- *
- * The non-compact branch is rendered; the compact one cannot be (the compact flag is SSR-false, see
- * `lib/compact.contract.test.ts`), so it is pinned in source.
+ * basalt-ui 2.9.0's `Section` clears a shell-less `PageBar` itself, so the non-compact branch passes
+ * no anchor style of its own. The compact branch swaps `Section` for a plain element, which gets no
+ * such offset, so it keeps one — and that half is a source test because the compact flag is
+ * SSR-false (`lib/compact.contract.test.ts`).
  */
 describe('DashboardSection anchor offset', () => {
-  test('the rendered section clears the measured page-bar height', () => {
+  test('the rendered section sets no scroll margin of its own', () => {
     const html = renderToStaticMarkup(
       <MantineProvider>
         <DashboardSection
@@ -24,11 +22,12 @@ describe('DashboardSection anchor offset', () => {
         />
       </MantineProvider>,
     )
-    expect(html).toContain('scroll-margin-top:var(--basalt-page-bar-h, 0px)')
+    expect(html).not.toContain('scroll-margin-top:var(--basalt-page-bar-h, 0px)')
+    expect(html).toContain('id="section-uptime"')
   })
 
-  test('the compact branch uses the same offset', () => {
+  test('only the compact branch carries the page-bar offset', () => {
     const source = readFileSync(new URL('./dashboard-section.tsx', import.meta.url), 'utf8')
-    expect(source.match(/style=\{ANCHOR_STYLE\}/g)?.length).toBe(2)
+    expect(source.match(/style=\{ANCHOR_STYLE\}/g)?.length).toBe(1)
   })
 })

@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Box } from '@mantine/core'
 import { Section } from 'basalt-ui'
 import { ViewTabs } from 'basalt-ui/controls'
-import { createPersistedState } from 'basalt-ui/state'
 import type { EnumField, FieldHandle } from 'basalt-ui/state'
 import { dashboard } from '../lib/dashboard-store'
 import { SECTION_LABEL, sectionAnchor, type SectionKey } from '../lib/verdict-section'
@@ -27,10 +26,9 @@ export interface SectionView<T extends string> {
 }
 
 /**
- * Both branches' anchor offset. `Section`'s own anchor clears `--vx-space-sticky-header-clearance`,
- * which since 2.0 is 12px of breathing room — the shell's header and page-bar band sit outside ITS
- * scrollport. This page is shell-less, so its sticky `PageBar` is in the document scroll and the
- * anchor must clear the bar's measured height instead (`--basalt-page-bar-h`, published by `PageBar`).
+ * The compact branch's anchor offset. `Section` clears the shell-less `PageBar` itself since
+ * basalt-ui 2.9.0, but compact drops `Section` for a plain element, which gets no such offset —
+ * so this one box clears the bar's measured height (`--basalt-page-bar-h`, published by `PageBar`).
  */
 const ANCHOR_STYLE = { scrollMarginTop: 'var(--basalt-page-bar-h, 0px)' } as const
 
@@ -39,8 +37,7 @@ const ANCHOR_STYLE = { scrollMarginTop: 'var(--basalt-page-bar-h, 0px)' } as con
  * rather than framework ones.
  *
  * The heading, the fold, the chevron, the persisted fold state, the `ViewTabs` responsive swap and
- * the anchor's `scroll-margin-top` (which now clears the measured `PageBar` height, not a guessed
- * 96px) are all basalt's since 1.26.0 — a ~190-line fork went with them. What is left here:
+ * the anchor's `scroll-margin-top` (which clears the measured `PageBar` height since 2.9.0) are all basalt's since 1.26.0 — a ~190-line fork went with them. What is left here:
  *
  * 1. **Compact drops the whole header**, so compact drops `Section` itself rather than passing it
  *    fewer props: basalt always draws the header, and title-plus-tabs is one row whose height is set
@@ -108,7 +105,8 @@ export function DashboardSection<T extends string>({
   const [compact] = dashboard.field.compact.use()
   const [view] = field.use()
   const anchor = sectionAnchor(id)
-  useOpenOnHash({ id, active: collapsible, defaultOpen })
+  const [hashOpen, setHashOpen] = useOpenOnHash({ id, active: collapsible })
+  const onOpenChange = useCallback((next: boolean) => setHashOpen(next), [setHashOpen])
 
   // The lazy switch. `views[0]` is the fallback rather than an error: the field's enum and this array
   // are declared apart, and a section drawing its primary view beats a section drawing nothing.
@@ -132,7 +130,6 @@ export function DashboardSection<T extends string>({
   return (
     <Section
       id={anchor}
-      style={ANCHOR_STYLE}
       title={SECTION_LABEL[id]}
       {...(subtitle !== undefined && { subtitle })}
       {...(meta !== undefined && { summary: meta })}
@@ -145,7 +142,13 @@ export function DashboardSection<T extends string>({
           />
         ),
       })}
-      {...(collapsible && { collapsible: true, persistKey: id, defaultOpen })}
+      {...(collapsible && {
+        collapsible: true,
+        persistKey: id,
+        defaultOpen,
+        ...(hashOpen !== undefined && { open: hashOpen }),
+        onOpenChange,
+      })}
     >
       {body}
     </Section>
@@ -163,18 +166,13 @@ export function DashboardSection<T extends string>({
  * open on every visit, the chevron did nothing visible when pressed, and the fold the reader asked
  * for did not exist. A control that silently does nothing is worse than no control.
  *
- * The hash is the precise moment the guarantee is needed: the reader followed a link *here*. So that
- * flips the stored preference to open, once, and every later press of the chevron is theirs again.
- * `VerdictPanel` renders a plain `#section-…` anchor, which is why this listens to the hash rather
- * than to the verdict set.
- *
- * **It writes basalt's own fold key with a plain `setOpen`.** `Section` persists at
- * `basalt:section:<persistKey>` through `createPersistedState`; before basalt-ui 1.27.0 that
- * factory's in-tab listener set belonged to the INSTANCE that wrote, so a write from a second
- * instance (this one) reached localStorage but notified nobody, and the fold only opened on the
- * next unrelated re-render — worked around here with a synthetic `storage` event dispatched at the
- * same key. 1.27.0 registers subscribers per storage key instead, so every instance sharing a key
- * now notifies every other one in-tab and the workaround is gone.
+ * The hash is the precise moment the guarantee is needed: the reader followed a link *here*. So the
+ * hash sets `hashOpen` to `true`, which the caller passes as `Section`'s controlled `open`; until
+ * then it is `undefined` and the persisted fold governs. **Once set it stays controlled and tracks
+ * the reader** — `onOpenChange` writes their next value back — because basalt mirrors a controlled
+ * value into its own fold and a dropped `open` falls back to that mirror: clearing `hashOpen` on the
+ * first press left the section open and swallowed the click. `VerdictPanel` renders a plain
+ * `#section-…` anchor, which is why this listens to the hash rather than to the verdict set.
  *
  * **It also re-scrolls, and that half only matters in compact.** Compact drops the collapsible
  * section outright, so a verdict link clicked there fires the browser's own hash scroll against a
@@ -184,43 +182,22 @@ export function DashboardSection<T extends string>({
  * a no-op on a normal in-page click (the browser has already scrolled to the same element) and on a
  * cold load with a hash (same).
  */
-function useOpenOnHash({
-  id,
-  active,
-  defaultOpen,
-}: {
-  id: SectionKey
-  active: boolean
-  defaultOpen: boolean
-}): void {
-  const storageKey = `section:${id}`
-  // Same construction `Section`'s own `useSectionOpen` uses, so the envelope and the version match
-  // byte for byte — a second writer with a different `version` would look like corruption to it.
-  const usePersistedOpen = useMemo(
-    () => createPersistedState<boolean>({ key: storageKey, version: 1, initial: defaultOpen }),
-    [storageKey, defaultOpen],
-  )
-  const [open, setOpen] = usePersistedOpen()
-
-  // `open` in a ref so the listener below can read the latest committed value without being torn
-  // down and rebuilt on every write — `createPersistedState`'s setter takes a value, not an updater.
-  // Synced in an effect (the `react(refs)` rule forbids a render-time write); it lags by one flush.
-  const openRef = useRef(open)
-  useEffect(() => {
-    openRef.current = open
-  }, [open])
+function useOpenOnHash({ id, active }: { id: SectionKey; active: boolean }) {
+  const state = useState<boolean | undefined>(undefined)
+  const setHashOpen = state[1]
 
   useEffect(() => {
     if (!active) return
     const anchor = sectionAnchor(id)
     const targeted = () => window.location.hash === `#${anchor}`
     const openIfTargeted = () => {
-      if (!targeted() || openRef.current) return
-      setOpen(true)
+      if (targeted()) setHashOpen(true)
     }
     openIfTargeted()
     if (targeted()) document.getElementById(anchor)?.scrollIntoView()
     window.addEventListener('hashchange', openIfTargeted)
     return () => window.removeEventListener('hashchange', openIfTargeted)
-  }, [active, id, setOpen])
+  }, [active, id, setHashOpen])
+
+  return state
 }

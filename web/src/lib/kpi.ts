@@ -174,9 +174,9 @@ export function compareWindows(opts: {
  * The tints a KPI card can carry — anything else stays the neutral default weight.
  *
  * `'good'` is a POSITIVE ASSERTION, not the absence of a problem: basalt-ui 1.8.0's
- * `StatCardTone` draws a rail for it exactly as it does for `'warn'`/`'bad'`, so returning it
+ * `Tone` draws a rail for it exactly as it does for `'warn'`/`'bad'`, so returning it
  * claims "this was measured and it earned a clean verdict" — never "nothing to report" (that stays
- * `undefined`; see `StatCardTone`'s own docblock). Most tint functions in this module never return
+ * `undefined`; see `Tone`'s own docblock). Most tint functions in this module never return
  * it: `worstLossTint` and `worstBucketLoss`'s `null` already mean "nothing measured" rather than
  * "measured and clean", so there is nothing for `worstLossTint` to assert. Only `downtimeTint`
  * earns it, and only behind a coverage gate — see its docblock for why a defined zero is not, on
@@ -254,7 +254,7 @@ export const DOWNTIME_BAD_FRACTION = 0.005
 /**
  * Tint for the downtime card.
  *
- * Four states, where there used to be three. basalt-ui 1.8.0 added `'good'` to `StatCardTone`, and
+ * Four states, where there used to be three. basalt-ui 1.8.0 added `'good'` to `Tone`, and
  * a downtime figure of exactly zero looked at first like the obvious place to spend it — until a
  * second look at where `WindowDowntime` comes from: `windowDowntime` sums `outage` rows, and an
  * `outage` row only ever exists because `services/outage-detector.ts` opened one off an INGESTED

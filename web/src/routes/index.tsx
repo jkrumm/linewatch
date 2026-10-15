@@ -74,9 +74,12 @@ import {
   THROUGHPUT_COPY,
 } from '../lib/guides'
 
-/** No `Any` row: "no filter" is the field's fallback (0), reached through `clearable`'s `Clear`
- * (basalt-ui 1.33.0), and the pill reads the filter's label while no preset matches. */
+/** `Any` is the field's fallback (0) and the one row that names the unset state: basalt-ui 2.9.0's
+ * `.labels()` does that for the stepper form only, and this is the preset form, whose pill prints
+ * the label of the selected row (an unmatched value prints the filter's own label). `clearable`
+ * stays — `Clear` is the same reset. */
 const MIN_DURATION_OPTIONS = [
+  { label: 'Any', value: 0 },
   { label: '≥1m', value: 60 },
   { label: '≥5m', value: 300 },
   { label: '≥10m', value: 600 },

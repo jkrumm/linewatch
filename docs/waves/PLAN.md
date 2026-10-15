@@ -13,6 +13,12 @@ and `bun run build`; `/review` clean on the wave's diff; zero new `theme-allow` 
 `oxlint-disable … basalt/` waivers; the wave's evidence in `docs/waves/evidence/w<n>.md`, compared
 against `docs/waves/evidence/baseline-1.41.md` from Wave 2 on.
 
+**Target:** the latest `basalt-ui` 2.x on npm at bump time (2.8.1 on 2026-10-15; carries ledger rows 61–76, incl. row 64 = the BandStrip absent share). Where this plan pins 2.7.3, pin that; claims verified on 2.7.3 stay valid.
+
+**Decisions taken 2026-10-15 (orchestrator, under the owner's standing autonomy):**
+- **D1 = (b), a `basalt-2` branch.** Wave 1 (evidence only) runs on master. From Wave 2 every wave works in a worktree on branch `basalt-2` (`git worktree add ../linewatch-basalt-2 -b basalt-2`), commits and pushes `basalt-2` only; master and production stay on 1.41 with real charts until Wave 10 merges `basalt-2` into master (rollhook CD then ships it once). The plan file travels on `basalt-2`; the orchestrator points each wave at `~/SourceRoot/linewatch-basalt-2/docs/waves/PLAN.md`. Proven on basalt-ui-obsidian (Waves 2–6). No stubs ever reach production; no CD pause needed.
+- **D2 answered by basalt-ui 2.8.0 (row 64):** `BandStrip` renders an absent share as its own flat fill (no hatch) — evaluate it against "not measured never looks like zero or good" in Waves 4/5/7; a gap there is a new ledger row, not a local workaround.
+
 **Fleet note:** feeds basalt-ui `docs/waves/argo-friction.md`: a basalt-rooted problem becomes a row
 there, prefixed `linewatch W<n>`; never worked around locally; stay exact-pinned on the 1.x pin
 (`basalt-ui` 1.41.0 in `web/package.json`) until Wave 2 (the bump) runs. A chart whose behaviour a
@@ -57,7 +63,7 @@ basalt-ui `docs/waves/v2-chart-inventory.md` rows l1–l11. Worked shape: argo's
   `ChartSeries`) and three render tests mount charts. `bun test` is a gate in its own right, and the
   bump wave must run it, not only `tsc`.
 
-## Wave 1 — Baseline evidence on 1.41 <!-- status: pending -->
+## Wave 1 — Baseline evidence on 1.41 <!-- status: active -->
 
 Nothing ships. The before-picture every later wave is compared against.
 

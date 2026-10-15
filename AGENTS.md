@@ -309,10 +309,13 @@ say they disagreed; the guards below exist so that cannot happen silently again.
   not a bug. Heatmaps join no cursor (hit-test per cell, never broadcast).
 - **`tooltip.formatHeader` must format from the instant, never regex the domain
   key.** A UTC ISO key regexed for `YYYY-MM-DD` and rebuilt as a LOCAL `Date` can
-  name the wrong calendar day. Pinned by `charts/tooltip-header.test.ts`.
-- **All six charts pass `lib/axis.ts`'s `axisTickValues` as `xTickValues`**, computed
-  from the chart's own resolved plot width — never a tick count or basalt's default
-  spacing (both overlap at typical densities).
+  name the wrong calendar day. The strips and throughput now receive the `Date`
+  itself; `charts/tooltip-header.test.ts` still pins the latency band (Wave 5).
+- **The bucketed band charts key on the instant and leave tick thinning to basalt.**
+  On 2.x `x` is `new Date(bucketStart)` and `xTicks` takes values, not a width callback,
+  so the two strips and the throughput bars hand basalt every bucket and it thins the
+  labels itself (checked at 1280 / 24 h and 352 px / 7 d: no overlap). `axisTickValues`
+  stays for the charts that still need it until their wave lands (Waves 5–6 decide).
 - **`densifyBuckets` throws on an off-grid row INSIDE the window (a real bug) and
   skips one outside it (routine)** — `keepAcrossTimeAdvance` serves a stale window's
   placeholder data for well under a second when the window steps forward.

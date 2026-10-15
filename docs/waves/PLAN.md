@@ -210,33 +210,51 @@ localStorage, fallback), friction rows filed.
 4. The shipped oxlint preset's `react(only-export-components)` warns on every TanStack file route (`Route` + component in one file); the preset could exempt `routes/**` or that rule could take `allowExportNames: ['Route']`.
 5. MIGRATING row for `PageBar` does not say the primary action moved to the end of row 1 (observed), nor that `Section`'s anchor no longer clears a shell-less bar (friction 1).
 
-## Wave 4 — Charts A: strips and bars (l1, l7, l8) <!-- status: active -->
+## Wave 4 — Charts A: strips and bars (l1, l7, l8) <!-- status: done -->
 
 `availability-strip.tsx` (399 lines, `BandStrip`), `link-speed-strip.tsx` (441, `BandStrip`),
 `throughput-chart.tsx` (278, `MirroredBars`) — they share `foldBands`/`fold`, `getBand`, the shared
 `bandSeries` helpers and `lib/axis.ts`. 42 of the probe's errors.
 
-- [ ] `BandStrip` ports (l1, l8): `states` series without `mark`, `getBand` returning
+- [x] `BandStrip` ports (l1, l8): `states` series without `mark`, `getBand` returning
       `{ state, fill?, marker? }`, `fold` with `minBandPx`, `tooltip.rows` replacing `label`/
       `TooltipRow`, `ariaLabel` required, `state` replacing `isPending`. Per-column alpha and the
       absent encoding follow D2 — if the fixing minor has not shipped, the chart stays
       `MIGRATION-STUB(w4)` and the ledger row names this step.
-- [ ] `MirroredBars` port (l7): `up`/`down` panes with `max`/`autoMaxFloor`, `getAbsentFraction`,
+- [x] `MirroredBars` port (l7): `up`/`down` panes with `max`/`autoMaxFloor`, `getAbsentFraction`,
       `getBarOpacity`, `fold`, `tooltip.rows`. `throughput-chart.test.ts` / `.render.test.tsx`
       keep their assertions about *what is measured*; only the import moves.
-- [ ] `lib/axis.ts`: `axisTickValues` against the 2.x `xTicks`/`formatX` contract (x is now a `Date`
+- [x] `lib/axis.ts`: `axisTickValues` against the 2.x `xTicks`/`formatX` contract (x is now a `Date`
       or number where it was an ISO-string key — `formatX` takes the `ChartX`, not a string; keep
       the "key on the instant, never a display string" rule and `densifyBuckets` behaviour),
       `tooltip.formatHeader(x, d)` formatting from the instant (`tooltip-header.test.ts`).
-- [ ] `tooltip.onFollow: inView` on all three (`use-in-viewport.ts` stays; `follower-tooltip.test.ts`
+- [x] `tooltip.onFollow: inView` on all three (`use-in-viewport.ts` stays; `follower-tooltip.test.ts`
       rewritten against the 2.x config shape, not deleted).
-- [ ] Compare against baseline: strips at 24 h / 7 d / 30 d, the `fold` on a narrow viewport, one
+- [x] Compare against baseline: strips at 24 h / 7 d / 30 d, the `fold` on a narrow viewport, one
       absent column per chart.
 
 **Evidence:** `w4.md` — before/after per chart, tooltip text diff, the ledger rows for anything
 that stayed a stub.
 
-## Wave 5 — Charts B: the latency band (l3, ×5) <!-- status: pending -->
+**Left behind:**
+- First step of the wave, done: `basalt-ui` 2.8.1 → **2.9.0** exact. `sync` clean, `doctor` clean, `check-theme --audit-allows` 1 live (pre-existing) / 0 dead, 0 new waivers. The 1.x compat removals touched nothing here except two docblock names (`StatCardTone` → `Tone`). Row 80: `foldBands` is exported, the three fold test files are un-stubbed and run against the real grouping. Row 81: `ABSENT_COLOR` (`VX.accent`) in `charts/band-shared.ts`, pinned by a test in each strip. Rows 84/85: `Section`'s own anchor clears the bar (computed 93 px = 81 + 12); `ANCHOR_STYLE` survives only on compact's plain `<section>`. Hash-open now uses controlled `open`/`onOpenChange` (no `writePersistedValue`, no `usePersistedOpen`, the `react(hooks)` warning is gone) — **review caught that clearing `open` on the first press swallows it** (basalt mirrors the controlled value into its fold), so the hook stays controlled once touched; verified in a browser.
+- Strips (`availability-strip`, `link-speed-strip`) on `BandStrip`, throughput on `MirroredBars`, all real; x is `new Date(bucketStart)`; `Column.key` / `ThroughputPoint.key` deleted. `tooltip.label` has no 2.x slot: availability gets an `Anchor` row, the link strip none. `getBand`, `bandFor`, `bandStates`, `columnRows`, `pointRows`, `mergeColumns`, `mergePoints` stay exported for tests.
+- Gates: `make check` green (web 341 pass / 17 skip / 0 fail; W3 was 280 / 66), lint 0 errors, `sync --check`, `doctor`, build green. The 17 skips are all w5/w6/w7 stubs (`grep MIGRATION-STUB web/src`). `/review`: 1 blocking (the chevron, fixed), the cheap findings taken (shared `band-shared.ts`, flat headline, memoised summary, stale axis docblocks); 2 of its 7 reviewers failed on shell denial (typescript, qa) — not re-run. Declined: `kpi.ts` unused exports and `routes/index.tsx` complexity (both pre-existing, untouched code).
+- **D2 verdict, verified in a browser build (`w4.md`):** the four conditions hold for the strips (accent absent differs in hue from clean/loss in both schemes; whole-band absent is a flat accent band; the absent legend toggle is off; the colour is pinned). Throughput is weaker — see friction 2. Decision for Wave 9 to close: flat fill is accepted for the strips; the owner should look at throughput's grey-on-grey.
+- Frame heights are the plot's, not the card's (the legend sits outside): strips 65 → a 44 px band, throughput 180 + 21 → a 180 px plot, both measured. A first guess of 98 drew a 77 px band.
+- Tick thinning: basalt thins band labels itself; `axisTickValues` is unused by the three ported charts (`xTicks` takes values, not a width callback). It stays for Waves 5–6 to decide; AGENTS.md's "all six charts pass it" rule is rewritten for what is true now. `follower-tooltip.test.ts` is rewritten against `tooltip.onFollow` for the three ported charts; the other three join when ported. `tooltip-header.test.ts` and `overlay-color.test.ts` still grep the latency stub (Wave 5).
+- Process note: the Chrome MCP may only write screenshots under the repo's workspace root; they were saved into the master checkout's gitignored `raw/` and moved. The throwaway server (`/tmp/lw-serve`) is torn down. `window` cannot be sized below 500 px; 390 was captured with `emulate`.
+- Wave 5 inherits: a `Date` x on the bucketed charts (`bucketTickFormat` takes a `Date`), `foldedFromRows` / `ABSENT_*` in `band-shared.ts`, the legend-while-pending gate (friction 1), and the stubbed `renderExtraTooltipRows` / `InternetFoldRows` in `routes/index.tsx`.
+
+**basalt friction** (for the orchestrator to file as `linewatch W4 …`; basalt-ui not edited):
+1. `state={{ pending: true }}` still renders the legend (`MirroredBars`, `BandStrip`): a legend over a plot with no marks names an encoding for nothing. 1.41 suppressed it; consumers must pass `legend: false` while pending.
+2. `MirroredBars` has no `absentState`: the absent share is a fixed `VX.neutral` over both panes, a grey like the Upload series (`VX.line2`), so row 81's "differs from every measured state" cannot be met by the consumer there; only the full-height shape separates them.
+3. Legend swatches ignore `fillOpacity`: "No loss" (`VX.neutral` at 0.14) draws as solid charcoal in the legend against a pale band in the plot, so the legend does not mirror the real alphas 1.x's did.
+4. `BandStrip`/`MirroredBars` frame `height` is the plot plus a measured ~21 px axis gutter with the legend outside it; the band height is only reachable by subtracting a magic number. A `bandHeight` / `plotHeight` prop would make the 44 px strip a declaration.
+5. Row 86 covers `NumberFilter`'s stepper form only; the preset (`options`) form's pill still prints the filter label at an unmatched value, so a "no filter" state needs a literal `Any` row.
+6. `tooltip.label` (a badge naming what a chart is a strip OF) has no 2.x slot; `tooltip.follow: false` for the latency band is still unanswered (Wave 5's question).
+
+## Wave 5 — Charts B: the latency band (l3, ×5) <!-- status: active -->
 
 `latency-band-chart.tsx` alone (876 lines, 31 errors; the only bespoke composition in the repo and
 the only direct `@visx/shape` import). Rendered five times in `routes/index.tsx`.

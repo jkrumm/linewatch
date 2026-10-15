@@ -262,40 +262,42 @@ say they disagreed; the guards below exist so that cannot happen silently again.
   `DashboardSection` re-scrolls on mount while the hash still names it. A verdict
   that points somewhere has to land somewhere.
 - **Every control on the page reads one store, `lib/dashboard-store.ts`, and Zod
-  is gone from the route.** `createSearchStore` (basalt-ui 1.26.0) takes typed
+  is gone from the route.** `createSearchStore` (`basalt-ui/state`) takes typed
   fields, so the range, the outage-duration bound and the density toggle each
   declare their own lanes once — `range` on the URL with a localStorage mirror
   under it, `minDuration` URL-only (`persist: false` — a filter you narrowed once
   should not narrow every later visit), `compact` local-only (`url: false`). The
-  URL is still the truth for the first two: a link to a reading carries `?range=`,
-  and `?range=nonsense` falls back instead of throwing a `ZodError` out of
-  `validateSearch` (`z.enum().default()` only defaults an ABSENT key, so a
-  hand-edited URL used to take the page down). Two things that are easy to get
-  wrong here: **the store's own navigate already passes `resetScroll: false`**, so
-  never hand-roll one beside a field write; and **`field.range` must be written
-  with an explicit `custom: false`** — called inline inside `fields`, its `const C
-  extends boolean` re-infers against `AnyField`'s widened `RangeField` and every
-  read of `search.range` silently widens to `RangeOption | 'custom'`, a value this
-  store can never hold. The reciprocal gap is upstream and costs one cast in
-  `routes/index.tsx`: `RangeFilterProps.field` pins that same argument to its
-  default `boolean`, so the control cannot take a `custom: false` handle.
+  URL is still the truth for the first two: a link to a reading carries `?range=`
+  (and `minDuration=0` — `validateSearch` always resolves both, so the URL states
+  its defaults), and `?range=nonsense&minDuration=abc` falls back to `24h`/`0`
+  instead of throwing out of `validateSearch`. Measured on the 2.8.1 build: a
+  control write puts `range` in the localStorage mirror (`basalt:dashboard`), a URL
+  visit does not, and a bare `/` then opens on the mirrored range with
+  `minDuration` back at 0. **The store's own navigate already passes
+  `resetScroll: false`**, so never hand-roll one beside a field write.
+  `field.range` is written inline with no `custom` flag and `<RangeFilter
+  field={…} />` takes the handle uncast — both since basalt-ui 1.27.0.
 - **The page's chrome is basalt's `PageBar`, and the sticky height is its own.**
-  Shell-less, so both rows render in flow with `title` leading and the whole bar
-  publishes its measured height as `--basalt-page-bar-h` in the LAYOUT phase —
-  which is what every section anchor's `scroll-margin-top` clears. The
-  `useElementSize` + `useLayoutEffect` publisher, the `--lw-header-h` variable and
-  its `96px` fallback are all gone; do not reintroduce a measured header height.
-  Two consumer-side facts: the full bleed across `__root.tsx`'s Container gutters
-  and the hairline under the bar arrive through `PageBar.className`
-  (`shell/page-bar.module.css`) because they are the only part of the layout
-  basalt cannot know. **The gutter itself is basalt's, stated once**: since 1.30.0
-  `--vx-space-app-shell-inset{,-mobile}` (20/8) are emitted for exactly this
-  shell-less case, so `shell/root-layout.module.css` sets the Container's
-  `padding-inline` from them and `.bleed` cancels the same var at the same 52.5em
-  step — never a second copy of the number, and never a Mantine spacing key. And
-  the bar renders **three** secondary actions inline before
-  folding the rest into a `More` dropdown — which is why the version string sits on
-  `filtersEnd` rather than becoming a fourth.
+  Shell-less (`BasaltProvider` + `createBasaltRouter`, no `BasaltShell`, no nav —
+  basalt documents a shell-less single page as closed by `PageBar`), so both rows
+  render in flow with `title` leading and the whole bar publishes its measured
+  height as `--basalt-page-bar-h` in the LAYOUT phase. **`Section` does not use
+  it**: since 2.0 its anchor clears only `--vx-space-sticky-header-clearance`
+  (12px — the shell's header sits outside the shell's own scrollport), so
+  `DashboardSection` passes `style={{ scrollMarginTop: 'var(--basalt-page-bar-h)' }}`
+  and a section anchor would otherwise land its heading under the bar. Do not
+  reintroduce a measured header height or a `--lw-header-h`. The full bleed across
+  `__root.tsx`'s Container gutters and the hairline under the bar arrive through
+  `PageBar.className` (`shell/page-bar.module.css`). **The gutter is basalt's,
+  stated once**: `--vx-space-app-shell-inset{,-mobile}` (16/8 on 2.x; they were
+  20/8) set the Container's `padding-inline` in `shell/root-layout.module.css`,
+  and `.bleed` cancels the same var at the same 52.5em step. **The Container
+  takes no `px` prop** — an inline `px={0}` beats the class, which is how the page
+  had no gutter at all and the bleed overshot the viewport by the inset (20 px on
+  1.41, 16 on 2.x) until Wave 3. `scrollWidth === innerWidth` at both viewports is
+  the check. `actions` is the 2.x tuple, first entry `primary: true` (the live
+  chip), at most five; the bar folds by its measured width, so the version string
+  stays on `filtersEnd`.
 - **Axis label vs. scale key are different things.** Bucketed charts key on the
   bucket's ISO start (`formatX`/`bucketTickFormat`); run charts key on the run's ISO
   instant (`runAxisKey`/`runTickFormat`). Never a pre-formatted display string as the

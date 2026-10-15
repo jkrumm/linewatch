@@ -22,9 +22,10 @@ import classes from '../shell/root-layout.module.css'
  * charts are time series read across, and the wide ones (the availability strip, the 30-day
  * heatmap) get materially more resolution per hour at 1600 px than at `xl`'s 1320.
  *
- * The gutter is `px={0}` plus a class, not a `px` prop: it is stated once in
- * `root-layout.module.css` on basalt's own page-gutter tokens, which `page-bar.module.css` cancels
- * by name rather than by a second copy of the numbers.
+ * The gutter is a class and NO `px` prop: it is stated once in `root-layout.module.css` on basalt's
+ * own page-gutter tokens, which `page-bar.module.css` cancels by name rather than by a second copy
+ * of the numbers. A `px={0}` here (which used to sit beside the class) is an inline style and beats
+ * it — the page then has no gutter and the full-bleed bar overshoots the viewport by the inset.
  */
 export const Route = createRootRouteWithContext<BasaltRouterContext>()({
   component: RootLayout,
@@ -33,7 +34,7 @@ export const Route = createRootRouteWithContext<BasaltRouterContext>()({
 function RootLayout() {
   return (
     <Box mih="100dvh">
-      <Container size={1600} px={0} className={classes.page} pb="xl">
+      <Container size={1600} className={classes.page} pb="xl">
         <Outlet />
       </Container>
     </Box>

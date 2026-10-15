@@ -27,6 +27,14 @@ export interface SectionView<T extends string> {
 }
 
 /**
+ * Both branches' anchor offset. `Section`'s own anchor clears `--vx-space-sticky-header-clearance`,
+ * which since 2.0 is 12px of breathing room — the shell's header and page-bar band sit outside ITS
+ * scrollport. This page is shell-less, so its sticky `PageBar` is in the document scroll and the
+ * anchor must clear the bar's measured height instead (`--basalt-page-bar-h`, published by `PageBar`).
+ */
+const ANCHOR_STYLE = { scrollMarginTop: 'var(--basalt-page-bar-h, 0px)' } as const
+
+/**
  * One section of the dashboard: basalt's `Section` plus the three things that are content decisions
  * rather than framework ones.
  *
@@ -114,7 +122,7 @@ export function DashboardSection<T extends string>({
       <Box
         component="section"
         id={anchor}
-        style={{ scrollMarginTop: 'var(--basalt-page-bar-h, 0px)' }}
+        style={ANCHOR_STYLE}
       >
         {body}
       </Box>
@@ -124,6 +132,7 @@ export function DashboardSection<T extends string>({
   return (
     <Section
       id={anchor}
+      style={ANCHOR_STYLE}
       title={SECTION_LABEL[id]}
       {...(subtitle !== undefined && { subtitle })}
       {...(meta !== undefined && { summary: meta })}

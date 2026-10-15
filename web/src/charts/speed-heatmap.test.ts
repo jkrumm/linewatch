@@ -98,6 +98,11 @@ test('a range longer than the cap is clamped to the trailing 30 days', () => {
   expect(rows.length).toBeLessThanOrEqual(32)
 })
 
+test('a measured hour of 0 Mbps stays a value (deficit 0), not the absent fill', () => {
+  const { cells } = speedCells([run(1, { downloadMbps: 0 })], FROM, TO)
+  expect(cellAt(cells, 1).deficitPct).toBe(0)
+})
+
 test('full colour is a fixed deficit, not the data max', () => {
   expect(FULL_INTENSITY_DEFICIT_PCT).toBe(50)
 })

@@ -85,6 +85,13 @@ const getAbsentFraction = (p: PlotPoint): number => p.unmeasuredMembers / p.fold
 const getBarOpacity = (p: PlotPoint): number => (p.skipped > 0 ? 0.45 : 1)
 
 /**
+ * The two greys and the accent are taken, so the third state needs a hue: amber, the one chromatic
+ * token no measured series here uses. It claims "caution", not "fault" — a bucket nothing measured
+ * is exactly that — and the swatch and the fill carry the same 0.45 alpha so neither overstates.
+ */
+const THROUGHPUT_ABSENT_COLOR = VX.status.warn
+
+/**
  * The three marks this chart draws, declared once.
  *
  * The legend used to be a hand-written array literal beside a set of `fill=` expressions that
@@ -98,16 +105,8 @@ const getBarOpacity = (p: PlotPoint): number => (p.skipped > 0 ? 0.45 : 1)
  * a reader cannot decode from the axes. **`absentState` (basalt-ui 2.10.0) paints the share in
  * this entry's colour**, and the colour has to differ from both measured series (`VX.accent`,
  * `VX.line2`), not only by alpha: the old flat `VX.neutral` sat a few percent of luminance from the
- * upload grey. It is `THROUGHPUT_ABSENT_COLOR` rather than the band strips' `ABSENT_COLOR`
- * because that one is `VX.accent`, which is this chart's download hue.
+ * upload grey. See `THROUGHPUT_ABSENT_COLOR` for why it is not the band strips' `ABSENT_COLOR`.
  */
-/**
- * The two greys and the accent are taken, so the third state needs a hue: amber, the one chromatic
- * token no measured series here uses. It claims "caution", not "fault" — a bucket nothing measured
- * is exactly that — and the swatch and the fill carry the same 0.45 alpha so neither overstates.
- */
-const THROUGHPUT_ABSENT_COLOR = VX.status.warn
-
 export const THROUGHPUT_SERIES: MirroredBarsSeries<PlotPoint>[] = [
   {
     key: 'down',

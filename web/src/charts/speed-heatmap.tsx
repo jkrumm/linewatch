@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { ChartCard, Heatmap, type ChartTooltipRow } from 'basalt-ui/charts'
 import { VX } from 'basalt-ui/tokens'
 import type { SpeedTest } from '../lib/types'
@@ -70,7 +71,7 @@ function mergeHours(a: HourRow | null, b: HourRow | null): HourRow | null {
  * rather than borrowing another run's reason. */
 function failureReason(failures: SpeedTest[]): string {
   const reason = failures.find((f) => f.error !== null)?.error
-  return reason === undefined || reason === null ? '' : ` — ${reason}`
+  return reason ? ` — ${reason}` : ''
 }
 
 /**
@@ -124,8 +125,10 @@ export function speedCells(
   const means = cells.map((c) => c.mean).filter((m): m is number => m !== null)
   const fastest = means.length > 0 ? Math.max(...means) : null
   for (const cell of cells) {
-    if (cell.mean !== null && fastest !== null && fastest > 0)
-      cell.deficitPct = (100 * (fastest - cell.mean)) / fastest
+    // A measured hour always has a value: when the fastest mean is itself 0 nothing is slower than
+    // it, so the deficit is 0 — never `null`, which is the absent fill.
+    if (cell.mean !== null && fastest !== null)
+      cell.deficitPct = fastest > 0 ? (100 * (fastest - cell.mean)) / fastest : 0
   }
   return { cells, rows: [...new Set(cells.map((c) => c.row))], fastest }
 }
@@ -189,7 +192,7 @@ export function SpeedHeatmap({
    */
   isPending?: boolean
 }) {
-  const { cells, rows, fastest } = speedCells(tests, from, to)
+  const { cells, rows, fastest } = useMemo(() => speedCells(tests, from, to), [tests, from, to])
   const [compact] = dashboard.field.compact.use()
   // The caption carries the real figure rather than a bare superlative: "Slowest" over a
   // range-relative ramp was the lie itself. While pending `state` conceals the legend, so the

@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { ChartCard, Heatmap, type ChartTooltipRow } from 'basalt-ui/charts'
 import { VX } from 'basalt-ui/tokens'
 import type { ProbeBucket } from '../lib/types'
@@ -144,7 +145,7 @@ export function AvailabilityHeatmap({
   /** True while the probe-buckets query behind this grid is in flight — see the component docblock. */
   isPending?: boolean
 }) {
-  const { cells, rows } = availabilityCells(buckets, from, to)
+  const { cells, rows } = useMemo(() => availabilityCells(buckets, from, to), [buckets, from, to])
   const [compact] = dashboard.field.compact.use()
 
   return (

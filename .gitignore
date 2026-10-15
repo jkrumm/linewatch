@@ -27,3 +27,6 @@ web/dist
 
 # Carries the real bearer token (rendered by `make up`) — never commit it.
 .env
+
+# Wave evidence: raw screenshots stay local, the index in docs/waves/evidence/*.md is committed.
+docs/waves/evidence/raw/

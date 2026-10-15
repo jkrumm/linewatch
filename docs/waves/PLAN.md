@@ -63,38 +63,53 @@ basalt-ui `docs/waves/v2-chart-inventory.md` rows l1–l11. Worked shape: argo's
   `ChartSeries`) and three render tests mount charts. `bun test` is a gate in its own right, and the
   bump wave must run it, not only `tsc`.
 
-## Wave 1 — Baseline evidence on 1.41 <!-- status: active -->
+## Wave 1 — Baseline evidence on 1.41 <!-- status: done -->
 
 Nothing ships. The before-picture every later wave is compared against.
 
-- [ ] Record the 1.41 state: `make check` verbatim, `bun test` pass/fail/file counts,
+- [x] Record the 1.41 state: `make check` verbatim, `bun test` pass/fail/file counts,
       `cd web && bun run lint` and `./node_modules/.bin/basalt-ui doctor` output, the `bun run build`
       output sizes (raw + gzip JS/CSS total and per chunk from `dist/`), and whether `USE_MOCK`'s
       generator is seeded (D3).
-- [ ] Screens of the one route (`/`) via `@verifier` against the live container: light/dark ×
+- [x] Screens of the one route (`/`) via `@verifier` against the live container: light/dark ×
       1280×800 / 390×844 × compact on/off × `?range=` 1h / 24h / 7d / 30d / all, plus the section
       tab views (`DashboardSection` `ViewTabs`) — every section, every named view. Gitignored raw
       PNGs under `docs/waves/evidence/raw/`, an index with the capture time in
       `baseline-1.41.md`.
-- [ ] Tooltip evidence for all 11 chart rows (l1–l11 of the inventory): hover shot of each of the five
+- [x] Tooltip evidence for all 11 chart rows (l1–l11 of the inventory): hover shot of each of the five
       latency-band instances, both strips, throughput, speed, bufferbloat, both heatmaps (one cell
       per state: measured / failed / absent), and the status-bar sparklines; one keyboard-focus
       capture of the shared cursor across charts. Record the tooltip header text of each — it pins
       `formatHeader` (`charts/tooltip-header.test.ts`).
-- [ ] Map every guard test to its 2.x fate in `baseline-1.41.md`: `pending.render`,
+- [x] Map every guard test to its 2.x fate in `baseline-1.41.md`: `pending.render`,
       `follower-tooltip`, `tooltip-header`, `axis`, `overlay-color`, `availability-heatmap.render`,
       `throughput-chart.render`, `status-bar.render`, `compact.contract` — keep / rewrite / delete,
       each with a reason. A guard deleted without a successor is a regression.
-- [ ] Check D1(c): can rollhook CD for this repo be paused? Record the answer (and the exact switch
+- [x] Check D1(c): can rollhook CD for this repo be paused? Record the answer (and the exact switch
       if any) — do not pause anything.
-- [ ] File the D2 ledger rows (absent hatch, `BandSpan.absentFraction`, `BandStripSeries.mark`,
+- [x] File the D2 ledger rows (absent hatch, `BandSpan.absentFraction`, `BandStripSeries.mark`,
       `tooltip.follow`, `tooltip.label`, see Appendix B "unmapped") in basalt-ui
       `docs/waves/argo-friction.md` as `linewatch W1 …` rows, or list them under **Left behind** if
       the lead cannot land the PR.
 
 **Evidence:** `docs/waves/evidence/baseline-1.41.md`.
 
-## Wave 2 — The 2.7.3 bump (atomic, D1) <!-- status: pending -->
+**Left behind:**
+- Wave 1 ran on master and committed docs/evidence only (`.gitignore` gains `docs/waves/evidence/raw/`). No app code changed, nothing pushed that CD would act on beyond docs.
+- 1.41 gates: `make check` green (577 root + 343 web tests), lint, `doctor` clean, build green; bundle JS 1372859 B raw / 429148 gz, CSS 281513 / 44905. Wave 2 must reproduce 343 web tests.
+- D1(c): **no pause switch** (not in this repo's workflows/compose, not in rollhook's README) — moot under D1(b).
+- D3: `USE_MOCK` is a hard-coded `const` in `web/src/lib/api.ts:37`, and the generator anchors on `Date.now()` at load, so mock marks are not byte-reproducible; pin `NOW` locally if a wave needs that.
+- **D2 verdict (paper, 2.8.0/2.8.1 `BandStrip`):** the invariant can be kept, with four Wave 4 conditions (absent vs clean are both `VX.neutral`, separated by alpha only — pick the absent colour deliberately and look at it in both schemes; a whole-band absent has no edge cue; the absent legend toggle zeroes the share; pin `absentState` with a test). Details in `baseline-1.41.md` § D2. Plan item "file D2 ledger rows" is moot for rows 1–3 of Appendix B's unmapped list (basalt rows 64/65 answered them in 2.8.0); not re-verified: `tooltip.follow` (2.8.1 still only has `onFollow`), `tooltip.label`.
+- Guard map is in `baseline-1.41.md` (none deleted; nine rewrite/keep decisions). **Wave 2 consequence:** three test files import `foldBands` from `basalt-ui/charts`, which is not in the published 2.x `dist` (friction 1) — they fail at link time under `bun test`; stub those fold cases with `MIGRATION-STUB(w4)`, don't delete.
+- Baseline oddities that are *not* migration regressions, to keep out of the 2.x diff: `range=all` takes 45–55 s (30d ~11 s), blank page until data lands, and stacked abandoned requests starved `/health`; 20 px / 8 px horizontal overflow; three tooltip date formats; failed-run speed-test tooltip is 1272×293 px with raw Ookla stderr containing `Permission denied "/app/.config/ookla"` — **a real container fault** (the speedtest cannot save its settings), outside this wave's scope, unfixed.
+
+**basalt friction** (for the orchestrator to file in basalt-ui `docs/waves/argo-friction.md` as `linewatch W1 …`; basalt-ui was not edited):
+1. `foldBands` is documented as exported (MIGRATING § 2.7.0-era table, line 4252 on 2.7.3, 4373 on 2.8.1; "returns with W5 BandStrip") but is **absent from the published `dist` of 2.7.3 and 2.8.1**; `BandFold` is present. `tsc` and `doctor` pass because tests are not typechecked; only `bun test` fails. Blocker for testing a strip's `merge` against the real grouping. Plan Appendix B's "kept" was wrong for the same reason.
+2. `tooltip.follow: false` (source-only anchor, five latency-band instances share a column) still has no 2.x equivalent (2.8.1 `types.d.ts` has `onFollow` only). Candidate for Wave 5, state per the instruction there.
+3. MIGRATING § 2.8.0 tells consumers to colour the absent state `VX.neutral`; a consumer whose "clean/no problem" state is also neutral gets the two separated by alpha alone. Doc advice, not a bug — candidate papercut: say the absent colour must differ from every measured state.
+4. Candidate, to confirm in Wave 4: toggling the absent legend entry zeroes every band's `absentFraction` (`resolveAbsent`, `BandStrip.js:41-42`), so a reader can make a folded band look fully measured. May want a non-toggleable legend entry.
+
+## Wave 2 — The 2.7.3 bump (atomic, D1) <!-- status: active -->
 
 One worker on one change; the lead reviews and lands it. Sized from the probe: 123 `tsc` errors in
 19 files (107 in 9 chart files, 4 in `status-bar.tsx`, 12 wiring/import), 6 hard `doctor` failures,

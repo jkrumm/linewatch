@@ -7,7 +7,7 @@ import { slotExtent } from '../lib/densify'
 import type { ProbeBucketSeconds, SpeedTest } from '../lib/types'
 import { fmtMs } from '../lib/format'
 import { runTickFormat } from '../lib/axis'
-import { runHeader, runX, toRuns, withLoneRunMarker, type Run } from '../lib/speed-runs'
+import { runHeader, runX, toRuns, type Run } from '../lib/speed-runs'
 import { dashboard } from '../lib/dashboard-store'
 import classes from './bufferbloat-chart.module.css'
 
@@ -83,7 +83,6 @@ export function BufferbloatChart({
   isPending?: boolean
 }) {
   const points = useMemo(() => toRuns(tests), [tests])
-  const series = useMemo(() => withLoneRunMarker(SERIES, points.length), [points.length])
   const xDomain = useMemo(() => slotExtent({ from, to, bucketSeconds }), [from, to, bucketSeconds])
   const { ref: viewRef, inView } = useInViewport<HTMLDivElement>()
   const [compact] = dashboard.field.compact.use()
@@ -113,7 +112,7 @@ export function BufferbloatChart({
             data={points}
             x={runX}
             xDomain={xDomain}
-            series={series}
+            series={SERIES}
             formatX={runTickFormat}
             // The unit rides the axis here, unlike `speed-chart` where a subtitle carries it: this
             // is the same `fmtMs` the latency band's own left axis uses, and the two read together.

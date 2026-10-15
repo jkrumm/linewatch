@@ -1,5 +1,5 @@
 import { createRootRouteWithContext, Outlet } from '@tanstack/react-router'
-import type { QueryClient } from '@tanstack/react-query'
+import type { BasaltRouterContext } from 'basalt-ui'
 import { Box, Container } from '@mantine/core'
 import classes from '../shell/root-layout.module.css'
 
@@ -26,7 +26,7 @@ import classes from '../shell/root-layout.module.css'
  * `root-layout.module.css` on basalt's own page-gutter tokens, which `page-bar.module.css` cancels
  * by name rather than by a second copy of the numbers.
  */
-export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
+export const Route = createRootRouteWithContext<BasaltRouterContext>()({
   component: RootLayout,
 })
 

@@ -1,5 +1,4 @@
-import { createSearchStore, field } from 'basalt-ui/router-tanstack'
-import { createLocalStore } from 'basalt-ui/state'
+import { createSearchStore, createLocalStore, field } from 'basalt-ui/state'
 import { RANGE_LABEL, RANGE_OPTIONS } from './range'
 
 /**

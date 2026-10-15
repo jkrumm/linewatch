@@ -8,8 +8,7 @@ import {
 } from '@tabler/icons-react'
 import type { ReactNode } from 'react'
 import { DeltaBadge, WidgetHeader } from 'basalt-ui'
-import { CONTAINER_KEYS } from 'basalt-ui/tokens'
-import { BarSparkline, LineSparkline, VX, useChartSize } from 'basalt-ui/charts'
+import { CONTAINER_KEYS, VX } from 'basalt-ui/tokens'
 import type { LiveReading } from '../lib/live'
 import { liveGateway, liveInternet } from '../lib/live'
 import type { OngoingOutage, ProbeBucketSeconds, SpeedTest, StatusSample } from '../lib/types'
@@ -23,7 +22,6 @@ import {
   denseSparkline,
   downtimeTint,
   measuredFraction,
-  poolTo,
   windowDownloadMedian,
   windowWanMedian,
   worstBucketLoss,
@@ -34,33 +32,12 @@ import {
 import { fmtDateTime, fmtDuration, fmtMbps, fmtMinutes, fmtMs, fmtPct, fmtRelative } from '../lib/format'
 import classes from './status-bar.module.css'
 
-/**
- * A sparkline sized to the cell it sits in.
- *
- * `ResponsiveChart` is gone in basalt-ui 1.15.0 — `ChartFrame` is the one responsive path, and it
- * is a chart shell (legend band, pending state, plot rect) rather than a measuring box, which is
- * not what a bare sparkline wants. `useChartSize` is the shipped hook for exactly this case, and
- * its own JSDoc names it: "sizing a sparkline to its table cell".
- *
- * The `width > 0` gate is the hook's documented pattern, not caution: `LineSparkline` takes a
- * numeric `width` and would draw a zero-width path on the first frame.
- */
-function MeasuredSpark({ children }: { children: (size: { width: number; height: number }) => ReactNode }) {
-  const { ref, width } = useChartSize()
-  return (
-    <Box ref={ref} mih={SPARK_H} h={SPARK_H}>
-      {width > 0 && children({ width, height: SPARK_H })}
-    </Box>
-  )
-}
-
 const SCOPE_LABEL: Record<OngoingOutage['scope'], string> = {
   wan: 'WAN outage',
   gateway: 'Gateway outage',
 }
 
-/** Sparkline height — width is measured per cell by `MeasuredSpark` below, never a fixed constant
- * (a fixed 260px overflowed the 390px mobile viewport by 74px, clipping mid-curve). */
+/** Sparkline slot height. */
 const SPARK_H = 44
 
 /** Matches `StatCard`'s own rail, which this bar had to stop using — see the module docblock. */
@@ -287,11 +264,10 @@ export function StatusBar({
   const plottablePending = pending.series || pending.tests
   const period = `vs ${RANGE_PERIOD_LABEL[range]}`
 
-  const spark = (node: (size: { width: number; height: number }) => ReactNode) => {
-    if (plottablePending) return <Box mih={SPARK_H} />
-    if (allSeries === null) return null
-    return <MeasuredSpark>{node}</MeasuredSpark>
-  }
+  // MIGRATION-STUB(w6): the three sparklines (loss bars, ping line, download line) return with
+  // basalt-ui's `Sparkline`; the slot keeps its height so the row does not reflow. The 1.41
+  // version (`MeasuredSpark`, `poolTo` downsampling per cell width) is in git history (d63aca7).
+  const spark = () => (allSeries === null && !plottablePending ? null : <Box mih={SPARK_H} />)
 
   /**
    * Per-cell width weights, not six equal sixths.
@@ -361,22 +337,7 @@ export function StatusBar({
         <Cell railGutter label={`Worst ${bucketLabel(bucketSeconds)}`} tone={pending.series ? undefined : worstLossTint(worstLoss)}>
           <KpiValue>{pending.series || worstLoss === null ? '—' : `${fmtPct(worstLoss)} lost`}</KpiValue>
           <ComparisonBadge comparison={previous === null ? null : lossDelta} period={period} />
-          {spark(({ width, height }) => {
-            // Downsampled to the width it is actually drawn at. `BarSparkline` computes
-            // `barWidth = max(step - 1, 1)`, so 288 buckets in 173px is a 1px bar on a 0.60px
-            // pitch — bars overlapping by 40%, and a single 100%-loss bucket invisible inside a
-            // uniform grey block. MAX for loss, because the number above it is a maximum over
-            // buckets and a sparkline that averaged the spike away would contradict it.
-            const cap = Math.max(8, Math.floor(width / 3))
-            return (
-              <BarSparkline
-                data={poolTo(allSeries?.loss ?? [], cap, 'max')}
-                width={width}
-                height={height}
-                ariaLabel="Worst packet loss per bucket"
-              />
-            )
-          })}
+          {spark()}
         </Cell>
       ),
     },
@@ -387,19 +348,7 @@ export function StatusBar({
         <Cell railGutter label="Ping · internet">
           <KpiValue>{pending.series ? '—' : fmtMs(wanMedianMs)}</KpiValue>
           <ComparisonBadge comparison={previous === null ? null : pingDelta} period={period} />
-          {spark(({ width, height }) => {
-            // MEDIAN, not max: this is a typical-case reading, and a max would draw an envelope
-            // rather than a trend.
-            const cap = Math.max(8, Math.floor(width / 3))
-            return (
-              <LineSparkline
-                data={poolTo(allSeries?.rtt ?? [], cap, 'median')}
-                width={width}
-                height={height}
-                ariaLabel="Median round-trip time to the internet per bucket"
-              />
-            )
-          })}
+          {spark()}
         </Cell>
       ),
     },
@@ -410,18 +359,7 @@ export function StatusBar({
         <Cell railGutter label="Download">
           <KpiValue>{pending.tests ? '—' : fmtMbps(downloadMbps)}</KpiValue>
           <ComparisonBadge comparison={previous === null ? null : downloadDelta} period={period} />
-          {spark(({ width, height }) => {
-            const cap = Math.max(8, Math.floor(width / 3))
-            return (
-              <LineSparkline
-                data={poolTo(allSeries?.download ?? [], cap, 'median')}
-                width={width}
-                height={height}
-                color={VX.line}
-                ariaLabel="Download throughput per run"
-              />
-            )
-          })}
+          {spark()}
         </Cell>
       ),
     },
@@ -501,7 +439,7 @@ function Cell({
   children: ReactNode
 }) {
   return (
-    <Stack gap={4} miw={0} pos="relative" pl={railGutter ? 'sm' : undefined} h="100%">
+    <Stack gap={4} miw={0} pos="relative" {...(railGutter ? { pl: 'sm' } : {})} h="100%">
       {tone !== undefined && (
         <>
           <VisuallyHidden>{TONE_LABEL[tone]}</VisuallyHidden>
@@ -700,8 +638,7 @@ function Reading({ kind, reading, now }: { kind: 'router' | 'internet'; reading:
           fw={600}
           fz="lg"
           ff="monospace"
-          c={stale ? 'dimmed' : undefined}
-          td={stale ? 'line-through' : undefined}
+          {...(stale ? { c: 'dimmed', td: 'line-through' } : {})}
           style={{ whiteSpace: 'nowrap' }}
         >
           {fmtMs(reading.medMs)}

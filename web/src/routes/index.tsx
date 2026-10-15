@@ -2,7 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 import { Card, Stack, Text } from '@mantine/core'
 import { useQueries, useQuery } from '@tanstack/react-query'
 import { PageBar, ThemeToggle } from 'basalt-ui'
-import { TooltipRow, VX } from 'basalt-ui/charts'
+import { VX } from 'basalt-ui/tokens'
 import { Callout } from 'basalt-ui/content'
 import { FilterSet, NumberFilter, RangeFilter } from 'basalt-ui/controls'
 import {
@@ -38,8 +38,7 @@ import { SpeedHeatmap } from '../charts/speed-heatmap'
 import { BufferbloatChart } from '../charts/bufferbloat-chart'
 import { LinkSpeedStrip } from '../charts/link-speed-strip'
 import { ThroughputChart } from '../charts/throughput-chart'
-import { WAN_TARGETS, comparePointsFrom, foldInternetBuckets, median } from '../lib/aggregate'
-import type { InternetBucket } from '../lib/aggregate'
+import { comparePointsFrom, foldInternetBuckets, median } from '../lib/aggregate'
 import { throughputPoints, throughputTotals } from '../lib/throughput'
 import { windowDowntime } from '../lib/downtime'
 import { downtimeTint, measuredFraction, type ThresholdTint, worstBucketLoss, worstLossTint } from '../lib/kpi'
@@ -233,10 +232,6 @@ function DashboardPage() {
 
   const points = comparePointsFrom(bucketsByTarget, { from, to, bucketSeconds: bucket })
   const internetBuckets = foldInternetBuckets(bucketsByTarget)
-  // Keyed by bucket start so the folded chart's tooltip can recover the two fields `ProbeBucket`
-  // has no room for. A lookup rather than a cast on the row the chart hands back: a miss draws no
-  // supplementary rows, where a cast would assert facts about a bucket that is not a fold.
-  const internetByBucket = new Map(internetBuckets.map((b) => [b.bucket, b]))
   // Folded onto the window's own axis first, so the totals count the same buckets the chart draws
   // — including the ones that reported nothing. A total summed straight from the response would
   // silently omit the unmeasured slots and then present the result as the window's volume.
@@ -306,7 +301,7 @@ function DashboardPage() {
           `barClasses.bleed` is the one thing basalt cannot know: `__root.tsx`'s Container gutters,
           and whether this bar wants a hairline. See that CSS module.
 
-          `mobile: 'bar'` on the live chip is mandatory rather than decorative — a custom secondary
+          `mobile: 'bar'` on the live chip is mandatory rather than decorative — a custom action
           defaults to `'more'`, and the kebab is the one place the verdict word must never be. */}
       <PageBar
         title="linewatch"
@@ -327,31 +322,30 @@ function DashboardPage() {
           </FilterSet>
         }
         filtersEnd={[{ key: 'version', kind: 'custom', node: <VersionTag />, mobile: 'hidden' }]}
-        actions={{
-          secondary: [
-            {
-              key: 'live',
-              kind: 'custom',
-              mobile: 'bar',
-              node: (
-                <LiveChip
-                  live={
-                    status === undefined
-                      ? null
-                      : {
-                          internetMs: liveInternet(status.lastSamples).medMs,
-                          latestTs: latestSampleTs(status.lastSamples),
-                          openOutages: status.ongoingOutages.length,
-                          now: nowTick,
-                        }
-                  }
-                />
-              ),
-            },
-            { key: 'compact', kind: 'custom', mobile: 'bar', node: <CompactToggle /> },
-            { key: 'theme', kind: 'custom', mobile: 'more', node: <ThemeToggle /> },
-          ],
-        }}
+        actions={[
+          {
+            key: 'live',
+            kind: 'custom',
+            primary: true,
+            mobile: 'bar',
+            node: (
+              <LiveChip
+                live={
+                  status === undefined
+                    ? null
+                    : {
+                        internetMs: liveInternet(status.lastSamples).medMs,
+                        latestTs: latestSampleTs(status.lastSamples),
+                        openOutages: status.ongoingOutages.length,
+                        now: nowTick,
+                      }
+                }
+              />
+            ),
+          },
+          { key: 'compact', kind: 'custom', mobile: 'bar', node: <CompactToggle /> },
+          { key: 'theme', kind: 'custom', mobile: 'more', node: <ThemeToggle /> },
+        ]}
       />
 
       <StatusBar
@@ -558,10 +552,9 @@ function DashboardPage() {
                     bucketSeconds={bucket}
                     isPending={seriesPending}
                     overlay={{ label: 'Router', buckets: bucketsByTarget.get('gateway') ?? [] }}
-                    renderExtraTooltipRows={(b) => {
-                      const fold = internetByBucket.get(b.bucket)
-                      return fold === undefined ? null : <InternetFoldRows fold={fold} />
-                    }}
+                    // MIGRATION-STUB(w5): `renderExtraTooltipRows` fed `InternetFoldRows` (anchors folded +
+                    // worst single anchor) into the tooltip; the 2.x tooltip takes rows as data, so it
+                    // returns with the latency band. The 1.41 version is in git history (d63aca7).
                     // Scoped here, not in the chart: an Outage row with scope 'gateway' drawn
                     // across the internet band would assert something the row does not say, and
                     // the chart cannot tell which band it is drawing.
@@ -825,41 +818,6 @@ function VersionTag() {
     <Text size="xs" c="dimmed" ff="monospace">
       {__APP_VERSION__}
     </Text>
-  )
-}
-
-/**
- * The two things the folded internet band cannot say for itself, said on its own tooltip.
- *
- * The band draws a `ProbeBucket`, which has no field for how many anchors it was folded from or
- * for the outlier the fold's median deliberately ignores. Both are needed to read it correctly:
- * a bucket where two anchors went missing plots as an ordinary reading, and an internet-wide 0%
- * loss beside one dead anchor is two facts rather than one. `foldInternetBuckets` carries both;
- * this is where they surface.
- *
- * The basis row is drawn always, not only when it is less than three — a reader who only sees the
- * caveat when something is wrong has to know the caveat exists to trust its absence.
- */
-function InternetFoldRows({ fold }: { fold: InternetBucket }) {
-  return (
-    <>
-      <TooltipRow
-        color={VX.neutral}
-        label="Folded from"
-        value={`${fold.anchors} of ${WAN_TARGETS.length} anchors`}
-        shape="bar"
-      />
-      {/* Only when it disagrees with the internet-wide figure above it. Equal values would draw
-          the same number twice under two labels, which reads as a distinction that isn't there. */}
-      {fold.worstAnchorLossPct > fold.lossPct && (
-        <TooltipRow
-          color={VX.status.warn}
-          label="Worst single anchor"
-          value={fmtPct(fold.worstAnchorLossPct)}
-          shape="dot"
-        />
-      )}
-    </>
   )
 }
 

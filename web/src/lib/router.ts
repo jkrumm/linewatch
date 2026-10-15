@@ -1,13 +1,9 @@
-import { createRouter } from '@tanstack/react-router'
-import { queryClient } from './query-client'
+import { createBasaltRouter } from 'basalt-ui'
 import { routeTree } from '../routeTree.gen'
 
-export const router = createRouter({
-  routeTree,
-  context: { queryClient },
-  defaultPreload: 'intent',
-  defaultPreloadStaleTime: 0,
-})
+// basalt's QueryClient defaults already carry the 30 s `staleTime` and no refetch on window focus;
+// `defaultPreload: 'intent'` and `defaultPreloadStaleTime: 0` are `createBasaltRouter`'s too.
+export const router = createBasaltRouter({ routeTree })
 
 declare module '@tanstack/react-router' {
   interface Register {

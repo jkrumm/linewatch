@@ -1,5 +1,5 @@
 import { Box, Group, Text, Tooltip } from '@mantine/core'
-import { VX } from 'basalt-ui/charts'
+import { VX } from 'basalt-ui/tokens'
 
 export interface Stat {
   /**
@@ -10,7 +10,7 @@ export interface Stat {
    * "Download p95" twice as wide is worse copy. Keyed on the label those two collided, and React's
    * response to a duplicate key is to drop one of the children.
    */
-  id?: string
+  id?: string | undefined
   label: string
   /**
    * The figure, or `null` while the query behind it is in flight.
@@ -23,14 +23,14 @@ export interface Stat {
   value: string | null
   /** A threshold verdict on the value. `undefined` — nothing wrong, or nothing measured — is never
    * tinted: absence is neither a good reading nor a bad one. */
-  tone?: 'warn' | 'bad'
+  tone?: 'warn' | 'bad' | undefined
   /** What the figure is taken over, or the caveat it carries. Shown on hover; must never be the
    * only place a problem is stated. */
-  hint?: string
+  hint?: string | undefined
   /** Entries sharing a `group` wrap as one unit. The Speed strip's `p95` label is deliberately bare
    * because it is read against the `Download p50` beside it — and on a narrow viewport flex-wrap
    * was free to put them on different lines, which leaves a `p95` on the page belonging to nothing. */
-  group?: string
+  group?: string | undefined
 }
 
 /** Split `stats` into runs of consecutive entries sharing a non-undefined `group`. An ungrouped
@@ -116,10 +116,10 @@ function StatValue({ stat }: { stat: Stat }) {
       size="sm"
       fw={600}
       ff="monospace"
-      c={stat.tone === 'bad' ? VX.status.bad : stat.tone === 'warn' ? VX.status.warn : undefined}
+      {...(stat.tone === undefined ? {} : { c: stat.tone === 'bad' ? VX.status.bad : VX.status.warn })}
       // A dotted underline is the only affordance saying a hover exists. Without it the hint is a
       // fact nobody finds, which is indistinguishable from a fact that was never written.
-      style={stat.hint === undefined ? undefined : { textDecoration: 'underline dotted', textUnderlineOffset: 3 }}
+      {...(stat.hint === undefined ? {} : { style: { textDecoration: 'underline dotted', textUnderlineOffset: 3 } })}
     >
       {stat.value}
     </Text>

@@ -1,7 +1,7 @@
 import { Box, Collapse, Group, Stack, Text, UnstyledButton } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { IconArrowsRightLeft, IconChevronDown, IconChevronRight } from '@tabler/icons-react'
-import { VX } from 'basalt-ui/charts'
+import { VX } from 'basalt-ui/tokens'
 import type { SpeedTest } from '../lib/types'
 import { fmtDateTime } from '../lib/format'
 import { dashboard } from '../lib/dashboard-store'

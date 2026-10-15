@@ -196,7 +196,9 @@ function useOpenOnHash({
   // `open` in a ref so the listener below can read the current value without being torn down and
   // rebuilt on every write — `createPersistedState`'s setter takes a value, not an updater.
   const openRef = useRef(open)
-  openRef.current = open
+  useEffect(() => {
+    openRef.current = open
+  }, [open])
 
   useEffect(() => {
     if (!active) return
@@ -210,5 +212,5 @@ function useOpenOnHash({
     if (targeted()) document.getElementById(anchor)?.scrollIntoView()
     window.addEventListener('hashchange', openIfTargeted)
     return () => window.removeEventListener('hashchange', openIfTargeted)
-  }, [active, id, setOpen, storageKey])
+  }, [active, id, setOpen])
 }

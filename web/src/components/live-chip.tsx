@@ -1,6 +1,6 @@
 import { Box, Group, Text } from '@mantine/core'
 import { useSizeClass } from 'basalt-ui'
-import { VX } from 'basalt-ui/charts'
+import { VX } from 'basalt-ui/tokens'
 import { isStale } from '../lib/freshness'
 import { fmtMs, fmtRelative } from '../lib/format'
 

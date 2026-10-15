@@ -22,7 +22,7 @@ A control has one home and takes its state from a store field; the home sets its
 ## Homes
 
 - A control lives in exactly one home: a `PageBar` slot (`actions`, `sync`, `filters`, `filtersEnd`, `tabs`), a `Section` slot (`actions`, `tabs`), a `WidgetHeader`/`ChartCard`/`StatCard`/`BasaltDataTable` `actions` slot, or a form row (`SettingsRow.control`, `FormRow`, `FormGroup`). A per-row action is `BasaltDataTable rowActions` (typed data: `label`, `icon`, `onClick(row)`, `danger`, `disabled(row)`), never a `Menu`/`ActionIcon` in a column `cell`/`display` renderer. [basalt/control-outside-home]
-- A raw Mantine selection control (`Select`, `SegmentedControl`, …) in a home slot is a filter without a `field`. [basalt/hand-rolled-filter] [check-theme raw-selection-control]
+- A raw Mantine selection control (`Select`, `SegmentedControl`, …) in a page slot is a filter without a `field`: bind the basalt filter with `field={store.field.x}`; in `SettingsRow control=` keep the Mantine control and take `[value, setValue]` from `prefs.field.x.use()`. [basalt/hand-rolled-filter] [check-theme raw-selection-control]
 - A basalt filter outside a slot, `FilterSet`, `PageAside` or form row has no home. [basalt/bound-control-outside-home]
 - `PageBar` `actions` holds at most 5 entries with exactly one `primary` (date navigation is `filtersEnd`, not an action); a `Section` holds at most 3 `actions`. [type PageBar] [type Section]
 - A control in a home slot carries no `size`, `w`, `fullWidth`, `visibleFrom` or `hiddenFrom`; the home sizes it. [basalt/control-size-literal]

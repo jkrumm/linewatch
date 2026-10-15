@@ -9,7 +9,7 @@ Method only; the law is `.claude/rules/basalt-*.md` and `./DESIGN.md`.
 ## Steps
 
 1. Read `./DESIGN.md` and the rules `basalt-tokens.md`, `basalt-mantine.md`, `basalt-controls.md`, `basalt-charts.md`. No `DESIGN.md`: run `/basalt-app` first.
-2. Decide before coding: which metrics earn a hue (trend, status, separation; the rest neutral), the one primary action per view, each control's home.
+2. Decide before coding: which metrics earn a hue (trend, status, separation; the rest neutral), the one primary action per view, each control's home (a `SettingsRow` preference: `const [unit, setUnit] = prefs.field.unit.use()` from `createLocalStore`, then `control={<Select value={unit} onChange={(v) => v && setUnit(v)} />}`, never `useState`).
 3. Check the shipped composites first: `StatCard`, `ChartCard`, `Section`, `WidgetHeader`, `BasaltDataTable`, `EmptyState`. A gap is reported, not routed around.
 4. Build with Mantine primitives and the composites; take every color from `VX.*` or a series token.
 5. Tune by eye in the running app: open the theme lab with the `dev.theme` Spotlight command (dev only) and adjust in both color schemes.

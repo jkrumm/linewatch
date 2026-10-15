@@ -8,6 +8,7 @@ import {
 } from '@tabler/icons-react'
 import type { ReactNode } from 'react'
 import { DeltaBadge, WidgetHeader } from 'basalt-ui'
+import { Sparkline } from 'basalt-ui/charts'
 import { CONTAINER_KEYS, VX } from 'basalt-ui/tokens'
 import type { LiveReading } from '../lib/live'
 import { liveGateway, liveInternet } from '../lib/live'
@@ -22,6 +23,7 @@ import {
   denseSparkline,
   downtimeTint,
   measuredFraction,
+  poolTo,
   windowDownloadMedian,
   windowWanMedian,
   worstBucketLoss,
@@ -39,6 +41,14 @@ const SCOPE_LABEL: Record<OngoingOutage['scope'], string> = {
 
 /** Sparkline slot height. */
 const SPARK_H = 44
+
+/**
+ * Points a sparkline is pooled to. The old cap was a third of the measured cell width; `Sparkline`
+ * measures its own box and does not report it, so this is a fixed ceiling sized for the narrowest
+ * cell (~170 px at 390 wide, 3 px a point). Left unpooled, 288 buckets in that width is a sub-pixel
+ * bar pitch, and a single 100 %-loss bucket disappears into a uniform block.
+ */
+const SPARK_POINTS = 56
 
 /** Matches `StatCard`'s own rail, which this bar had to stop using — see the module docblock. */
 const TONE_RAIL_WIDTH = 3
@@ -264,10 +274,10 @@ export function StatusBar({
   const plottablePending = pending.series || pending.tests
   const period = `vs ${RANGE_PERIOD_LABEL[range]}`
 
-  // MIGRATION-STUB(w6): the three sparklines (loss bars, ping line, download line) return with
-  // basalt-ui's `Sparkline`; the slot keeps its height so the row does not reflow. The 1.41
-  // version (`MeasuredSpark`, `poolTo` downsampling per cell width) is in git history (d63aca7).
-  const spark = () => (allSeries === null && !plottablePending ? null : <Box mih={SPARK_H} />)
+  const sparkState = { pending: plottablePending }
+  // Pending draws the sparkline's own placeholder at the same box, so the row does not reflow when
+  // the trend lands; resolved with a withheld series draws nothing (`NoSeriesSlot` covers downtime).
+  const sparkSlot = (node: ReactNode) => (allSeries === null && !plottablePending ? null : node)
 
   /**
    * Per-cell width weights, not six equal sixths.
@@ -337,7 +347,17 @@ export function StatusBar({
         <Cell railGutter label={`Worst ${bucketLabel(bucketSeconds)}`} tone={pending.series ? undefined : worstLossTint(worstLoss)}>
           <KpiValue>{pending.series || worstLoss === null ? '—' : `${fmtPct(worstLoss)} lost`}</KpiValue>
           <ComparisonBadge comparison={previous === null ? null : lossDelta} period={period} />
-          {spark()}
+          {sparkSlot(
+            // MAX when pooling, because the number above is a maximum over buckets and a sparkline
+            // that averaged the spike away would contradict it.
+            <Sparkline
+              mark="bar"
+              data={poolTo(allSeries?.loss ?? [], SPARK_POINTS, 'max')}
+              height={SPARK_H}
+              state={sparkState}
+              ariaLabel="Worst packet loss per bucket"
+            />,
+          )}
         </Cell>
       ),
     },
@@ -348,7 +368,15 @@ export function StatusBar({
         <Cell railGutter label="Ping · internet">
           <KpiValue>{pending.series ? '—' : fmtMs(wanMedianMs)}</KpiValue>
           <ComparisonBadge comparison={previous === null ? null : pingDelta} period={period} />
-          {spark()}
+          {sparkSlot(
+            // MEDIAN, not max: a typical-case reading, and a max would draw an envelope, not a trend.
+            <Sparkline
+              data={poolTo(allSeries?.rtt ?? [], SPARK_POINTS, 'median')}
+              height={SPARK_H}
+              state={sparkState}
+              ariaLabel="Median round-trip time to the internet per bucket"
+            />,
+          )}
         </Cell>
       ),
     },
@@ -359,7 +387,15 @@ export function StatusBar({
         <Cell railGutter label="Download">
           <KpiValue>{pending.tests ? '—' : fmtMbps(downloadMbps)}</KpiValue>
           <ComparisonBadge comparison={previous === null ? null : downloadDelta} period={period} />
-          {spark()}
+          {sparkSlot(
+            <Sparkline
+              data={poolTo(allSeries?.download ?? [], SPARK_POINTS, 'median')}
+              height={SPARK_H}
+              color={VX.line}
+              state={sparkState}
+              ariaLabel="Download throughput per run"
+            />,
+          )}
         </Cell>
       ),
     },

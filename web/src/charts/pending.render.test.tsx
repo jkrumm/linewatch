@@ -19,7 +19,7 @@ const PENDING = 'Loading'
  * nobody had asked yet. `densifyBuckets` fills the requested window with nulls the moment it is
  * called, so the two strips painted the whole span as measured-and-absent; `SpeedHeatmap` rendered
  * thirty days of "No run · Not measured" cells under a legend reading "No successful run"; the two
- * `MultiLine` charts drew named series with nothing under them; the latency band drew a legend
+ * `Lines` charts drew named series with nothing under them; the latency band drew a legend
  * whose entries are an ENCODING for marks that were not on screen.
  *
  * **One shape of assertion now, and the collapse is the point.** Every one of the six used to need
@@ -116,8 +116,7 @@ describe.skip('SpeedHeatmap isPending', () => {
   })
 })
 
-// MIGRATION-STUB(w6): SpeedChart renders a placeholder card until the MultiLine port
-describe.skip('SpeedChart isPending', () => {
+describe('SpeedChart isPending', () => {
   test('renders the pending caption and drops the ref-line legend', () => {
     const html = renderToStaticMarkup(
       <SpeedChart
@@ -146,8 +145,7 @@ describe.skip('SpeedChart isPending', () => {
   })
 })
 
-// MIGRATION-STUB(w6): BufferbloatChart renders a placeholder card until the MultiLine port
-describe.skip('BufferbloatChart isPending', () => {
+describe('BufferbloatChart isPending', () => {
   test('renders the pending caption instead of the chart', () => {
     const html = renderToStaticMarkup(<BufferbloatChart tests={[]} isPending />)
     expect(html).toContain(PENDING)

@@ -1,6 +1,26 @@
-// MIGRATION-STUB(w6): the MultiLine speed chart (download/upload traces, reference lines, ref legend)
-import { ChartCard } from 'basalt-ui/charts'
+import { ChartCard, Lines } from 'basalt-ui/charts'
+import { VX } from 'basalt-ui/tokens'
+import { useMemo } from 'react'
+import { useInViewport } from './use-in-viewport'
 import type { SpeedTest } from '../lib/types'
+import { fmtMbps } from '../lib/format'
+import { runTickFormat } from '../lib/axis'
+import { runHeader, runX, toRuns, type Run } from '../lib/speed-runs'
+import { dashboard } from '../lib/dashboard-store'
+
+/**
+ * 220, not 190: two traces plus two horizontal references need room to sit apart, and at 190 the
+ * download line and the carrier-sync reference nearly touch on this line. It is the FRAME height —
+ * the legend sits outside it.
+ */
+const SPEED_HEIGHT = 220
+
+/**
+ * Compact draws this one chart shorter, and only this one: two near-flat traces plus two
+ * references, where the reading is *where they sit* against the references, not the wiggle. The
+ * latency band and the throughput bars are the opposite — spikes and gaps are the whole content.
+ */
+const SPEED_HEIGHT_COMPACT = 160
 
 /**
  * A horizontal reference at a rate the line is measured against — the host's negotiated link speed,
@@ -18,6 +38,26 @@ export type SpeedRefLine = {
   color: string
 }
 
+/** Accent blue against `VX.line2`, the MID grey — one pair for these two concepts wherever they are
+ * drawn, here and in the throughput bars. Not `VX.line`, the brightest grey available, which makes
+ * the secondary series louder than the accent. */
+const SERIES = [
+  {
+    key: 'download',
+    label: 'Download',
+    color: VX.accent,
+    getValue: (r: Run) => r.test.downloadMbps,
+    formatValue: fmtMbps,
+  },
+  {
+    key: 'upload',
+    label: 'Upload',
+    color: VX.line2,
+    getValue: (r: Run) => r.test.uploadMbps,
+    formatValue: fmtMbps,
+  },
+]
+
 /**
  * Every speed-test run in the window, download against upload.
  *
@@ -33,27 +73,72 @@ export type SpeedRefLine = {
  * saturate. One word for two measurements a screen apart is the confusion the Speed/Throughput
  * split exists to prevent. Each chart now takes its OWN section's word, so no word is used twice.
  */
-export function SpeedChart(_props: {
+export function SpeedChart({
+  tests,
+  refLines = [],
+  isPending,
+}: {
   tests: SpeedTest[]
   refLines?: SpeedRefLine[]
   /**
-   * True while the speed-tests query is in flight.
-   *
-   * `tests ?? []` drew an axis with no points on it — which on a run-series chart is the claim
-   * "no speed test ran in this window", not "nobody has asked yet".
-   *
-   * Handed straight to `MultiLine` now. It used to be branched here, onto an app-side
-   * `PendingChart`, because the kind sat inside this chart's own `ResponsiveChart` and its
-   * `ChartFrame` therefore never mounted until a `ResizeObserver` had fired — invisible to the
-   * server-rendered guard. `ChartFrame` floors its plot rect at `minWidth` (200px) as of 1.15.0,
-   * so it renders `ChartPending` whether or not anything has been measured, and the app-side
-   * scaffolding is gone.
-   *
-   * The ref-line legend below is this app's own rather than `ChartFrame`'s, so it still needs
-   * suppressing explicitly: a dashed "Host link 1000 Mbit" caption over a plot with no runs on it
+   * True while the speed-tests query is in flight. `tests ?? []` drew an axis with no points on it,
+   * which on a run series is the claim "no speed test ran in this window", not "nobody has asked
+   * yet". Handed to `state`; the legend (reference labels included) is dropped while pending,
+   * because 2.x renders it over a plot with no marks and a dashed "Host link 1000 Mbit" caption
    * names a ceiling for measurements that are not on screen.
    */
   isPending?: boolean
 }) {
-  return <ChartCard state={{ empty: 'Migrating to basalt-ui 2.0' }} />
+  const points = useMemo(() => toRuns(tests), [tests])
+  const [compact] = dashboard.field.compact.use()
+  const { ref: viewRef, inView } = useInViewport<HTMLDivElement>()
+  const pending = isPending === true
+  // The reference labels ride on the lines themselves (`RefLine.legend`, 2.x), so the swatch, the
+  // dash and the label are one record and cannot drift. `label` is the caller's, derived from the
+  // live reading it marks.
+  const refs = useMemo(
+    () =>
+      refLines.map((ref) => ({
+        value: ref.value,
+        color: ref.color,
+        dashed: true,
+        legend: { label: ref.label },
+      })),
+    [refLines],
+  )
+  const tooltip = useMemo(
+    () => ({
+      onFollow: inView,
+      formatHeader: runHeader,
+    }),
+    [inView],
+  )
+
+  return (
+    <ChartCard
+      // Titled in compact only, where there is no section heading to name the block — see
+      // `GuidedChart` for the whole rule.
+      title={compact ? 'Speed' : undefined}
+      // The unit lives here, not on the y ticks: it is said once for a card whose two series share it.
+      subtitle="Mbps"
+      info="Ookla runs, one point each, placed at the moment the run happened. Download and upload share one axis."
+    >
+      {/* See `availability-strip.tsx`'s identical wrapper for why this is a floor, not a height. */}
+      <div ref={viewRef} style={{ minHeight: compact ? SPEED_HEIGHT_COMPACT : SPEED_HEIGHT }}>
+        <Lines
+          data={points}
+          x={runX}
+          series={SERIES}
+          refLines={refs}
+          formatX={runTickFormat}
+          y={{ domain: 'auto' }}
+          height={compact ? SPEED_HEIGHT_COMPACT : SPEED_HEIGHT}
+          state={{ pending }}
+          ariaLabel="Download against upload in Mbps, one point per speed-test run"
+          legend={pending ? false : undefined}
+          tooltip={tooltip}
+        />
+      </div>
+    </ChartCard>
+  )
 }

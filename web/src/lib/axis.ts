@@ -1,64 +1,6 @@
 import type { ProbeBucketSeconds } from './types'
 
 /**
- * Horizontal room one `bucketAxisLabel` needs, in px, including breathing space.
- *
- * `DD.MM HH:MM` measures ~72px at the 11px axis font, and basalt's own `smartTicks` spaces ticks by
- * `VX.minPxPerTick`, which is 55 — sized for the bare `DD.MM` its formatter used to produce. Left at
- * 55 the richer label overlaps its neighbour at every single tick, which is measurably worse than
- * the repeated-date axis it replaced. This is that constant, corrected for the label actually drawn,
- * and it is now `axisTickValues`'s default alone: the strips' plot insets are the framework's
- * measured gutters as of 1.23.0, and nothing derives a tick COUNT from a width any more.
- */
-export const AXIS_LABEL_PX = 96
-
-/**
- * Which of a chart's category values get a tick, given the axis width.
- *
- * **Every chart on this page passes this, and passes it the same way**: as `xTickValues`, the seam
- * basalt-ui 1.23.0 added to `CartesianChart`, `MultiLine` and both band kinds. Its shape is that
- * seam's shape — `(keys, plotWidth) => keys` — so it is handed straight to the prop rather than
- * wrapped, and the width is the chart's OWN resolved plot rect rather than an estimate.
- *
- * The values are x values, not labels — on the bucketed charts that is the bucket's start as a `Date`,
- * rendered through `bucketTickFormat`. `minPxPerTick` still measures the *drawn* label, which is
- * why it stays `AXIS_LABEL_PX` and not the width of an ISO string: spacing is a question about what
- * the reader sees, not about what the scale holds.
- *
- * Deliberately not `smartTicks`, and not a tick COUNT either: both append the final value
- * unconditionally, so the last two ticks land wherever the step happens to leave them — on a 24 h
- * window that printed `01.08 15:10` and `01.08 15:20` on top of each other at the right edge, at
- * every count rather than at an unlucky one. Here the final value is included only when it clears
- * the previous tick by a full label width, because a legible axis that omits its last gridline is
- * strictly better than one whose last two labels are unreadable.
- *
- * Evenly spaced from the start otherwise, so the ticks stay on round-ish positions rather than
- * drifting to fit the end.
- */
-export function axisTickValues<T>(
-  values: readonly T[],
-  widthPx: number,
-  minPxPerTick = AXIS_LABEL_PX,
-): T[] {
-  if (values.length === 0) return []
-  const maxTicks = Math.max(2, Math.floor(widthPx / minPxPerTick))
-  if (values.length <= maxTicks) return [...values]
-
-  const step = Math.ceil(values.length / maxTicks)
-  const picked: T[] = []
-  for (let i = 0; i < values.length; i += step) picked.push(values[i]!)
-
-  // The last value is worth a tick only if it does not crowd the one before it. `step` positions
-  // are `step * (widthPx / values.length)` px apart, so the remainder decides.
-  const pxPerValue = widthPx / values.length
-  const lastIndex = values.length - 1
-  const lastPickedIndex = (picked.length - 1) * step
-  if ((lastIndex - lastPickedIndex) * pxPerValue >= minPxPerTick) picked.push(values[lastIndex]!)
-
-  return picked
-}
-
-/**
  * The time label for one bucket on a chart's x-axis.
  *
  * `basalt-ui`'s `fmtAxisDate` renders every category as `DD.MM` — it matches the date out of an
@@ -88,9 +30,9 @@ export function axisTickValues<T>(
  * a column and a remembered moment an offset calculation done in the reader's head.
  *
  * **The shape stays fixed rather than following the host locale, and that is not an oversight.**
- * `AXIS_LABEL_PX` above is a measured width that `axisTickValues` reads on every chart on the
- * page; a locale-shaped label is of no predictable width, so handing this to `Intl` would silently
- * invalidate it. The zone is what a reader needs from a tick.
+ * A locale-shaped label is of no predictable width, and basalt thins ticks by measured label
+ * width, so handing this to `Intl` would make the axis density vary by machine. The zone is what a
+ * reader needs from a tick.
  * The punctuation is not.
  */
 export function bucketAxisLabel(ts: number, bucketSeconds: ProbeBucketSeconds): string {
@@ -119,42 +61,16 @@ export function bucketTickFormat(bucketSeconds: ProbeBucketSeconds): (x: Date) =
 }
 
 /**
- * Scale key and axis label for a series drawn one point per event rather than one per bucket.
+ * `formatX` for a series drawn one point per event rather than one per bucket (the speed runs).
  *
- * **Two functions, because they are two jobs.** `runAxisKey` produces the categorical scale's
- * domain value and `runTickFormat` renders it. For most of this file's history they were one
- * string: the kinds forwarded no `formatX`, so the only thing that reached the axis was the value
- * `getX` returned, and the visible label was therefore also the identity. That forced a whole
- * apparatus — a seconds tiebreak appended to every member of a colliding minute, then a UTC-offset
- * suffix for the autumn fall-back hour where two runs 3600 s apart agree on date, hour, minute AND
- * second — to keep a *display* string unique, because two points sharing a domain value collapse
- * onto one x position and one of them stops being drawn. `formatX` (basalt-ui 1.17.0) ended that.
- *
- * **The key is the run's instant, and that is what puts these charts on the page cursor.**
- * `useChartCursor` resolves a sibling's broadcast key by PARSING it, so an ISO instant is the only
- * shape that can correspond to a bucketed chart's domain at all. Hovering a latency spike now
- * marks the speed run nearest it, and hovering a run marks the bucket it landed in. It used to be
- * `ts:id` — deliberately unparseable, to keep two axes that did not correspond from being lined
- * up — and `ChartCursorScope` isolated the section on top of that.
- *
- * **What that trades, stated once so nobody re-derives it from the symptom:** uniqueness now rests
- * on two runs never sharing a millisecond, where the row id made it a fact. That is structural
- * rather than lucky — `POST /api/speedtests/run` is rate-limited to one run per
- * `speedtestMinIntervalS` (5 min) measured against the newest stored row, and a run takes tens of
- * seconds — but it is an argument, not a primary key, and it is the reason this comment exists.
- *
- * **These charts still do not line up horizontally with the ones above them, and cannot.** Every
- * cartesian x scale in basalt-ui is a `scalePoint` over the domain's own keys, so 24 runs are 24
- * evenly spaced positions whatever the real gap between them; the bucketed charts only look
- * proportional because their domain IS a regular grid. The cursor therefore resolves the right
- * RUN at the wrong screen x. Proportional time placement needs a linear x scale the framework does
- * not have.
+ * The x is the run's instant as a `Date`, which in 2.x is a proportional time scale: runs sit where
+ * they happened, so they line up under the bucketed charts above and the shared cursor lands on the
+ * same screen x everywhere. (1.x keyed these on an ISO string over a `scalePoint`, which spaced N
+ * runs evenly whatever the gap and could not line up; the two functions that split key from label
+ * are gone with it.) Uniqueness rests on two runs never sharing a millisecond — structural, not
+ * lucky: `POST /api/speedtests/run` is rate-limited to one run per `speedtestMinIntervalS` and a
+ * run takes tens of seconds.
  */
-export function runAxisKey(ts: number): string {
-  return new Date(ts).toISOString()
-}
-
-/** `MultiLine`'s `formatX` for a run series — the reading half of `runAxisKey`. */
-export function runTickFormat(key: string): string {
-  return bucketAxisLabel(Date.parse(key), 60)
+export function runTickFormat(x: Date): string {
+  return bucketAxisLabel(x.getTime(), 60)
 }

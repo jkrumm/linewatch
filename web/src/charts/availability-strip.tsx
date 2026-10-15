@@ -203,7 +203,7 @@ export function bandStates(expectedCycles: number): BandStripSeries<Column>[] {
 /**
  * The Now view's 24 h summary, and why it is not a sparkline.
  *
- * `LineSparkline`/`BarSparkline` take `data: number[]` with no x accessor and no domain, so the
+ * `Sparkline` takes `data: number[]` with no x accessor and no domain, so the
  * only way to feed them is to drop the buckets that measured nothing — and a dropped element is not
  * a gap, the array simply closes over it. Every 100%-loss bucket and every unmeasured bucket
  * shortened the array and the remaining points slid together into a continuous healthy trend, which

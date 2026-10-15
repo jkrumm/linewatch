@@ -5,7 +5,7 @@ import type { WindowDowntime } from './downtime'
 /**
  * A sparkline's data, or `null` when the window has a hole in it.
  *
- * `LineSparkline`/`BarSparkline` take `number[]` — they have no null state and no axis. So a
+ * `Sparkline` takes `number[]` — it has no null state and no axis. So a
  * missing bucket can only be dropped or zero-filled, and both are wrong in the specific way this
  * codebase exists to avoid: dropping one silently compresses the x-axis so the trend spans a
  * different stretch of time than the card claims, and zero-filling a loss or down-cycle series
@@ -312,9 +312,9 @@ export type PoolMode = 'max' | 'median'
  * Fold a dense series down to at most `cap` points, so a sparkline is drawn at the resolution it is
  * displayed at rather than under it.
  *
- * `BarSparkline` takes `number[]` with no width awareness: at 288 points in 173px it computes a
+ * `Sparkline` (bar) takes `number[]` with no width awareness: at 288 points in 173px it computes a
  * 0.60px step, floors every bar to 1px, and the bars overlap by 40% — the loss series renders as a
- * uniform grey block in which a single 100%-loss bucket is invisible. `LineSparkline` at the same
+ * uniform grey block in which a single 100%-loss bucket is invisible. `Sparkline` (line) at the same
  * pitch is a curve through sub-pixel-spaced points, which is noise wearing the shape of a trend.
  *
  * **`mode` is not a formatting choice.** The loss series pools by MAXIMUM, because a worst-bucket

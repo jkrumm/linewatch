@@ -636,20 +636,11 @@ function DashboardPage() {
               key: 'runs',
               label: 'Every run',
               render: () => (
-                // ON the page cursor, which it was not for most of this chart's life. The
-                // isolation (`ChartCursorScope`, and `ChartHoverSync`'s absence before it) rested
-                // on the axis being runs rather than clock time, and on a key deliberately shaped
-                // so `Date.parse` would reject it. Both are gone: `runAxisKey` is the run's ISO
-                // instant, so hovering a latency spike above marks the run nearest it and hovering
-                // a run marks the bucket it landed in — the correlation the two sections exist to
-                // let a reader make, which was previously a manual eyeball between two cards.
-                //
-                // **What the removal does NOT buy is horizontal alignment, and that is a framework
-                // limit rather than a choice here.** Every cartesian x scale in basalt-ui is a
-                // `scalePoint` over the domain's keys, so these 24 runs are 24 evenly spaced
-                // positions whatever the real gaps; the charts above only look proportional
-                // because their domain is a regular grid. The cursor lands on the right run at a
-                // different screen x. `runAxisKey`'s docblock carries the full trade.
+                // ON the page cursor: a run's x is its instant as a `Date`, so hovering a latency
+                // spike marks the run nearest it and the reverse. The crosshair does NOT land on
+                // the same pixel column as the bucketed charts above — a Date scale spans the data's
+                // own extent (first run to last), and the bucketed charts span the window (W6
+                // measurement, basalt friction in `docs/waves/evidence/w6.md`).
                 //
                 // The 30-day pattern view and the by-hour heatmap still join no cursor at all —
                 // they hit-test per cell and never broadcast.

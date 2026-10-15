@@ -1,10 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  AXIS_LABEL_PX,
-  axisTickValues,
   bucketAxisLabel,
   bucketTickFormat,
-  runAxisKey,
   runTickFormat,
 } from './axis'
 
@@ -100,114 +97,24 @@ describe('bucketAxisLabel', () => {
   })
 })
 
-describe('axisTickValues', () => {
-  const range = (n: number) => Array.from({ length: n }, (_, i) => i)
-
-  test('returns every value when they all fit', () => {
-    expect(axisTickValues(range(5), 1000)).toEqual([0, 1, 2, 3, 4])
-  })
-
-  test('an empty axis has no ticks', () => {
-    expect(axisTickValues([], 1000)).toEqual([])
-  })
-
-  /**
-   * The measured failure this exists to fix: 288 five-minute buckets on a 1130px axis produced 24
-   * ticks at ~58px spacing while each label needs ~96px, so 23 of the 24 overlapped a neighbour.
-   */
-  test('never places two ticks closer than one label width', () => {
-    const width = 1130
-    const values = range(288)
-    const ticks = axisTickValues(values, width)
-    const pxPerValue = width / values.length
-    for (let i = 1; i < ticks.length; i++) {
-      expect((ticks[i]! - ticks[i - 1]!) * pxPerValue).toBeGreaterThanOrEqual(AXIS_LABEL_PX)
-    }
-  })
-
-  /** `smartTicks` appends the final value unconditionally, which is what collided at the right
-   * edge — the last two labels landed 10px apart. Dropping it is the lesser harm. */
-  test('drops a final tick that would crowd the one before it', () => {
-    const values = range(10)
-    // 10 values over 300px = 30px each; a 96px minimum allows a tick every 4th value at most.
-    const ticks = axisTickValues(values, 300)
-    const pxPerValue = 300 / 10
-    const gap = (ticks[ticks.length - 1]! - ticks[ticks.length - 2]!) * pxPerValue
-    expect(gap).toBeGreaterThanOrEqual(96)
-  })
-
-  test('keeps a final tick that clears the previous one', () => {
-    // 9 values over 900px = 100px each, already above the minimum, so nothing is dropped.
-    expect(axisTickValues(range(9), 900)).toEqual(range(9))
-  })
-
-  test('always yields at least two ticks even on a very narrow axis', () => {
-    expect(axisTickValues(range(100), 10).length).toBeGreaterThanOrEqual(2)
-  })
-
-  test('ticks are a subsequence of the input, in order', () => {
-    const ticks = axisTickValues(range(200), 800)
-    expect(ticks).toEqual(ticks.toSorted((a, b) => a - b))
-    expect(new Set(ticks).size).toBe(ticks.length)
-  })
-})
-
-describe('runAxisKey / runTickFormat', () => {
-  /** Local components for the label, for the reason `JUL_31_2026_2305` gives — the label is the
-   * host's wall clock, so a UTC-pinned instant would render differently per machine. */
-  const at = (h: number, m: number, s = 0) => new Date(2026, 7, 1, h, m, s).getTime()
+describe('runTickFormat', () => {
+  /** Local components for the label — the label is the host's wall clock, so a UTC-pinned instant
+   * would render differently per machine. */
+  const at = (h: number, m: number, s = 0) => new Date(2026, 7, 1, h, m, s)
 
   test('renders a run to the minute, on the host clock', () => {
-    expect(runTickFormat(runAxisKey(at(14, 3, 41)))).toBe('01.08 14:03')
+    expect(runTickFormat(at(14, 3, 41))).toBe('01.08 14:03')
   })
 
-  /**
-   * The property that puts these charts on the page cursor: `useChartCursor` resolves a sibling's
-   * broadcast key by PARSING it, so the key has to be an instant a bucketed chart's domain can
-   * correspond to. It used to be `ts:id`, shaped so `Date.parse` would reject it, precisely to keep
-   * the two axes apart.
-   */
-  test('the key round-trips to the exact instant, so a bucketed sibling can resolve it', () => {
-    const ts = at(14, 3, 41)
-    expect(Date.parse(runAxisKey(ts))).toBe(ts)
+  test('two runs in one minute share a label — identity is the instant, not the label', () => {
+    expect(runTickFormat(at(14, 3, 7))).toBe(runTickFormat(at(14, 3, 41)))
   })
 
-  /**
-   * Two runs in one minute share a LABEL and must not share a key.
-   *
-   * When the label was the key this took a seconds tiebreak on every member of the colliding group,
-   * and then a UTC-offset suffix on top of it for the autumn fall-back hour, where two runs 3600 s
-   * apart agree on date, hour, minute and second alike. Separating display from identity makes it
-   * fall out of the instant itself.
-   */
-  test('two runs in one minute share a label and never a key', () => {
-    const a = runAxisKey(at(14, 3, 7))
-    const b = runAxisKey(at(14, 3, 41))
-    expect(runTickFormat(a)).toBe(runTickFormat(b))
-    expect(a).not.toBe(b)
-  })
-
-  /** The DST fall-back that forced the old offset suffix: same wall clock, different instants. */
+  /** The DST fall-back: same wall clock, different instants, no special case. */
   test('a repeated wall-clock hour needs no special case', () => {
-    const first = Date.UTC(2026, 9, 25, 0, 30)
-    const second = first + 3_600_000
-    if (new Date(first).getTimezoneOffset() === new Date(second).getTimezoneOffset()) return
-
-    expect(runAxisKey(first)).not.toBe(runAxisKey(second))
-    expect(runTickFormat(runAxisKey(first))).toBe(runTickFormat(runAxisKey(second)))
-  })
-
-  /**
-   * The cost of keying on the instant, pinned rather than left to be re-derived from a symptom.
-   *
-   * Identity is now the millisecond, where the row id made it a fact. Two runs on the same
-   * millisecond collapse onto one x position and one stops being drawn. `POST /api/speedtests/run`
-   * is rate-limited to one run per `speedtestMinIntervalS` against the newest stored row, so this
-   * is structural rather than lucky — but it is an argument, and this test is where it is written
-   * down.
-   */
-  test('identity is the millisecond — same instant, same key', () => {
-    expect(runAxisKey(at(9, 0))).toBe(runAxisKey(at(9, 0)))
-    expect(runAxisKey(at(9, 0))).not.toBe(runAxisKey(at(9, 0, 1)))
+    const first = new Date(Date.UTC(2026, 9, 25, 0, 30))
+    const second = new Date(first.getTime() + 3_600_000)
+    if (first.getTimezoneOffset() === second.getTimezoneOffset()) return
+    expect(runTickFormat(first)).toBe(runTickFormat(second))
   })
 })

@@ -3,7 +3,8 @@ import type { CSSProperties } from 'react'
 import { ChartCard, Lines } from 'basalt-ui/charts'
 import { VX } from 'basalt-ui/tokens'
 import { useInViewport } from './use-in-viewport'
-import type { SpeedTest } from '../lib/types'
+import { slotExtent } from '../lib/densify'
+import type { ProbeBucketSeconds, SpeedTest } from '../lib/types'
 import { fmtMs } from '../lib/format'
 import { runTickFormat } from '../lib/axis'
 import { runHeader, runX, toRuns, type Run } from '../lib/speed-runs'
@@ -66,15 +67,23 @@ const SERIES = [
  * not a literal authored here. */
 export function BufferbloatChart({
   tests,
+  from,
+  to,
+  bucketSeconds,
   isPending,
 }: {
   tests: SpeedTest[]
+  /** The window and bucket size the bucketed charts draw — see `SpeedChart`. */
+  from: number
+  to: number
+  bucketSeconds: ProbeBucketSeconds
   /** True while the speed-tests query is in flight. An empty run series here draws three named
    * latency lines with nothing under them, which reads as three measurements that came back empty;
    * `state` conceals the legend as well. */
   isPending?: boolean
 }) {
   const points = useMemo(() => toRuns(tests), [tests])
+  const xDomain = useMemo(() => slotExtent({ from, to, bucketSeconds }), [from, to, bucketSeconds])
   const { ref: viewRef, inView } = useInViewport<HTMLDivElement>()
   const [compact] = dashboard.field.compact.use()
   const pending = isPending === true
@@ -102,6 +111,7 @@ export function BufferbloatChart({
           <Lines
             data={points}
             x={runX}
+            xDomain={xDomain}
             series={SERIES}
             formatX={runTickFormat}
             // The unit rides the axis here, unlike `speed-chart` where a subtitle carries it: this

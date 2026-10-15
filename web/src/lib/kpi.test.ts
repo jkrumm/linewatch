@@ -6,7 +6,6 @@ import {
   denseSparkline,
   downtimeTint,
   measuredFraction,
-  poolTo,
   windowDownloadMedian,
   windowWanMedian,
   worstBucketLoss,
@@ -201,29 +200,7 @@ describe('downtimeTint', () => {
   })
 })
 
-describe('poolTo', () => {
-  test('a series already inside the cap is passed through unchanged', () => {
-    expect(poolTo([1, 2, 3], 8, 'max')).toEqual([1, 2, 3])
-  })
 
-  /** The load-bearing case. A max-pooled loss series must keep the spike, because the card above it
-   * reports a maximum and a sparkline that averaged the spike away would contradict its own number. */
-  test('max pooling keeps the worst member of every bucket', () => {
-    expect(poolTo([0, 0, 100, 0, 0, 0], 2, 'max')).toEqual([100, 0])
-  })
-
-  test('median pooling reports the typical member, not the worst', () => {
-    expect(poolTo([1, 2, 30, 4, 5, 6], 2, 'median')).toEqual([2, 5])
-  })
-
-  test('the last bucket takes the remainder rather than dropping it', () => {
-    expect(poolTo([1, 2, 3, 4, 5], 2, 'max')).toEqual([3, 5])
-  })
-
-  test('a non-positive cap yields nothing rather than dividing by zero', () => {
-    expect(poolTo([1, 2, 3], 0, 'max')).toEqual([])
-  })
-})
 
 describe('windowDownloadMedian', () => {
   test('takes the median of the runs that reported throughput', () => {

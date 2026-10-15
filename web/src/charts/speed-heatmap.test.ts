@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test'
-import { FULL_INTENSITY_DEFICIT_PCT, failureReason, speedCellRows, speedCells } from './speed-heatmap'
+import {
+  FULL_INTENSITY_DEFICIT_PCT,
+  failureReason,
+  speedCellRows,
+  speedCellState,
+  speedCells,
+} from './speed-heatmap'
 import type { SpeedTest } from '../lib/types'
 
 const HOUR_MS = 3_600_000
@@ -73,7 +79,7 @@ describe('speedCells — the three states', () => {
   })
 })
 
-describe('speedCellRows — the tooltip is what separates failed from absent', () => {
+describe('speedCellState / speedCellRows — failed and absent are separate fills', () => {
   const { cells } = speedCells(
     [run(1), run(3, { ok: false, downloadMbps: null, error: 'server unreachable' })],
     FROM,
@@ -85,11 +91,14 @@ describe('speedCellRows — the tooltip is what separates failed from absent', (
       expect.objectContaining({ label: 'Failed runs', value: '1 — server unreachable' }),
     ])
   })
-  test('absent says "No run"', () => {
+  test('absent adds no row: the state label is the value row', () => {
     const absent = cells.find((c) => c.hour === null)!
-    expect(speedCellRows(absent)).toEqual([
-      expect.objectContaining({ label: 'No run', value: 'Not measured' }),
-    ])
+    expect(speedCellRows(absent)).toEqual([])
+  })
+  test('each cell has exactly one of ramp / failed / absent', () => {
+    expect(speedCellState(cellAt(cells, 1))).toBeUndefined()
+    expect(speedCellState(cellAt(cells, 3))).toBe('failed')
+    expect(speedCellState(cells.find((c) => c.hour === null)!)).toBe('absent')
   })
 })
 

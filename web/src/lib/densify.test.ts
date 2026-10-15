@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { densifyBuckets } from './densify'
-import { rangeToBucket, rangeToWindow, RANGE_OPTIONS, type RangeOption } from './range'
+import { densifyBuckets, slotExtent } from './densify'
+import { rangeToBucket, rangeToWindow, RANGE_OPTIONS } from './range'
 
 /**
  * `src/db/bucket-probes.ts`'s grouping key, restated. SQLite's `/` on two integers is integer
@@ -233,5 +233,18 @@ describe('the windows the dashboard actually densifies', () => {
     expect(() => densifyBuckets([], { from: to - 365 * DAY_MS, to, bucketSeconds: 3_600 })).toThrow(
       /over the 5000 cap/,
     )
+  })
+})
+
+describe('slotExtent', () => {
+  test('is the first and last slot densifyBuckets draws, for every range', () => {
+    for (const range of RANGE_OPTIONS) {
+      const { from, to } = rangeToWindow(range, Date.UTC(2026, 6, 30, 14, 37, 11))
+      const bucketSeconds = rangeToBucket(range)
+      const slots = densifyBuckets([], { from, to, bucketSeconds })
+      const [first, last] = slotExtent({ from, to, bucketSeconds })
+      expect(first.getTime()).toBe(slots[0]!.bucketStart)
+      expect(last.getTime()).toBe(slots[slots.length - 1]!.bucketStart)
+    }
   })
 })

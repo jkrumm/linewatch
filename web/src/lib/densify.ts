@@ -62,6 +62,23 @@ const MAX_SLOTS = 5_000
  * `keepAcrossTimeAdvance`'s own docblock already makes when it shows a 99.9%-overlapping window
  * under the current label.
  */
+/**
+ * The first and last slot start `densifyBuckets` would produce for this window, as the `xDomain` of
+ * a chart that is NOT bucketed (a run series). A `Date` x scale spans its data's own extent by
+ * default, so a run chart beside a bucketed one put the same instant on a different pixel column
+ * under the shared cursor; giving both this extent makes them agree.
+ */
+export function slotExtent(opts: {
+  from: number
+  to: number
+  bucketSeconds: ProbeBucketSeconds
+}): readonly [Date, Date] {
+  const bucketMs = Math.max(1, Math.round(opts.bucketSeconds * 1000))
+  const first = Math.floor(opts.from / bucketMs) * bucketMs
+  const last = first + Math.max(0, Math.floor((opts.to - first) / bucketMs)) * bucketMs
+  return [new Date(first), new Date(last)]
+}
+
 export function densifyBuckets<T extends { bucket: number }>(
   rows: T[],
   opts: { from: number; to: number; bucketSeconds: ProbeBucketSeconds },

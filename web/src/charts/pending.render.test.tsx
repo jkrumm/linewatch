@@ -121,9 +121,10 @@ describe('SpeedHeatmap isPending', () => {
   test('renders the pending caption, and neither of the two claims the empty grid makes', () => {
     const html = renderToStaticMarkup(<SpeedHeatmap tests={[]} {...WINDOW} isPending />)
     expect(html).toContain(PENDING)
-    // The legend caption derived from a `fastest` of null, and the cell tooltip for an hour with
-    // no run. Both are findings about the line; neither may be on screen over an unanswered query.
-    expect(html).not.toContain('No run')
+    // The legend caption derived from a `fastest` of null, and the state legend naming an hour
+    // with no run. Both are findings about the line; neither may be readable over an unanswered
+    // query, so the legend is concealed (it stays in the DOM to hold its row).
+    expectConcealedLegend(html)
     expect(html).not.toContain('No successful run')
   })
 
@@ -137,6 +138,7 @@ describe('SpeedChart isPending', () => {
   test('renders the pending caption and conceals the ref-line legend', () => {
     const html = renderToStaticMarkup(
       <SpeedChart
+        {...BUCKETED}
         tests={[]}
         refLines={[{ value: 1000, label: 'Host link 1000 Mbit', color: 'var(--vx-warn-ref)' }]}
         isPending
@@ -151,6 +153,7 @@ describe('SpeedChart isPending', () => {
   test('names its ref lines once resolved', () => {
     const html = renderToStaticMarkup(
       <SpeedChart
+        {...BUCKETED}
         tests={[TEST_RUN]}
         refLines={[{ value: 1000, label: 'Host link 1000 Mbit', color: 'var(--vx-warn-ref)' }]}
         isPending={false}
@@ -164,13 +167,13 @@ describe('SpeedChart isPending', () => {
 
 describe('BufferbloatChart isPending', () => {
   test('renders the pending caption instead of the chart', () => {
-    const html = renderToStaticMarkup(<BufferbloatChart tests={[]} isPending />)
+    const html = renderToStaticMarkup(<BufferbloatChart tests={[]} {...BUCKETED} isPending />)
     expect(html).toContain(PENDING)
     expectConcealedLegend(html)
   })
 
   test('does not claim to be pending once resolved', () => {
-    const html = renderToStaticMarkup(<BufferbloatChart tests={[TEST_RUN]} isPending={false} />)
+    const html = renderToStaticMarkup(<BufferbloatChart tests={[TEST_RUN]} {...BUCKETED} isPending={false} />)
     expect(html).not.toContain(PENDING)
   })
 })

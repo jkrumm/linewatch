@@ -2,7 +2,8 @@ import { ChartCard, Lines } from 'basalt-ui/charts'
 import { VX } from 'basalt-ui/tokens'
 import { useMemo } from 'react'
 import { useInViewport } from './use-in-viewport'
-import type { SpeedTest } from '../lib/types'
+import { slotExtent } from '../lib/densify'
+import type { ProbeBucketSeconds, SpeedTest } from '../lib/types'
 import { fmtMbps } from '../lib/format'
 import { runTickFormat } from '../lib/axis'
 import { runHeader, runX, toRuns, type Run } from '../lib/speed-runs'
@@ -75,10 +76,18 @@ const SERIES = [
  */
 export function SpeedChart({
   tests,
+  from,
+  to,
+  bucketSeconds,
   refLines = [],
   isPending,
 }: {
   tests: SpeedTest[]
+  /** The window and bucket size the bucketed charts above draw: the x domain is theirs, so one
+   * instant is one pixel column under the shared cursor. */
+  from: number
+  to: number
+  bucketSeconds: ProbeBucketSeconds
   refLines?: SpeedRefLine[]
   /**
    * True while the speed-tests query is in flight. `tests ?? []` drew an axis with no points on it,
@@ -90,6 +99,7 @@ export function SpeedChart({
   isPending?: boolean
 }) {
   const points = useMemo(() => toRuns(tests), [tests])
+  const xDomain = useMemo(() => slotExtent({ from, to, bucketSeconds }), [from, to, bucketSeconds])
   const [compact] = dashboard.field.compact.use()
   const { ref: viewRef, inView } = useInViewport<HTMLDivElement>()
   const pending = isPending === true
@@ -128,6 +138,7 @@ export function SpeedChart({
         <Lines
           data={points}
           x={runX}
+          xDomain={xDomain}
           series={SERIES}
           refLines={refs}
           formatX={runTickFormat}

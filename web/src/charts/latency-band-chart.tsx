@@ -1,6 +1,5 @@
 import { useCallback, useMemo } from 'react'
 import { areaY } from '@tanstack/charts/area'
-import { dot } from '@tanstack/charts/dot'
 import { lineY } from '@tanstack/charts/line'
 import { decorative } from '@tanstack/charts/mark/decorative'
 import { rect } from '@tanstack/charts/rect'
@@ -61,7 +60,7 @@ const HOME_LINE_LABEL: Record<HomeLineVerdict, string> = {
 }
 
 /** Where the marker ramp steps from amber to red, named once because the legend entries
- * (`loss-partial` / `loss-heavy`) and the gate that decides which dot to draw both read it. The
+ * (`loss-partial` / `loss-heavy`) and `getMarker`, which picks the dot colour, both read it. The
  * *Solid* variants, not `VX.good`/`VX.warn`/`VX.bad`: those are area-fill tokens mixed down to
  * 8–18% opacity, right behind a line and invisible on a 3 px marker. */
 const HEAVY_LOSS_PCT = 20
@@ -242,6 +241,16 @@ export function LatencyBandChart({
         mark: 'line',
         getValue: (p) => p.bucket?.medianMs ?? null,
         formatValue: fmtMs,
+        // The loss dots. A marker sits on the bucket's MEDIAN, so a bucket with no median has
+        // nowhere honest to put one (the only such bucket is one the full-loss band already paints
+        // in full). `cursorValue` makes the hover dot take the same colour (basalt-ui 2.11.0), so
+        // the crosshair reads the bucket's worst loss the way the dot under it does.
+        cursorValue: (p) => p.bucket?.medianMs ?? null,
+        getMarker: (p) => {
+          const loss = p.bucket?.maxLossPct ?? 0
+          if (loss <= 0 || p.bucket?.medianMs == null) return null
+          return { color: lossColor(loss), r: 3, ring: false }
+        },
       },
       ...(overlayLabel !== undefined
         ? [
@@ -389,9 +398,9 @@ type MarkOptions = {
  * **Every colour is read back off `plot.visible`, never off a local literal**, and `plot.rows(key)`
  * is `[]` for a toggled-off series, so a series absent from the plot draws nothing here.
  *
- * Marks are in data space, so they track resize and the legend. The three pixel-sized rails
- * (outage rail, vantage rail) are converted at the plot's height: that is the frame height, a few
- * px more than the plot, so they draw a few percent thin rather than the declared 3 / 5 px.
+ * Marks are in data space, so they track resize and the legend. The pixel-sized rails (outage,
+ * vantage) are converted at `plot.plotHeight`, the plot area without the axis gutter, so they draw
+ * the declared 3 / 5 px (basalt-ui 2.11.0; the first pass reports the frame and re-renders once).
  */
 function latencyMarks(
   plot: PlotContext<Point, Date>,
@@ -403,13 +412,9 @@ function latencyMarks(
   const showAbsent = visible.some((s) => s.key === 'absent')
   const showDownBand = visible.some((s) => s.key === 'down-band')
   const showOutages = visible.some((s) => s.key === 'outage')
-  // Each loss threshold is gated on its OWN legend entry: one gate for both drew both dot colours
-  // or neither and read `loss-heavy` nowhere.
-  const showLossPartial = visible.some((s) => s.key === 'loss-partial')
-  const showLossHeavy = visible.some((s) => s.key === 'loss-heavy')
 
-  const [, yMax] = plot.yDomain
-  const perPx = yMax / Math.max(1, plot.height)
+  const [yMin, yMax] = plot.yDomain
+  const perPx = (yMax - yMin) / Math.max(1, plot.plotHeight)
   const half = bucketMs / 2
   const column = (p: Point) => ({
     x1: new Date(p.bucketStart - half),
@@ -417,10 +422,8 @@ function latencyMarks(
   })
 
   // Absence, the full-loss band and the vantage rail are properties of the BUCKET, not of the
-  // median line, so they read the slot grid off whichever series is still visible.
-  const slots = (primary !== undefined ? plot.rows(chartKey) : plot.rows(overlayKey)).map(
-    (r) => r.datum,
-  )
+  // median line, so they read the slot grid off `plot.data`, which no legend toggle empties.
+  const slots = plot.data
 
   const marks: ChartMarks[number][] = []
 
@@ -570,34 +573,6 @@ function latencyMarks(
         curve: chartCurve('monotone'),
       }),
     )
-  }
-
-  if (primary !== undefined) {
-    // A marker sits on the bucket's MEDIAN, so a bucket with no median has nowhere honest to put
-    // one — and the only such bucket is one where every cycle got nothing back, which the
-    // full-loss band already paints in full. Placing a dot at 0 ms would claim a reading.
-    for (const heavy of [false, true]) {
-      if (heavy ? !showLossHeavy : !showLossPartial) continue
-      const dotKey = heavy ? 'loss-heavy' : 'loss-partial'
-      const dots = plot
-        .rows(chartKey)
-        .filter((r) => {
-          const b = r.datum.bucket
-          return b !== null && b.maxLossPct > 0 && r.y !== null && (b.maxLossPct >= HEAVY_LOSS_PCT) === heavy
-        })
-      if (dots.length === 0) continue
-      marks.push(
-        decorative(
-          dot(dots, {
-            id: dotKey,
-            x: rowX,
-            y: 'y',
-            r: 3,
-            fill: visible.find((s) => s.key === dotKey)?.color ?? VX.badSolid,
-          }),
-        ),
-      )
-    }
   }
 
   // The vantage rail. `all` is the only verdict that claims the whole bucket measured this line,

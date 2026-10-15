@@ -23,7 +23,6 @@ import {
   denseSparkline,
   downtimeTint,
   measuredFraction,
-  poolTo,
   windowDownloadMedian,
   windowWanMedian,
   worstBucketLoss,
@@ -41,14 +40,6 @@ const SCOPE_LABEL: Record<OngoingOutage['scope'], string> = {
 
 /** Sparkline slot height. */
 const SPARK_H = 44
-
-/**
- * Points a sparkline is pooled to. The old cap was a third of the measured cell width; `Sparkline`
- * measures its own box and does not report it, so this is a fixed ceiling sized for the narrowest
- * cell (~170 px at 390 wide, 3 px a point). Left unpooled, 288 buckets in that width is a sub-pixel
- * bar pitch, and a single 100 %-loss bucket disappears into a uniform block.
- */
-const SPARK_POINTS = 56
 
 /** Matches `StatCard`'s own rail, which this bar had to stop using — see the module docblock. */
 const TONE_RAIL_WIDTH = 3
@@ -348,11 +339,11 @@ export function StatusBar({
           <KpiValue>{pending.series || worstLoss === null ? '—' : `${fmtPct(worstLoss)} lost`}</KpiValue>
           <ComparisonBadge comparison={previous === null ? null : lossDelta} period={period} />
           {sparkSlot(
-            // MAX when pooling, because the number above is a maximum over buckets and a sparkline
-            // that averaged the spike away would contradict it.
+            // `Sparkline` pools itself to its width and keeps each bucket's extreme (bars: the
+            // value furthest from zero), so the spike the number above names survives.
             <Sparkline
               mark="bar"
-              data={poolTo(allSeries?.loss ?? [], SPARK_POINTS, 'max')}
+              data={allSeries?.loss ?? []}
               height={SPARK_H}
               state={sparkState}
               ariaLabel="Worst packet loss per bucket"
@@ -369,9 +360,8 @@ export function StatusBar({
           <KpiValue>{pending.series ? '—' : fmtMs(wanMedianMs)}</KpiValue>
           <ComparisonBadge comparison={previous === null ? null : pingDelta} period={period} />
           {sparkSlot(
-            // MEDIAN, not max: a typical-case reading, and a max would draw an envelope, not a trend.
             <Sparkline
-              data={poolTo(allSeries?.rtt ?? [], SPARK_POINTS, 'median')}
+              data={allSeries?.rtt ?? []}
               height={SPARK_H}
               state={sparkState}
               ariaLabel="Median round-trip time to the internet per bucket"
@@ -389,7 +379,7 @@ export function StatusBar({
           <ComparisonBadge comparison={previous === null ? null : downloadDelta} period={period} />
           {sparkSlot(
             <Sparkline
-              data={poolTo(allSeries?.download ?? [], SPARK_POINTS, 'median')}
+              data={allSeries?.download ?? []}
               height={SPARK_H}
               color={VX.line}
               state={sparkState}

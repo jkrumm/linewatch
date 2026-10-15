@@ -633,16 +633,18 @@ function DashboardPage() {
               label: 'Every run',
               render: () => (
                 // ON the page cursor: a run's x is its instant as a `Date`, so hovering a latency
-                // spike marks the run nearest it and the reverse. The crosshair does NOT land on
-                // the same pixel column as the bucketed charts above — a Date scale spans the data's
-                // own extent (first run to last), and the bucketed charts span the window (W6
-                // measurement, basalt friction in `docs/waves/evidence/w6.md`).
+                // spike marks the run nearest it and the reverse. Both run charts take the bucketed
+                // charts' slot extent as `xDomain` (basalt-ui 2.11.0), so one instant is one pixel
+                // column; without it a Date scale spans the runs' own extent.
                 //
                 // The 30-day pattern view and the by-hour heatmap still join no cursor at all —
                 // they hit-test per cell and never broadcast.
                 <Stack gap="md">
                   <SpeedChart
                     tests={tests ?? []}
+                    from={from}
+                    to={to}
+                    bucketSeconds={bucket}
                     refLines={throughputRefLines(status?.vantage, router, nowTick)}
                     isPending={testsPending}
                   />
@@ -662,7 +664,13 @@ function DashboardPage() {
               label: 'Latency under load',
               render: () => (
                 // On the page cursor too — see the 'Every run' view above.
-                <BufferbloatChart tests={tests ?? []} isPending={testsPending} />
+                <BufferbloatChart
+                  tests={tests ?? []}
+                  from={from}
+                  to={to}
+                  bucketSeconds={bucket}
+                  isPending={testsPending}
+                />
               ),
             },
           ]}

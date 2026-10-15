@@ -115,7 +115,7 @@ const EXPECTED_CYCLES = Math.max(
   1,
   Math.round((AVAILABILITY_BUCKET_SECONDS * 1000) / PROBE_CYCLE_MS),
 )
-const TOOLTIP = { rows: (c: AvailabilityCell) => cellRows(c, EXPECTED_CYCLES) }
+const TOOLTIP = { rows: (c: AvailabilityCell) => cellRows(c, EXPECTED_CYCLES), valueLabel: 'Loss' }
 const LEGEND = { label: `Loss per hour — full colour at ${FULL_INTENSITY_LOSS_PCT}%` }
 
 /** Day × hour availability grid, per DESIGN.md's "Uptime" view. Always the trailing 30 days

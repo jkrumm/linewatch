@@ -139,13 +139,13 @@ export function speedCells(
 }
 
 /**
- * What `Heatmap`'s own `Value` row cannot say. The three states are told apart HERE, in the
- * tooltip, because `Heatmap` draws a failed hour and an unmeasured one with the same flat neutral
- * fill (a `null` value is one thing to it) — see the Left behind of wave 7 for the gap.
+ * What `Heatmap`'s own value row cannot say: the run counts and the failure reason. The three
+ * states are told apart by their fill (`speedCellState`) and the value row names the state, so an
+ * hour nothing ran in has no row of its own to add.
  */
 export function speedCellRows(c: SpeedCell): ChartTooltipRow[] {
   const { hour, mean } = c
-  if (hour === null) return [{ label: 'No run', value: 'Not measured', color: VX.neutral }]
+  if (hour === null) return []
   const rows: ChartTooltipRow[] = []
   if (mean !== null)
     rows.push({
@@ -167,19 +167,32 @@ export function speedCellRows(c: SpeedCell): ChartTooltipRow[] {
 const getRow = (c: SpeedCell): string => c.row
 const getCol = (c: SpeedCell): string => c.col
 const getValue = (c: SpeedCell): number | null => c.deficitPct
-// Short on purpose: the gradient legend prints this at every step, and "50.0% below fastest hour"
-// collided with its neighbour (measured, 42 px overlap at 1280). The unit's meaning rides on the
-// legend `label`; the tooltip's `Value` row reads "1.8%" under the same caption.
-const formatValue = (v: number): string => fmtPct(v)
+
+/** The two non-measurements, each its own fill. `failed` is an hour whose only runs errored;
+ * `absent` an hour nothing ran in. Neither is a zero and neither stretches the ramp's domain. */
+export type SpeedCellState = 'failed' | 'absent'
+export const speedCellState = (c: SpeedCell): SpeedCellState | undefined => {
+  if (c.hour === null) return 'absent'
+  return c.mean === null ? 'failed' : undefined
+}
+const STATES = [
+  { key: 'failed', label: 'Failed run', color: VX.status.warn, fillOpacity: 0.6 },
+  { key: 'absent', label: 'No run', color: VX.neutral, fillOpacity: 0.12 },
+] as const
+
+// The tooltip's value row carries the unit; the legend labels its two ends only, so it gets the
+// compact form (`formatLegend`) and the row gets the sentence.
+const formatValue = (v: number): string => `${fmtPct(v)} below the fastest hour`
+const formatLegend = (v: number): string => fmtPct(v)
 const formatRow = (row: string): string => DAY_FORMAT.format(localDayStart(row))
-const TOOLTIP = { rows: speedCellRows }
+const TOOLTIP = { rows: speedCellRows, valueLabel: 'Slowdown' }
 
 /** Hourly "when is the line slow" heatmap, per DESIGN.md's "Speed" view.
  *
  * Three cell states, because a failed run used to be dropped by a bare `return []` and so became
  * pixel-identical to an hour nothing ran in: measured (a ramp), failed (an hour whose only runs
- * errored) and absent (an hour with no run at all). On basalt-ui 2.10.0 the last two share one
- * flat neutral fill and the tooltip is what separates them; the legend and the card copy say so. */
+ * errored) and absent (an hour with no run at all). Since basalt-ui 2.11.0 each has its own fill
+ * (`getState`/`states`) and the legend names the two non-measurements. */
 export function SpeedHeatmap({
   tests,
   from,
@@ -223,7 +236,7 @@ export function SpeedHeatmap({
       // one block the range does not fully scope) is the structural cap, stated once and
       // unconditionally rather than re-derived from the current selection.
       subtitle={`When the line is slow · never more than the trailing ${MAX_DAYS} days, by hour of your day.`}
-      info="Darker cells averaged lower download throughput that hour; a cell paints full at half the fastest hour in range. Grey cells either had no run or had one that failed — the tooltip says which."
+      info="Darker cells averaged lower download throughput that hour; a cell paints full at half the fastest hour in range. Amber cells only had runs that failed; grey cells had no run at all."
     >
       {/* A floor under the frame: the height is already computed from the row count, this only
           stops it reporting 0 before the first measurement. */}
@@ -238,6 +251,9 @@ export function SpeedHeatmap({
           color={VX.accent}
           domain={DOMAIN}
           formatValue={formatValue}
+          formatLegend={formatLegend}
+          getState={speedCellState}
+          states={STATES}
           formatRow={formatRow}
           legend={legend}
           tooltip={TOOLTIP}

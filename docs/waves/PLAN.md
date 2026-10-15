@@ -425,23 +425,30 @@ container (the Waves 3–8 recipe); Wave 10 re-verifies on the real container af
 4. The first x tick label overlaps the y-axis label at the plot origin on the throughput and ping charts (compact and 390 px).
 5. `CartesianChart` with consumer `marks` draws no `getMarker` dots (only the cursor dot is coloured), unlike `Lines`; the 2.11 docs say "a `CartesianChart` with consumer `marks` can colour the dot" without saying the always-on markers are `Lines`-only.
 
-## Wave 10 — Deploy and prove it live <!-- status: active -->
+## Wave 10 — Deploy and prove it live <!-- status: done -->
 
-- [ ] Land on `master` (direct-to-master, per AGENTS.md); rollhook CD ships it. If D1(c) paused CD,
+- [x] Land on `master` (direct-to-master, per AGENTS.md); rollhook CD ships it. If D1(c) paused CD,
       resume it now. `make deploy` only reports how it ships — it is not the deploy.
-- [ ] On the mini: `make verify` green, `make logs` shows no new errors, the `config_change` event
+- [x] On the mini: `make verify` green, `make logs` shows no new errors, the `config_change` event
       for the container start is in the record (`make db-counts` / the event timeline), and the
       served build is the merged head.
-- [ ] Both Uptime Kuma push monitors (`Home Line - Push`, `Home Line - Watchdog`) green through the
+- [x] Both Uptime Kuma push monitors (`Home Line - Push`, `Home Line - Watchdog`) green through the
       deploy; `make heartbeat-status` prints a healthy verdict; the native collector, heartbeat and
       watchdog were never touched (nothing under `collector/` changed — assert with `git diff`).
-- [ ] `@verifier` loads the live origin: spot-check one screen per region against Wave 9's
+- [x] `@verifier` loads the live origin: spot-check one screen per region against Wave 9's
       captures; recorded.
-- [ ] If anything fails: the next PR, not a rollback narrative.
+- [x] If anything fails: the next PR, not a rollback narrative.
 
-**Evidence:** `w10.md` — the commands and outputs above, the served commit.
+**Evidence:** `w10.md` — the commands and outputs above, the served commit; screenshots in `evidence/w10/`.
 
-## Wave 11 — Fresh-agent DX trial <!-- status: pending -->
+**Left behind:**
+- Master is `4671c1c` (basalt-2 rebased onto master, fast-forwarded, pushed); production runs it via `make up` (no CD), `.codesum` matches the tree. Verify, logs, heartbeat, watchdog and the 32-state live matrix are green; details in `evidence/w10.md`. `collector/` untouched. The `basalt-2` branch (local + origin) and its worktree are removed.
+- The deploy produced one explicit `down` push (`api_unreachable`, ~1 min, the recreate window) before `up` resumed; Kuma itself was not queried from the mini.
+- `GET /favicon.ico` is a 404 (pre-existing: no icon link, no `public/`). Console-clean otherwise.
+- Owner note (unchanged by design): throughput's amber "Not measured" shares a hue with the speed heatmap's "Failed run".
+- **basalt friction** (rows 107-111 filed upstream, in progress): the five Wave 9 items above stand; new from the live pass: availability strip and throughput bars end short of the plot's right edge at 390/30d and 1440/7d (unclear whether gutter or bucket padding); uptime/throughput x ticks touch at 1440.
+
+## Wave 11 — Fresh-agent DX trial <!-- status: active -->
 
 A fresh agent with only the repo, its AGENTS.md and the shipped `basalt-*` skills/rules (no plan,
 no memory of this migration) adds one new thing on basalt surfaces linewatch uses — **on the

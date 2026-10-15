@@ -34,6 +34,6 @@ const railTop = (plotHeight: number) => Y_MAX - (RAIL_PX * (Y_MAX - Y_MIN)) / pl
 />
 ```
 
-4. Wrap it in `ChartCard`; pass `state={{ pending, error, empty }}` from the query. A `cursorValue` series colours its cursor dot per datum with `getMarker: (d) => ({ color })`.
+4. Wrap it in `ChartCard`; pass `state={{ pending, error, empty }}` from the query. A `cursorValue` series colours its CURSOR dot per datum with `getMarker: (d) => ({ color })`; always-on markers are `Lines`-only, so a consumer-`marks` chart draws its persistent dots itself.
 5. Run the repo's own gate (e.g. `make check`), which runs lint, the theme guard and typecheck; fix every finding at its source.
 6. Check both color schemes and a pending query.

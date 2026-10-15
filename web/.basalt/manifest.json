@@ -7,7 +7,7 @@
     ".claude/rules/basalt-state.md": "1f62f9f628c801368b851d7105095e5b6a271e6e52fc75e62e54da1f2b4ec6ab",
     ".claude/skills/basalt-app/SKILL.md": "159ff7db2ac932d06ce35d88c43a3b6ff46ec596cdf5f461d98b98595a3e323f",
     ".claude/skills/basalt-design/SKILL.md": "9affe0419e00cc4c9744d7e5d82b00c6d051d995b74d27290bb226b4fe4b33cc",
-    ".claude/skills/basalt-charts/SKILL.md": "f8b889c38146771316bcb3534798e51b361373f1c8fc0dc4d4ec129398a5d447",
+    ".claude/skills/basalt-charts/SKILL.md": "f723aa1ecae41bdfcd4179ee82a5d87ad3de302b613a15a5b0854cc6c5dad38c",
     "DESIGN.md": "5bbf20edb4483682e5ff5564c446e3b8335947917545af708b671957286256b1",
     ".oxfmtrc.json": "45c6ab68a6bc0e5dd6bb8b4106c71fe4af6f3e68309f112c0df382bce57e8cdb",
     "lefthook.yml": "38174437df9d4f0c1af6fc3ff7b0a96e820f9b88758ffd4dba29c5ed738681c0",
@@ -18,7 +18,7 @@
     ".claude/rules/basalt-controls.md": "1db7beecfb3df28c678c6fcc0c59f3a6c6772b8e90a76f226ca85c8e1c42c39b",
     "AGENTS.md": "68c22d59aa05dd64450484bd9466c0081c8f4f1c4098b38e1d2b94a69fad776a"
   },
-  "basaltVersion": "2.11.0",
+  "basaltVersion": "2.11.1",
   "spacingScale": {
     "xs": 11,
     "sm": 13,

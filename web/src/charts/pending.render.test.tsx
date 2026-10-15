@@ -11,6 +11,24 @@ const WINDOW = { from: 0, to: 3_600_000 } as const
 const BUCKETED = { ...WINDOW, bucketSeconds: 300 } as const
 const PENDING = 'Loading'
 
+/** basalt-ui 2.10.0 keeps a pending chart's legend in the DOM, `visibility: hidden` and
+ * `aria-hidden`, so the box holds its row and the chart does not shift when data arrives. The
+ * assertion is on that fieldset, not on the absence of its text. */
+function legendOf(html: string): string {
+  return /<fieldset aria-label="Legend"[^>]*>/.exec(html)?.[0] ?? ''
+}
+function expectConcealedLegend(html: string): void {
+  const legend = legendOf(html)
+  expect(legend).toContain('aria-hidden="true"')
+  expect(legend).toContain('visibility:hidden')
+}
+function expectVisibleLegend(html: string): void {
+  const legend = legendOf(html)
+  expect(legend).not.toBe('')
+  expect(legend).not.toContain('aria-hidden')
+  expect(legend).not.toContain('visibility:hidden')
+}
+
 /**
  * The six charts that shipped without a pending guard, and the reason they all needed one at once.
  *
@@ -67,10 +85,9 @@ describe('AvailabilityStrip isPending', () => {
       <AvailabilityStrip target="cloudflare" buckets={[]} {...BUCKETED} isPending />,
     )
     expect(html).toContain(PENDING)
-    // The four fills this strip's legend names. They are the only thing on screen that decodes a
-    // hatched column, so a legend over a plot with no columns in it names nothing.
-    expect(html).not.toContain('Every cycle down')
-    expect(html).not.toContain('Not measured')
+    // The four fills this strip's legend names are the only thing on screen that decodes a flat
+    // column, so a legend over a plot with no columns in it must not be readable.
+    expectConcealedLegend(html)
   })
 
   test('does not claim to be pending once resolved', () => {
@@ -78,6 +95,7 @@ describe('AvailabilityStrip isPending', () => {
       <AvailabilityStrip target="cloudflare" buckets={[]} {...BUCKETED} isPending={false} />,
     )
     expect(html).not.toContain(PENDING)
+    expectVisibleLegend(html)
     expect(html).toContain('Every cycle down')
   })
 })
@@ -86,7 +104,7 @@ describe('LinkSpeedStrip isPending', () => {
   test('renders the pending caption instead of the strip', () => {
     const html = renderToStaticMarkup(<LinkSpeedStrip vantage={[]} {...BUCKETED} isPending />)
     expect(html).toContain(PENDING)
-    expect(html).not.toContain('Negotiated speed')
+    expectConcealedLegend(html)
     // The verdict line above the strip states a conclusion about the window — "No link speed
     // recorded in this window" over an unanswered query is the same fabrication in prose.
     expect(html).not.toContain('buckets reported a speed')
@@ -117,7 +135,7 @@ describe.skip('SpeedHeatmap isPending', () => {
 })
 
 describe('SpeedChart isPending', () => {
-  test('renders the pending caption and drops the ref-line legend', () => {
+  test('renders the pending caption and conceals the ref-line legend', () => {
     const html = renderToStaticMarkup(
       <SpeedChart
         tests={[]}
@@ -126,10 +144,9 @@ describe('SpeedChart isPending', () => {
       />,
     )
     expect(html).toContain(PENDING)
-    // The ref-line legend is this app's own, not `ChartFrame`'s, so it needs its own suppression —
-    // a dashed "Host link 1000 Mbit" caption over a plot with no runs on it names a ceiling for
-    // measurements that are not on screen.
-    expect(html).not.toContain('Host link 1000 Mbit')
+    // A dashed "Host link 1000 Mbit" caption over a plot with no runs on it names a ceiling for
+    // measurements that are not on screen; the legend carrying it is concealed.
+    expectConcealedLegend(html)
   })
 
   test('names its ref lines once resolved', () => {
@@ -141,6 +158,7 @@ describe('SpeedChart isPending', () => {
       />,
     )
     expect(html).not.toContain(PENDING)
+    expectVisibleLegend(html)
     expect(html).toContain('Host link 1000 Mbit')
   })
 })
@@ -149,6 +167,7 @@ describe('BufferbloatChart isPending', () => {
   test('renders the pending caption instead of the chart', () => {
     const html = renderToStaticMarkup(<BufferbloatChart tests={[]} isPending />)
     expect(html).toContain(PENDING)
+    expectConcealedLegend(html)
   })
 
   test('does not claim to be pending once resolved', () => {
@@ -161,13 +180,12 @@ describe('LatencyBandChart isPending', () => {
   /** The legend is the whole point on this one: it is the only place on the page that says what
    * the amber and red dots mean, which makes it an encoding rather than a caption — and an
    * encoding for marks that are not drawn is a legend describing nothing. */
-  test('marks itself busy and drops the loss encoding', () => {
+  test('marks itself busy and conceals the loss encoding', () => {
     const html = renderToStaticMarkup(
       <LatencyBandChart label="Internet" chartKey="internet" buckets={[]} vantage={[]} {...BUCKETED} isPending />,
     )
     expect(html).toContain('aria-busy="true"')
-    expect(html).not.toContain('Loss under 20%')
-    expect(html).not.toContain('Cycles fully down')
+    expectConcealedLegend(html)
   })
 
   test('draws the loss encoding once resolved', () => {

@@ -22,13 +22,13 @@ describe('ThroughputChart isPending', () => {
       />,
     )
     expect(html).toContain('Loading')
-    // The legend `ChartFrame` derives from this chart's three marks — proof the chart body did not
-    // mount underneath the pending caption, which is the exact "renders both, one on top of the
-    // other" failure mode a boolean gate that forgot its `else` branch would produce. Asserted on
-    // the legend rather than the accessible label because `ChartFrame` keeps `ariaLabel` on its
-    // container while pending, deliberately: a screen reader should be told what is loading.
-    expect(html).not.toContain('Not measured')
-    expect(html).not.toContain('Download')
+    // The legend is kept in the DOM (so the chart does not shift when data arrives) but concealed
+    // from sight and from assistive tech; the plot itself must not mount under the caption, which
+    // is the "renders both, one on top of the other" failure a gate that forgot its `else` makes.
+    const legend = /<fieldset aria-label="Legend"[^>]*>/.exec(html)?.[0] ?? ''
+    expect(legend).toContain('aria-hidden="true"')
+    expect(legend).toContain('visibility:hidden')
+    expect(html).toContain('aria-busy="true"')
   })
 
   test('does not render the pending caption once the query has resolved', () => {

@@ -71,7 +71,7 @@ export function BufferbloatChart({
   tests: SpeedTest[]
   /** True while the speed-tests query is in flight. An empty run series here draws three named
    * latency lines with nothing under them, which reads as three measurements that came back empty;
-   * the legend is dropped too (2.x renders it over a plot with no marks). */
+   * `state` conceals the legend as well. */
   isPending?: boolean
 }) {
   const points = useMemo(() => toRuns(tests), [tests])
@@ -110,7 +110,6 @@ export function BufferbloatChart({
             height={BUFFERBLOAT_RESPONSIVE_HEIGHT}
             state={{ pending }}
             ariaLabel="Idle ping against latency measured while the line was saturated, one point per speed-test run"
-            legend={pending ? false : undefined}
             tooltip={tooltip}
           />
         </div>

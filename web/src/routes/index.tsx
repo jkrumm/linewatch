@@ -81,12 +81,10 @@ import {
   THROUGHPUT_COPY,
 } from '../lib/guides'
 
-/** `Any` is the field's fallback (0) and the one row that names the unset state: basalt-ui 2.9.0's
- * `.labels()` does that for the stepper form only, and this is the preset form, whose pill prints
- * the label of the selected row (an unmatched value prints the filter's own label). `clearable`
- * stays — `Clear` is the same reset. */
+/** The unset state (`0`) is named by the store's `.labels({ minDuration: { 0: 'Any' } })`, which
+ * the preset form's pill honours as of basalt-ui 2.10.0 — so it is not a row here. `clearable`
+ * stays: `Clear` is the same reset. */
 const MIN_DURATION_OPTIONS = [
-  { label: 'Any', value: 0 },
   { label: '≥1m', value: 60 },
   { label: '≥5m', value: 300 },
   { label: '≥10m', value: 600 },

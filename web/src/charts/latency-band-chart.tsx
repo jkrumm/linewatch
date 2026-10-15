@@ -152,9 +152,9 @@ export function LatencyBandChart({
   to: number
   bucketSeconds: ProbeBucketSeconds
   /**
-   * True while the probe-buckets queries behind this band are in flight. The legend is dropped
-   * with it: it declares the loss thresholds and the full-loss band — an encoding for marks that,
-   * while pending, do not exist (2.x draws it regardless of `state`, so this file withholds it).
+   * True while the probe-buckets queries behind this band are in flight. Handed to `state`, which
+   * also conceals the legend (it declares marks that, while pending, do not exist) without
+   * moving the chart when the data arrives.
    */
   isPending?: boolean
   /**
@@ -360,8 +360,8 @@ export function LatencyBandChart({
         cursorResolution="leading"
         // The legend is a KEY first and a control second: it is the only place on the page that
         // says what the amber and red dots mean, and `toggle` would let a reader hide the finding
-        // they opened the page for. Dropped while pending (an encoding for marks that do not exist).
-        legend={pending ? false : { toggle: false }}
+        // they opened the page for. `state` conceals it while pending (basalt-ui 2.10.0).
+        legend={{ toggle: false }}
         state={{ pending }}
         tooltip={tooltip}
         ariaLabel={

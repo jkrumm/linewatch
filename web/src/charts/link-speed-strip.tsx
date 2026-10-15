@@ -331,10 +331,9 @@ export function LinkSpeedStrip({
         formatX={formatX}
         ariaLabel="Negotiated link speed per bucket, with unmeasured buckets marked and renegotiations marked rather than averaged"
         state={{ pending: isPending === true }}
-        // Four states, not four series — there is nothing to toggle. Dropped while pending: a legend
-        // over a plot with no marks names an encoding for nothing, and 2.x renders it regardless of
-        // `state` (basalt friction, w4.md).
-        legend={isPending === true ? false : { toggle: false }}
+        // Four states, not four series — there is nothing to toggle. `state` conceals the legend
+        // while pending (basalt-ui 2.10.0).
+        legend={{ toggle: false }}
         tooltip={tooltip}
       />
     </div>

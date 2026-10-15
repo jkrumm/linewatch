@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { foldBands } from 'basalt-ui/charts'
-import { mergePoints, pointRows, type PlotPoint } from './throughput-chart'
+import { mergePoints, pointRows, THROUGHPUT_SERIES, type PlotPoint } from './throughput-chart'
 import type { ThroughputPoint } from '../lib/throughput'
 
 function measured(over: Partial<ThroughputPoint> = {}): PlotPoint {
@@ -166,5 +166,17 @@ describe('pointRows', () => {
     expect(pointRows(folded!).find((r) => r.label === 'Folded from')?.value).toBe(
       '3 buckets, 2 not measured',
     )
+  })
+})
+
+describe('THROUGHPUT_SERIES absent state', () => {
+  // `MirroredBars.absentState` paints the unmeasured share in this entry's colour. basalt-ui
+  // requires it to differ from every measured series' colour, not only by alpha: the flat
+  // `VX.neutral` it replaced sat next to the upload grey.
+  test('its colour differs from every measured series', () => {
+    const absent = THROUGHPUT_SERIES.find((s) => s.key === 'absent')
+    expect(absent).toBeDefined()
+    for (const s of THROUGHPUT_SERIES.filter((s) => s.key !== 'absent'))
+      expect(absent?.color).not.toBe(s.color)
   })
 })

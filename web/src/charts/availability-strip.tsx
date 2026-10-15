@@ -41,10 +41,10 @@ const CLEAN_ALPHA = 0.14
 const LOSS_FLOOR_ALPHA = 0.34
 
 /**
- * The plot's height — bands plus the axis — because `BandStrip` has no `bandHeight` prop: the band
- * row gets what the measured axis gutter (~21px: 4px top inset, label row) leaves out of `height`,
- * and margins are measured, not passed. The legend sits OUTSIDE this height, in its own row below
- * the plot (98 gave a 77px band in the browser; 65 gives the 44px band 1.41 drew).
+ * The FRAME height — bands plus the axis — in every basalt kind (documented as of 2.10.0; there is
+ * no `bandHeight` or `plotHeight`). The band row gets what the measured axis gutter (~21px) leaves
+ * out of `height`: 65 gives the 44px band 1.41 drew, and 98 gave a 77px one in the browser. The
+ * legend sits OUTSIDE this height, in its own row below the plot.
  */
 const STRIP_FRAME_HEIGHT = 65
 
@@ -294,9 +294,8 @@ export function AvailabilityStrip({
         // The legend toggles nothing: these four entries are STATES, not series with values, so
         // hiding one would remove a name from the key and change no mark — except `absent`, whose
         // toggle would zero every band's absent share and make a folded band read fully measured.
-        // Dropped while pending: a legend over a plot with no marks names an encoding for nothing,
-        // and 2.x renders it regardless of `state` (basalt friction, w4.md).
-        legend={isPending === true ? false : { toggle: false }}
+        // `state` conceals it while pending (basalt-ui 2.10.0).
+        legend={{ toggle: false }}
         tooltip={tooltip}
       />
     </div>

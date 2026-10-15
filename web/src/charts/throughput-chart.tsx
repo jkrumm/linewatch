@@ -6,7 +6,7 @@ import {
   type ChartTooltipRow,
 } from 'basalt-ui/charts'
 import { VX } from 'basalt-ui/tokens'
-import { foldedFromRows } from './band-shared'
+import { ABSENT_ALPHA, foldedFromRows } from './band-shared'
 import { useInViewport } from './use-in-viewport'
 import type { ProbeBucketSeconds, ThroughputBucket } from '../lib/types'
 import { throughputPoints, type ThroughputPoint } from '../lib/throughput'
@@ -95,11 +95,20 @@ const getBarOpacity = (p: PlotPoint): number => (p.skipped > 0 ? 0.45 : 1)
  * "Not measured" is a series here in the legend's sense but not in the data's — it has no values,
  * only an absence, which is why its `getValue` is `() => null` (the shipped legend-only idiom).
  * It has to be named on the legend all the same: a flat grey column is the one mark on this chart
- * a reader cannot decode from the axes. **Its colour is basalt's, not ours:** `MirroredBars` paints
- * the absent share in `VX.neutral` across both panes and takes no `absentState`, so the swatch
- * repeats that token rather than choosing one — a basalt-owned fill the series cannot recolour.
+ * a reader cannot decode from the axes. **`absentState` (basalt-ui 2.10.0) paints the share in
+ * this entry's colour**, and the colour has to differ from both measured series (`VX.accent`,
+ * `VX.line2`), not only by alpha: the old flat `VX.neutral` sat a few percent of luminance from the
+ * upload grey. It is `THROUGHPUT_ABSENT_COLOR` rather than the band strips' `ABSENT_COLOR`
+ * because that one is `VX.accent`, which is this chart's download hue.
  */
-const THROUGHPUT_SERIES: MirroredBarsSeries<PlotPoint>[] = [
+/**
+ * The two greys and the accent are taken, so the third state needs a hue: amber, the one chromatic
+ * token no measured series here uses. It claims "caution", not "fault" — a bucket nothing measured
+ * is exactly that — and the swatch and the fill carry the same 0.45 alpha so neither overstates.
+ */
+const THROUGHPUT_ABSENT_COLOR = VX.status.warn
+
+export const THROUGHPUT_SERIES: MirroredBarsSeries<PlotPoint>[] = [
   {
     key: 'down',
     label: 'Download',
@@ -122,7 +131,7 @@ const THROUGHPUT_SERIES: MirroredBarsSeries<PlotPoint>[] = [
     getValue: (p) => p.upBytesPerS,
     formatValue: (v, p) => `${fmtRate(v)} · ${fmtBytes(p.upBytes)}`,
   },
-  { key: 'absent', label: 'Not measured', color: VX.neutral, getValue: () => null },
+  { key: 'absent', label: 'Not measured', color: THROUGHPUT_ABSENT_COLOR, fillOpacity: ABSENT_ALPHA, getValue: () => null },
 ]
 
 /**
@@ -204,6 +213,7 @@ export function ThroughputChart({
         up={UP_PANE}
         down={DOWN_PANE}
         getAbsentFraction={getAbsentFraction}
+        absentState="absent"
         getBarOpacity={getBarOpacity}
         fold={FOLD}
         height={CHART_FRAME_HEIGHT}
@@ -214,9 +224,8 @@ export function ThroughputChart({
         // offer to hide a state rather than a measurement. The two real halves are scaled
         // independently and drawn against one baseline; hiding one would leave the other reading
         // against an axis that no longer has an opposite.
-        // Dropped while pending: a legend over a plot with no marks names an encoding for nothing,
-        // and 2.x renders it regardless of `state` (basalt friction, w4.md).
-        legend={isPending === true ? false : { toggle: false }}
+        // `state` conceals it while pending (basalt-ui 2.10.0).
+        legend={{ toggle: false }}
         tooltip={tooltip}
       />
     </div>
@@ -227,7 +236,7 @@ export function ThroughputChart({
 export function pointRows(point: PlotPoint): ChartTooltipRow[] {
   const basis: ChartTooltipRow[] =
     point.downBytesPerS === null
-      ? [{ label: 'Not measured', value: 'no usable interval', color: VX.neutral }]
+      ? [{ label: 'Not measured', value: 'no usable interval', color: THROUGHPUT_ABSENT_COLOR }]
       : [
           // The basis, always — the rate is bytes over *measured* time, and a bucket that measured
           // 2 of 20 intervals is a different claim from one that measured all 20.

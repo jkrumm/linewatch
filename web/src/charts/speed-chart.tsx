@@ -83,9 +83,9 @@ export function SpeedChart({
   /**
    * True while the speed-tests query is in flight. `tests ?? []` drew an axis with no points on it,
    * which on a run series is the claim "no speed test ran in this window", not "nobody has asked
-   * yet". Handed to `state`; the legend (reference labels included) is dropped while pending,
-   * because 2.x renders it over a plot with no marks and a dashed "Host link 1000 Mbit" caption
-   * names a ceiling for measurements that are not on screen.
+   * yet". Handed to `state`, which also conceals the legend (reference labels included) while
+   * pending: a dashed "Host link 1000 Mbit" caption would name a ceiling for measurements that are
+   * not on screen.
    */
   isPending?: boolean
 }) {
@@ -135,7 +135,6 @@ export function SpeedChart({
           height={compact ? SPEED_HEIGHT_COMPACT : SPEED_HEIGHT}
           state={{ pending }}
           ariaLabel="Download against upload in Mbps, one point per speed-test run"
-          legend={pending ? false : undefined}
           tooltip={tooltip}
         />
       </div>

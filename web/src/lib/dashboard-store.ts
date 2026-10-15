@@ -85,7 +85,7 @@ export const dashboard = createSearchStore({
      */
     compact: field.boolean(false, { url: false }),
   },
-}).labels({ range: RANGE_LABEL })
+}).labels({ range: RANGE_LABEL, minDuration: { 0: 'Any' } })
 
 /**
  * One store per section, holding which view of its evidence is drawn.

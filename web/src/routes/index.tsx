@@ -497,7 +497,7 @@ function DashboardPage() {
                 // No cursor scope — this used to be wrapped on the theory that `AvailabilityHeatmap`
                 // could broadcast a key the latency band's shared cursor would collide with (see the
                 // 'Every run' view under the Speed section for that actual collision). It draws
-                // `CategoryGrid`, which owns its own per-cell tooltip and joins no cursor at all;
+                // `Heatmap`, which owns its own per-cell tooltip and joins no cursor at all (it has no crosshair);
                 // its columns are fixed `HOUR_LABELS` ('00'..'23'), never a run key — there is
                 // no shared key here to protect, and the wrapper was a no-op.
                 <Stack gap={4}>

@@ -7,13 +7,12 @@ const WINDOW = { from: 0, to: 30 * DAY_MS } as const
 
 /**
  * The heatmap's own version of `throughput-chart.render.test.tsx`'s bug: `heatmapData?.buckets ??
- * []` fed to this grid ungated painted every cell hatched-absent and every tooltip "0 of 30
+ * []` fed to this grid ungated painted every cell absent and every tooltip "0 of 30
  * expected cycles" on the pattern view's first render — `probeBucketsQuery` for the heatmap's own
- * 30-day span is not in the route loader either. Milder than the throughput case (hatching never
+ * 30-day span is not in the route loader either. Milder than the throughput case (an absent cell never
  * claims the line was up), but the same class, and the same `isPending` fix.
  */
-// MIGRATION-STUB(w7): AvailabilityHeatmap renders a placeholder card until the grid port
-describe.skip('AvailabilityHeatmap isPending', () => {
+describe('AvailabilityHeatmap isPending', () => {
   test('renders the shipped pending caption, not the grid, while pending — even with buckets already in hand', () => {
     const html = renderToStaticMarkup(
       <AvailabilityHeatmap
@@ -37,8 +36,8 @@ describe.skip('AvailabilityHeatmap isPending', () => {
       />,
     )
     expect(html).toContain('Loading')
-    // `CategoryGrid`'s own tooltip claim for an absent cell — proof the hatched-absent grid did not
-    // also mount underneath the pending caption.
+    // The tooltip claim for an absent cell — proof the absent-cell grid did not also mount
+    // underneath the pending caption.
     expect(html).not.toContain('expected cycles')
   })
 

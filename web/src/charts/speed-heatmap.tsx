@@ -1,13 +1,180 @@
-// MIGRATION-STUB(w7): the hourly speed heatmap (CategoryGrid cells, legend, tooltips)
-import { ChartCard } from 'basalt-ui/charts'
+import { ChartCard, Heatmap, type ChartTooltipRow } from 'basalt-ui/charts'
+import { VX } from 'basalt-ui/tokens'
 import type { SpeedTest } from '../lib/types'
+import { densifyBuckets } from '../lib/densify'
+import { fmtMbps, fmtPct } from '../lib/format'
+import { HOUR_LABELS } from './availability-heatmap'
+import { localDayKey, localDayStart, localHourKey } from './local-calendar'
+import { dashboard } from '../lib/dashboard-store'
+
+/** One cell is one hour of the reader's own day, matching the availability grid so the two
+ * calendars on this dashboard are read the same way — `local-calendar.ts` carries the argument for
+ * both. Hourly is also the speed test's own cadence (DESIGN.md, "Cadence"). */
+const HOUR_SECONDS = 3_600
+const DAY_FORMAT = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' })
+
+/**
+ * How far below the fastest hour in range a cell has to be to paint full. ABSOLUTE, unlike a
+ * `deficit / maxDeficit` ramp: on a perfectly steady line the slowest hour is the largest deficit
+ * there is, so it paints maximally dark under a legend reading "Slowest" — a stable line rendered
+ * as a nightly collapse. Half the fastest reading is a real slowdown; 3% below it is not.
+ */
+export const FULL_INTENSITY_DEFICIT_PCT = 50
+const DOMAIN = [0, FULL_INTENSITY_DEFICIT_PCT] as const
+
+/**
+ * The grid draws at most this many days, however long the selected range is.
+ *
+ * Not cosmetic. The Speed view offers an `all` range of 365 days, and one row per day × 24
+ * hours is 8 760 cells — past `densifyBuckets`'s slot cap, and unreadable long before it. Clamping
+ * to the trailing month keeps this chart answering the question it is for ("which hours of the day
+ * are slow") while the throughput line above it keeps the full range. The subtitle states this
+ * constant, so the clamp is visible rather than a quiet disagreement with the range selector — as a
+ * fixed ceiling, not a `${days} days` readout of the actual span drawn: the page's own range
+ * control already states the selection, and echoing its day count here duplicated it every time the
+ * selection was already under `MAX_DAYS`.
+ */
+const MAX_DAYS = 30
+
+const ROW_PX = 15
+const FRAME_CHROME_PX = 64
+
+type HourRow = { bucket: number; downloads: number[]; failures: SpeedTest[] }
+
+/** One grid position. `hour` is `null` for an hour nothing ran in; a row with `downloads` empty and
+ * `failures` not is an hour whose only runs errored. */
+export type SpeedCell = {
+  row: string
+  col: string
+  hour: HourRow | null
+  /** Mean download over the hour's successful runs; `null` when it had none. */
+  mean: number | null
+  /** Percent below the fastest hour in range; `null` exactly when `mean` is. */
+  deficitPct: number | null
+}
+
+/** The two hourly buckets an autumn fall-back puts in one local hour, combined. Runs concatenate —
+ * both sets of runs really did happen in that local hour — and the cell's mean is then taken over
+ * the union, which is the same figure it would have been had the clock not moved. */
+function mergeHours(a: HourRow | null, b: HourRow | null): HourRow | null {
+  if (a === null) return b
+  if (b === null) return a
+  return {
+    bucket: a.bucket,
+    downloads: [...a.downloads, ...b.downloads],
+    failures: [...a.failures, ...b.failures],
+  }
+}
+
+/** The first stored error, when there is one. A failed run with no `error` text stays a bare count
+ * rather than borrowing another run's reason. */
+function failureReason(failures: SpeedTest[]): string {
+  const reason = failures.find((f) => f.error !== null)?.error
+  return reason === undefined || reason === null ? '' : ` — ${reason}`
+}
+
+/**
+ * The window's cells, day rows and the fastest hour's mean.
+ *
+ * Slots are folded onto their LOCAL cell before any mean is taken, because the fall-back hour puts
+ * two of them in one cell and a mean of the union is not the mean of two means. See
+ * `local-calendar.ts`.
+ */
+export function speedCells(
+  tests: SpeedTest[],
+  from: number,
+  to: number,
+): { cells: SpeedCell[]; rows: string[]; fastest: number | null } {
+  const windowFrom = Math.max(from, to - MAX_DAYS * 86_400_000)
+
+  const byHour = new Map<number, HourRow>()
+  for (const test of tests) {
+    if (test.ts < windowFrom || test.ts > to) continue
+    const bucket = Math.floor(test.ts / (HOUR_SECONDS * 1000)) * HOUR_SECONDS * 1000
+    const row = byHour.get(bucket) ?? { bucket, downloads: [], failures: [] }
+    // `ok` alone is not the gate: a run can report ok with no download figure, and a number that
+    // was never measured must not become a data point.
+    if (test.ok && test.downloadMbps !== null) row.downloads.push(test.downloadMbps)
+    else row.failures.push(test)
+    byHour.set(bucket, row)
+  }
+
+  const slots = densifyBuckets([...byHour.values()], {
+    from: windowFrom,
+    to,
+    bucketSeconds: HOUR_SECONDS,
+  })
+
+  const byCell = new Map<string, SpeedCell>()
+  for (const slot of slots) {
+    const row = localDayKey(slot.bucketStart)
+    const col = localHourKey(slot.bucketStart)
+    const key = `${row} ${col}`
+    const previous = byCell.get(key)
+    if (previous === undefined)
+      byCell.set(key, { row, col, hour: slot.value, mean: null, deficitPct: null })
+    else previous.hour = mergeHours(previous.hour, slot.value)
+  }
+
+  const cells = [...byCell.values()]
+  for (const cell of cells) {
+    const runs = cell.hour?.downloads ?? []
+    if (runs.length > 0) cell.mean = runs.reduce((a, b) => a + b, 0) / runs.length
+  }
+  const means = cells.map((c) => c.mean).filter((m): m is number => m !== null)
+  const fastest = means.length > 0 ? Math.max(...means) : null
+  for (const cell of cells) {
+    if (cell.mean !== null && fastest !== null && fastest > 0)
+      cell.deficitPct = (100 * (fastest - cell.mean)) / fastest
+  }
+  return { cells, rows: [...new Set(cells.map((c) => c.row))], fastest }
+}
+
+/**
+ * What `Heatmap`'s own `Value` row cannot say. The three states are told apart HERE, in the
+ * tooltip, because `Heatmap` draws a failed hour and an unmeasured one with the same flat neutral
+ * fill (a `null` value is one thing to it) — see the Left behind of wave 7 for the gap.
+ */
+export function speedCellRows(c: SpeedCell): ChartTooltipRow[] {
+  const { hour, mean } = c
+  if (hour === null) return [{ label: 'No run', value: 'Not measured', color: VX.neutral }]
+  const rows: ChartTooltipRow[] = []
+  if (mean !== null)
+    rows.push({
+      label: hour.downloads.length > 1 ? 'Download (mean)' : 'Download',
+      value: fmtMbps(mean),
+      color: VX.accent,
+    })
+  if (hour.downloads.length > 0)
+    rows.push({ label: 'Successful runs', value: String(hour.downloads.length), color: VX.neutral })
+  if (hour.failures.length > 0)
+    rows.push({
+      label: 'Failed runs',
+      value: `${hour.failures.length}${failureReason(hour.failures)}`,
+      color: VX.warnSolid,
+    })
+  return rows
+}
+
+const getRow = (c: SpeedCell): string => c.row
+const getCol = (c: SpeedCell): string => c.col
+const getValue = (c: SpeedCell): number | null => c.deficitPct
+const formatValue = (v: number): string => `${fmtPct(v)} below fastest hour`
+const formatRow = (row: string): string => DAY_FORMAT.format(localDayStart(row))
+const TOOLTIP = { rows: speedCellRows }
 
 /** Hourly "when is the line slow" heatmap, per DESIGN.md's "Speed" view.
  *
  * Three cell states, because a failed run used to be dropped by a bare `return []` and so became
- * pixel-identical to an hour nothing ran in: measured, hatched-warn for an hour whose only runs
- * errored, and hatched-neutral for an hour with no run at all. */
-export function SpeedHeatmap(_props: {
+ * pixel-identical to an hour nothing ran in: measured (a ramp), failed (an hour whose only runs
+ * errored) and absent (an hour with no run at all). On basalt-ui 2.10.0 the last two share one
+ * flat neutral fill and the tooltip is what separates them; the legend and the card copy say so. */
+export function SpeedHeatmap({
+  tests,
+  from,
+  to,
+  isPending,
+}: {
   tests: SpeedTest[]
   from: number
   to: number
@@ -22,5 +189,49 @@ export function SpeedHeatmap(_props: {
    */
   isPending?: boolean
 }) {
-  return <ChartCard state={{ empty: 'Migrating to basalt-ui 2.0' }} />
+  const { cells, rows, fastest } = speedCells(tests, from, to)
+  const [compact] = dashboard.field.compact.use()
+  // The caption carries the real figure rather than a bare superlative: "Slowest" over a
+  // range-relative ramp was the lie itself. While pending `state` conceals the legend, so the
+  // "No successful run" a `fastest` of `null` would print is never readable over an unanswered query.
+  const legend = {
+    label: fastest === null ? 'No successful run' : `Fastest hour ${fmtMbps(fastest)}`,
+  }
+
+  return (
+    <ChartCard
+      // Titled in compact only, where there is no section heading to name the block — see
+      // `GuidedChart` for the whole rule.
+      title={compact ? 'Throughput by hour' : undefined}
+      // Not `` `last ${days} days` `` — the page carries exactly one range control, and restating
+      // the selected window's day count here duplicated it whenever the selection was already under
+      // `MAX_DAYS`. What this view still has to self-report (the repo's own AGENTS.md: this is the
+      // one block the range does not fully scope) is the structural cap, stated once and
+      // unconditionally rather than re-derived from the current selection.
+      subtitle={`When the line is slow · never more than the trailing ${MAX_DAYS} days, by hour of your day.`}
+      info="Darker cells averaged lower download throughput that hour; a cell paints full at half the fastest hour in range. Grey cells either had no run or had one that failed — the tooltip says which."
+    >
+      {/* A floor under the frame: the height is already computed from the row count, this only
+          stops it reporting 0 before the first measurement. */}
+      <div style={{ minHeight: 220 }}>
+        <Heatmap
+          data={cells}
+          getRow={getRow}
+          getCol={getCol}
+          getValue={getValue}
+          rows={rows}
+          cols={HOUR_LABELS}
+          color={VX.accent}
+          domain={DOMAIN}
+          formatValue={formatValue}
+          formatRow={formatRow}
+          legend={legend}
+          tooltip={TOOLTIP}
+          height={Math.max(220, rows.length * ROW_PX + FRAME_CHROME_PX)}
+          state={{ pending: isPending === true }}
+          ariaLabel="Download throughput by hour of day, with hours that had no run or a failed run marked"
+        />
+      </div>
+    </ChartCard>
+  )
 }

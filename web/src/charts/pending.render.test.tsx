@@ -117,15 +117,14 @@ describe('LinkSpeedStrip isPending', () => {
   })
 })
 
-// MIGRATION-STUB(w7): SpeedHeatmap renders a placeholder card until the grid port
-describe.skip('SpeedHeatmap isPending', () => {
+describe('SpeedHeatmap isPending', () => {
   test('renders the pending caption, and neither of the two claims the empty grid makes', () => {
     const html = renderToStaticMarkup(<SpeedHeatmap tests={[]} {...WINDOW} isPending />)
     expect(html).toContain(PENDING)
     // The legend caption derived from a `fastest` of null, and the cell tooltip for an hour with
-    // no run. Both are findings about the line; neither may render over an unanswered query.
+    // no run. Both are findings about the line; neither may be on screen over an unanswered query.
+    expect(html).not.toContain('No run')
     expect(html).not.toContain('No successful run')
-    expect(html).not.toContain('Not measured')
   })
 
   test('does not claim to be pending once resolved', () => {

@@ -393,23 +393,39 @@ bespoke tooltip (`ChartTooltipFloat`/`TooltipBody` deleted).
 
 **basalt friction:** none new.
 
-## Wave 9 — Visual check against the baseline, BEFORE deploy <!-- status: active -->
+## Wave 9 — Visual check against the baseline, BEFORE deploy <!-- status: done -->
 
-Nothing ships. Run from `make up` on the working tree (the local equivalent; AGENTS.md § Deploy) so
-the check sees the container build, not only vite.
+Nothing ships. **Never `make up` here** — it replaces the live container (no CD; orchestrator correction
+2026-10-15). Serve a /tmp vite build of basalt-2 on a throwaway port proxying /api to the running
+container (the Waves 3–8 recipe); Wave 10 re-verifies on the real container after the merge.
 
-- [ ] `make up` on the merged head; `make verify` green. Repeat Wave 1's matrix with `@verifier`:
-      light/dark × both viewports × compact × all ranges × every section view.
-- [ ] Repeat the tooltip captures (all 11 rows, three cell states, keyboard cursor) and diff text
+- [x] ~~`make up`~~ (never — see the note above) vite build of the head served read-only; Wave 1's matrix repeated:
+      light/dark × both viewports × compact × all ranges × every section view (`@verifier` classified the pairs).
+- [x] Repeat the tooltip captures (all 11 rows, three cell states, keyboard cursor) and diff text
       against `baseline-1.41.md`.
-- [ ] Console and network check: no error/warn on load or on any interaction, no failed request,
+- [x] Console and network check: no error/warn on load or on any interaction, no failed request,
       `POST /api/speedtests/run` never fired.
-- [ ] Verdict: per region "same / improved / regressed (why)". Any regression is a fix or a ledger
+- [x] Verdict: per region "same / improved / regressed (why)". Any regression is a fix or a ledger
       row before Wave 10; D2's flat-fill decision is closed here.
 
 **Evidence:** `w9.md` — side-by-side index of every capture.
 
-## Wave 10 — Deploy and prove it live <!-- status: pending -->
+**Left behind:**
+- `basalt-ui` **2.11.0** exact; rows 94, 96, 97, 99, 100, 103, 104 taken in code (95, 101, 102, 105 needed none); details and the matrix verdict in `evidence/w9.md`. Commits `e4f4be0`..`03e11a5` on `basalt-2`, pushed.
+- **The check ran against the vite build, not a container build** (`make up` was not run). Wave 10 re-verifies on the real container after the merge.
+- **D2 closed:** failed (amber) and absent (neutral) have their own fills and legend entries on the speed heatmap. Throughput's amber "Not measured" shares a hue with the heatmap's "Failed run" — accepted, owner should look at it.
+- Defects found and fixed here: the latency loss dots (a first 2.11 attempt deleted them — `getMarker` only colours the cursor dot on a consumer-marks chart), a banner-rule failure reason squeezing the heatmap tooltip, a lone speed run drawing nothing at 1h. Heatmap value row is labelled "This hour".
+- Gates green (577 / 374, lint, build, `sync --check`, `doctor`, `--audit-allows`); `/review` taken in part: declined (a) a render test pinning that the worst-loss sparkline keeps a spike — that is `Sparkline`'s documented pooling contract now, a render test cannot observe it at the static 640 px width; (b) hoisting `xDomain` to one route-level prop; (c) pre-existing unused `kpi.ts` exports.
+- Wave 10 needs: pull/merge `basalt-2` into `master`, `make up` from the master checkout, then the live-container version of this check (matrix subset + `POST /api/speedtests/run` never fired).
+
+**basalt friction** (for the orchestrator to file as `linewatch W9 …`; basalt-ui not edited):
+1. `Lines` draws nothing for a lone finite point; worked around locally with `getMarker` on a one-run window (`lib/speed-runs.ts`). A single-point series should draw its dot.
+2. End labels at the `wide` class are clipped at the right plot edge when the last point sits on it ("Downloa").
+3. `BandStrip` x ticks at the 1 h range (60 s buckets) are unevenly spaced and nearly touch ("18:13 18:17 18:21").
+4. The first x tick label overlaps the y-axis label at the plot origin on the throughput and ping charts (compact and 390 px).
+5. `CartesianChart` with consumer `marks` draws no `getMarker` dots (only the cursor dot is coloured), unlike `Lines`; the 2.11 docs say "a `CartesianChart` with consumer `marks` can colour the dot" without saying the always-on markers are `Lines`-only.
+
+## Wave 10 — Deploy and prove it live <!-- status: active -->
 
 - [ ] Land on `master` (direct-to-master, per AGENTS.md); rollhook CD ships it. If D1(c) paused CD,
       resume it now. `make deploy` only reports how it ships — it is not the deploy.

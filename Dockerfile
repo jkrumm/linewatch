@@ -59,6 +59,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
   && groupadd --system app && useradd --system --gid app --home-dir /app app
 
 COPY --from=ookla /tmp/ookla/speedtest /usr/local/bin/speedtest
+# The speedtest CLI saves its settings under $HOME/.config/ookla, and the app
+# user's home is /app (root-owned WORKDIR). Without this directory the run fails
+# with `Permission denied "/app/.config/ookla"`.
+RUN install -d -o app -g app /app/.config/ookla
 
 COPY --from=base --chown=app:app /app/node_modules /app/node_modules
 COPY --from=base --chown=app:app /app/src /app/src

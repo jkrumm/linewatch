@@ -2,7 +2,7 @@
 
 *Moved from `AGENTS.md` (then `CLAUDE.md`; the "dashboard runs on basalt-ui" section) to keep that
 file under its size budget. The one-line rules stay there; this is the why. Rewritten for
-basalt-ui 2.10.0 in the migration's Wave 8: where a 1.x mechanism is gone, the bullet keeps the
+basalt-ui 2.10.0 in the migration's Wave 8 (touched up for 2.11.0 in Wave 9): where a 1.x mechanism is gone, the bullet keeps the
 lesson and names what replaced it.*
 
 - **A mark that renders and a legend that does not are not independently reviewable, so the
@@ -67,10 +67,10 @@ lesson and names what replaced it.*
   (their x was speed-test RUNS, deliberately shaped so `Date.parse` would reject it); once x is an
   instant a latency spike marks the nearest run and a run marks the bucket it landed in. The group
   is basalt's default `chartCursor()`; `ChartCursorScope` is gone (`cursorGroup` opts a chart
-  out; nothing here does). **Alignment is not shared:** a `Date` x is a proportional scale over
-  the data's OWN extent, so the run charts (first run to last) put the crosshair at a different
-  pixel column than the bucketed ones (whole window) — same instant, different x (24h: 974 / 1005
-  / 1042 px). The fix is an upstream `xDomain` (ledger row 99). The heatmaps join no cursor — they
+  out; nothing here does). **Alignment is shared by construction since 2.11.0:** a `Date` x
+  spans the data's OWN extent unless given `xDomain`, so the run charts used to put the crosshair at
+  a different pixel column than the bucketed ones (24h: 974 / 1005 / 1042 px). Both run charts now
+  take `slotExtent` (`lib/densify.ts`: the first and last slot `densifyBuckets` draws) as `xDomain`. The heatmaps join no cursor — they
   hit-test per cell and never broadcast.
 - **The tooltip header formats from the instant, never from the key.**
   1.x's `TooltipHeader` regexed `YYYY-MM-DD` out of the domain value and rebuilt a LOCAL

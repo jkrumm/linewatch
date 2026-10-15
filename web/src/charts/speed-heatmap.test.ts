@@ -102,6 +102,13 @@ describe('speedCellState / speedCellRows — failed and absent are separate fill
   })
 })
 
+test('failureReason skips a banner rule and keeps the first line with words', () => {
+  const banner = `${'='.repeat(70)}\nYou may only use this Speedtest software after you accept the licence`
+  expect(failureReason([run(1, { ok: false, error: banner })])).toBe(
+    ' — You may only use this Speedtest software after you accept the licence',
+  )
+})
+
 test('failureReason keeps one short line of a long multi-line error', () => {
   const long = `${'x'.repeat(200)}\nsecond line`
   const reason = failureReason([run(1, { ok: false, error: long })])

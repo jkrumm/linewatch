@@ -134,8 +134,8 @@ say they disagreed; the guards below exist so that cannot happen silently again.
   `charts/band-shared.ts` `ABSENT_COLOR` (`VX.accent`, at `ABSENT_ALPHA`) is the strips' and the
   latency band's; throughput passes `absentState` with `THROUGHPUT_ABSENT_COLOR` (`VX.status.warn`)
   because `ABSENT_COLOR` is its download hue. Each is pinned by a test. The 1.x hatch is gone with
-  `CategoryGrid`; on the speed heatmap *failed* and *absent* share one flat fill and only the
-  tooltip separates them (D2, accepted — `docs/waves/evidence/w7.md`).
+  `CategoryGrid`; on the speed heatmap *failed* (amber) and *absent* (neutral) each have their
+  own `getState`/`states` fill since 2.11.0 (D2 closed — `docs/waves/evidence/w9.md`).
 - **Every chart takes `tooltip.onFollow: inView`, never `true`.** `onFollow` is basalt's
   boolean (a follower shows its tooltip while a sibling owns the cursor); `inView` is
   `charts/use-in-viewport.ts`, which tracks the NODE, so an off-screen chart does not draw over

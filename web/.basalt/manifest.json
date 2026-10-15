@@ -14,13 +14,11 @@
     ".github/workflows/check.yml": "897aa9276bf0f96fc45f86947346312a4bda67f8bdd5e6cef8d530a3a934605c",
     ".oxlintrc.json": "e7237e982c1d2528ecc4ab5ae7bc6737591a60a66ad28df8ddf5c0ffadeea803",
     "src/query-client.ts": "5efb420731453ee1e0279a4501bf6536b066b595f14886ba3d7329336eae09c1",
-    "src/routes/__root.tsx": "439fb91cf26ee51eb56ae6415556970d323dae6049d10415970709b79c0373e0",
     ".claude/rules/basalt-batteries.md": "272737ef85af6a5393c52ad7c2897c27817a08e2f8a8ed286add7334e9fa9fdc",
     ".claude/rules/basalt-controls.md": "1db7beecfb3df28c678c6fcc0c59f3a6c6772b8e90a76f226ca85c8e1c42c39b",
-    "AGENTS.md": "68c22d59aa05dd64450484bd9466c0081c8f4f1c4098b38e1d2b94a69fad776a",
-    "src/lib/nav.tsx": "658cae42e14d1000bab320327f103dc5afae3e9858da0dc4d8183a4e7970ebcf"
+    "AGENTS.md": "68c22d59aa05dd64450484bd9466c0081c8f4f1c4098b38e1d2b94a69fad776a"
   },
-  "basaltVersion": "2.9.0",
+  "basaltVersion": "2.9.1",
   "spacingScale": {
     "xs": 11,
     "sm": 13,

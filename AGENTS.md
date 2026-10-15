@@ -134,8 +134,9 @@ say they disagreed; the guards below exist so that cannot happen silently again.
 - **Every chart takes `tooltip.onFollow: inView`, never `true`** — `ChartTooltipFloat` has no
   viewport gate of its own and clamps an off-screen follower over the tooltip the reader is
   looking at; `charts/use-in-viewport.ts` tracks the NODE, and
-  `charts/follower-tooltip.test.ts` pins both halves. Only the latency band anchors as a source
-  (`tooltip.follow: false`), because three charts share its column.
+  `charts/follower-tooltip.test.ts` pins both halves. There is no `tooltip.follow` on 2.x and
+  none is needed: the tooltip is anchored to the cursor's column (`anchor: 'group-center'`), so
+  every chart sharing it, the latency band included, lines up on the instant being read.
   History and measurements: [`docs/dashboard-charts.md`](docs/dashboard-charts.md).
 ## Conventions
 
@@ -310,7 +311,8 @@ say they disagreed; the guards below exist so that cannot happen silently again.
 - **`tooltip.formatHeader` must format from the instant, never regex the domain
   key.** A UTC ISO key regexed for `YYYY-MM-DD` and rebuilt as a LOCAL `Date` can
   name the wrong calendar day. The strips and throughput now receive the `Date`
-  itself; `charts/tooltip-header.test.ts` still pins the latency band (Wave 5).
+  itself, and so does the latency band; `charts/tooltip-header.test.ts` pins all of them. There
+  is no `tooltip.label` slot, so the clock rides in the header (`fmtDateTime`).
 - **The bucketed band charts key on the instant and leave tick thinning to basalt.**
   On 2.x `x` is `new Date(bucketStart)` and `xTicks` takes values, not a width callback,
   so the two strips and the throughput bars hand basalt every bucket and it thins the

@@ -25,20 +25,16 @@ const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
  * `renderToStaticMarkup` never produces one. What has to hold is structural, so that is what this
  * asserts: the header formats from the INSTANT, and the key is the one the strips resolve against.
  */
-// MIGRATION-STUB(w5): greps latency-band-chart.tsx, which is a stub until the CartesianChart port
-describe.skip('the latency band tooltip header and its axis cannot name different days', () => {
-  test('the header formats from the bucket instant, never from the domain key', () => {
-    expect(code).toContain('formatHeader: (_key, p) => fmtTooltipDate(new Date(p.bucketStart))')
+describe('the latency band tooltip header and its axis cannot name different days', () => {
+  test('the header formats from the bucket instant, never from the x value', () => {
+    expect(code).toContain('formatHeader: (_x: Date, p: Point) => fmtDateTime(p.bucketStart)')
   })
 
-  test('the domain key is densifyBuckets own ISO start, shared verbatim with the strips', () => {
-    expect(code).toContain('key: slot.key,')
-    // The local-ISO workaround this replaced. Re-keying the domain to make a formatter come out
-    // right is the regression: it desynchronises this chart's broadcast key from every sibling's.
+  test('the x value is the bucket instant as a Date, shared with the strips', () => {
+    expect(code).toContain('const getPointX = (p: Point): Date => new Date(p.bucketStart)')
+    // The local-ISO workaround and the string key this replaced. Re-keying the domain to make a
+    // formatter come out right is the regression.
     expect(code).not.toContain('localOffsetIso')
-  })
-
-  test('the badge still carries the clock the header format drops', () => {
-    expect(code).toContain('label: (p) => ({ text: fmtClock(p.bucketStart)')
+    expect(code).not.toContain('key: slot.key')
   })
 })

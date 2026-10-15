@@ -34,7 +34,7 @@ function bucket(patch: Partial<ProbeBucket> = {}): ProbeBucket {
 }
 
 function point(patch: Partial<Point> = {}): Point {
-  return { key: '2026-08-18T00:00:00.000Z', bucketStart: 0, bucket: null, vantage: null, overlayMs: null, ...patch }
+  return { bucketStart: 0, bucket: null, vantage: null, overlayMs: null, ...patch }
 }
 
 /** Only `key` is read by `domainMax`'s callers; the accessors are never invoked here. */

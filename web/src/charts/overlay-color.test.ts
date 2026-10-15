@@ -30,19 +30,18 @@ const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
  * marks stroke `primary.color` / `overlaySeries.color`, i.e. the very object the legend rendered.
  * There is no second read left to drift. What these tests pin is that nobody reintroduces one.
  */
-// MIGRATION-STUB(w5): greps latency-band-chart.tsx, which is a stub until the CartesianChart port
-describe.skip('the latency band legend and its marks cannot drift', () => {
+describe('the latency band legend and its marks cannot drift', () => {
   test('the overlay colour is declared once and only in the series descriptor', () => {
     expect(source).toContain('const OVERLAY_COLOR =')
     expect(source).toContain('color: OVERLAY_COLOR')
     // Read back off the series, never repeated at the mark.
-    expect(code).not.toContain('stroke={OVERLAY_COLOR}')
+    expect(code).not.toContain('stroke: OVERLAY_COLOR')
   })
 
   test('every series stroke reads the descriptor the legend rendered', () => {
-    const strokes = [...code.matchAll(/stroke=\{([^}]+)\}/g)].map((m) => m[1]!.trim())
-    // Chrome (`VX.grid`, `VX.axisStroke`) may stroke a literal — it is not a series. A series
-    // neutral or the accent written back into a stroke is the regression this guards.
+    const strokes = [...code.matchAll(/stroke: ([^,\n]+),/g)].map((m) => m[1]!.trim())
+    // Chrome may stroke a token — it is not a series. A series neutral or the accent written back
+    // into a stroke is the regression this guards.
     expect(strokes.filter((t) => /^VX\.(line|line2|accent|neutral|ink)$/.test(t))).toEqual([])
     // Both series marks resolve their colour through the `PlotContext` entry, not a local.
     expect(strokes).toContain('primary.color')
@@ -50,6 +49,6 @@ describe.skip('the latency band legend and its marks cannot drift', () => {
   })
 
   test('neither site reintroduces a series-colour literal in the legend', () => {
-    expect(code).not.toMatch(/label: overlay\.label,\s*color: VX\./)
+    expect(code).not.toMatch(/label: overlayLabel,\s*color: VX\./)
   })
 })

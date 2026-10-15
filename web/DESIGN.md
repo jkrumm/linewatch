@@ -36,7 +36,7 @@ below; **silence means "inherits the basalt-ui defaults unchanged."**
   series; on a secondary it is louder than the series it is drawn against, which is where every
   colour problem on this page has started.
 - **A legend swatch and the mark it names must read the same binding**, not two literals that
-  happen to agree. `latency-band-chart` builds its legend in one function and its `LinePath` in
+  happen to agree. `latency-band-chart` built its legend in one function and its overlay line in
   another, and drifted for two commits with nothing to catch it — both are tokens, so the palette
   guard was satisfied. `charts/overlay-color.test.ts` pins the structural form.
 - **Tone deltas:** _(none — inherits)_

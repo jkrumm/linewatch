@@ -159,8 +159,7 @@ describe.skip('BufferbloatChart isPending', () => {
   })
 })
 
-// MIGRATION-STUB(w5): LatencyBandChart renders a placeholder card until the CartesianChart port
-describe.skip('LatencyBandChart isPending', () => {
+describe('LatencyBandChart isPending', () => {
   /** The legend is the whole point on this one: it is the only place on the page that says what
    * the amber and red dots mean, which makes it an encoding rather than a caption — and an
    * encoding for marks that are not drawn is a legend describing nothing. */

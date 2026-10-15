@@ -6,14 +6,13 @@ const WINDOW = { from: 0, to: 3_600_000, bucketSeconds: 300 } as const
 
 /**
  * `buckets={throughput?.buckets ?? []}` fed to this chart ungated, before `isPending` existed,
- * densified to an all-null window and painted a fully-hatched "measured, and nothing was there"
+ * densified to an all-null window and painted a fully-absent "measured, and nothing was there"
  * band on every cold load and range change — `throughputQuery` is not in the route loader, so this
  * was reachable, not a one-frame flicker. `isPending` is the fix; these pin the two things that
  * must be true of it: the pending state renders instead of a chart body, and it never renders
  * alongside one, whatever `buckets` holds.
  */
-// MIGRATION-STUB(w4): ThroughputChart renders a placeholder card until the MirroredBars port
-describe.skip('ThroughputChart isPending', () => {
+describe('ThroughputChart isPending', () => {
   test('renders the shipped pending caption, not a chart, while pending — even with buckets already in hand', () => {
     const html = renderToStaticMarkup(
       <ThroughputChart

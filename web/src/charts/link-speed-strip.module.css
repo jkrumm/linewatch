@@ -1,0 +1,12 @@
+/*
+ * The verdict line's layout. A stylesheet rather than a TSX style object because both 6px values
+ * are micro-spacing the guard only treats as legitimate in a CSS declaration, and
+ * `src/charts/**` is the Mantine-free half of this app, so no spacing prop is reachable.
+ */
+.verdict {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px;
+  padding-bottom: 6px;
+}

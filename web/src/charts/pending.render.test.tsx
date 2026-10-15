@@ -61,8 +61,7 @@ const TEST_RUN = {
   error: null,
 }
 
-// MIGRATION-STUB(w4): AvailabilityStrip renders a placeholder card until the BandStrip port
-describe.skip('AvailabilityStrip isPending', () => {
+describe('AvailabilityStrip isPending', () => {
   test('renders the pending caption instead of the strip', () => {
     const html = renderToStaticMarkup(
       <AvailabilityStrip target="cloudflare" buckets={[]} {...BUCKETED} isPending />,
@@ -83,8 +82,7 @@ describe.skip('AvailabilityStrip isPending', () => {
   })
 })
 
-// MIGRATION-STUB(w4): LinkSpeedStrip renders a placeholder card until the BandStrip port
-describe.skip('LinkSpeedStrip isPending', () => {
+describe('LinkSpeedStrip isPending', () => {
   test('renders the pending caption instead of the strip', () => {
     const html = renderToStaticMarkup(<LinkSpeedStrip vantage={[]} {...BUCKETED} isPending />)
     expect(html).toContain(PENDING)

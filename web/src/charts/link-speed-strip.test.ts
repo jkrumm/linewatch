@@ -1,5 +1,16 @@
 import { describe, expect, test } from 'bun:test'
-import { type Column, foldStates, summariseLink } from './link-speed-strip'
+import { foldBands } from 'basalt-ui/charts'
+import { VX } from 'basalt-ui/tokens'
+import { ABSENT_COLOR } from './band-shared'
+import {
+  bandFor,
+  columnRows,
+  type Column,
+  foldStates,
+  LINK_STATES,
+  mergeColumns,
+  summariseLink,
+} from './link-speed-strip'
 import type { LinkBucketState } from '../lib/vantage'
 
 const STEADY_1000: LinkBucketState = { kind: 'steady', mbit: 1000 }
@@ -13,7 +24,6 @@ const TRANSITION: LinkBucketState = { kind: 'transition', mbits: [100, 1000] }
  * from construction, because `getBand` never sees the fold's own bookkeeping. */
 function column(key: string, state: LinkBucketState): Column {
   return {
-    key,
     bucketStart: Number(key),
     state,
     foldedFrom: 1,
@@ -21,10 +31,10 @@ function column(key: string, state: LinkBucketState): Column {
   }
 }
 
-// MIGRATION-STUB(w4): `foldBands` is not exported by basalt-ui 2.8.1 (basalt ledger row 80). Returns as
-//   import { foldBands } from 'basalt-ui/charts'
-//   import { mergeColumns } from './link-speed-strip'
-//   const fold = (columns: Column[], cap: number) => foldBands(columns, cap, mergeColumns)
+/** The real grouping `BandStrip` runs (`foldBands`, exported from basalt-ui 2.9.0), with this
+ * strip's own merge — so a fold test exercises the kind's arithmetic, not a copy of it. */
+const fold = (columns: Column[], cap: number) => foldBands(columns, cap, mergeColumns)
+const colorOf = (key: string) => LINK_STATES.find((s) => s.key === key)?.color
 
 /**
  * The verdict line above the strip. It exists because this chart's normal state is a flat band
@@ -102,8 +112,7 @@ describe('foldStates', () => {
   })
 })
 
-// MIGRATION-STUB(w4): `foldBands` is not exported by basalt-ui 2.8.1 (ledger row 80)
-describe.skip('mergeColumns, through foldBands', () => {
+describe('mergeColumns, through foldBands', () => {
   test('[steady, unmeasured, unmeasured] carries unmeasuredMembers 2, not a collapse to fully-measured', () => {
     const [folded] = fold(
       [column('0', STEADY_1000), column('1', UNMEASURED), column('2', UNMEASURED)],
@@ -112,7 +121,7 @@ describe.skip('mergeColumns, through foldBands', () => {
     expect(folded?.foldedFrom).toBe(3)
     expect(folded?.unmeasuredMembers).toBe(2)
     // `foldStates` still reports a speed — the coverage count is what keeps that from reading as a
-    // fully-confident reading across the whole span (see `StripPlot`'s `unmeasuredFrac`).
+    // fully-confident reading across the whole span (see `bandFor`'s `absentFraction`).
     expect(folded?.state).toEqual({ kind: 'steady', mbit: 1000 })
   })
 
@@ -163,5 +172,82 @@ describe.skip('mergeColumns, through foldBands', () => {
 
   test('a non-positive cap folds nothing', () => {
     expect(fold([column('0', STEADY_1000)], 0)).toEqual([])
+  })
+})
+
+describe('bandFor', () => {
+  test('a steady band is a speed ramp relative to the fastest speed the window saw', () => {
+    expect(bandFor(column('0', STEADY_1000), 1000)).toMatchObject({ state: 'speed' })
+    const slow = bandFor(column('0', STEADY_100), 1000)
+    const fast = bandFor(column('0', STEADY_1000), 1000)
+    expect(slow.fill).not.toBe(fast.fill)
+  })
+
+  /** A renegotiation is its own state with a marker, never a point on the speed ramp. */
+  test('a transition is its own state with a marker, not a value', () => {
+    const band = bandFor(column('0', TRANSITION), 1000)
+    expect(band.state).toBe('transition')
+    expect(band.marker).toBeDefined()
+  })
+
+  test('cycles that reported no speed are not the absent state', () => {
+    expect(bandFor(column('0', NO_VANTAGE_5), 0).state).toBe('no-vantage')
+    expect(bandFor(column('0', UNMEASURED), 0).state).toBe('absent')
+  })
+
+  test('a window with no speed at all keeps the ramp defined rather than NaN', () => {
+    expect(bandFor(column('0', STEADY_1000), 0).fill).not.toContain('NaN')
+  })
+
+  /** `foldStates` reports what the MEASURED members saw; the absent share is what keeps a
+   * 1-of-3-measured fold from reading as a fully-measured band. */
+  test('a partly-measured fold paints exactly the share nothing measured', () => {
+    const [folded] = fold(
+      [column('0', STEADY_1000), column('1', UNMEASURED), column('2', UNMEASURED)],
+      1,
+    )
+    expect(bandFor(folded!, 1000).absentFraction).toBeCloseTo(2 / 3, 10)
+  })
+})
+
+/**
+ * D2 (plan Wave 1, basalt-ui 2.9.0): with the hatch gone, "not measured" is a flat fill, and the
+ * only thing keeping it from reading as a speed or as "no speed reported" is that no measured
+ * state shares its colour — not the same token at another alpha.
+ */
+describe('the absent state is told apart by colour, not only by opacity', () => {
+  test('its colour differs from every measured state', () => {
+    const measured = LINK_STATES.filter((s) => s.key !== 'absent')
+    expect(measured.length).toBe(3)
+    for (const state of measured) expect(state.color).not.toBe(ABSENT_COLOR)
+    expect(colorOf('absent')).toBe(ABSENT_COLOR)
+  })
+
+  test('the ramp and the transition marker never use the absent colour', () => {
+    const fills = [
+      bandFor(column('0', STEADY_1000), 1000).fill,
+      bandFor(column('0', TRANSITION), 1000).fill,
+    ]
+    for (const fill of fills) expect(fill).not.toContain(VX.accent)
+  })
+})
+
+describe('columnRows', () => {
+  test('a steady unfolded column has no extra rows', () => {
+    expect(columnRows(column('0', STEADY_1000))).toEqual([])
+  })
+
+  test('a transition says it was not averaged', () => {
+    expect(columnRows(column('0', TRANSITION)).map((r) => r.label)).toEqual(['Not averaged'])
+  })
+
+  test('a partly-measured fold names its basis and the unmeasured share', () => {
+    const [folded] = fold(
+      [column('0', STEADY_1000), column('1', UNMEASURED), column('2', UNMEASURED)],
+      1,
+    )
+    expect(columnRows(folded!)).toContainEqual(
+      expect.objectContaining({ label: 'Folded from', value: '3 buckets, 2 not measured' }),
+    )
   })
 })

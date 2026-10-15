@@ -1,5 +1,14 @@
 import { describe, expect, test } from 'bun:test'
-import type { Column } from './availability-strip'
+import { foldBands } from 'basalt-ui/charts'
+import { VX } from 'basalt-ui/tokens'
+import { ABSENT_COLOR } from './band-shared'
+import {
+  bandStates,
+  columnRows,
+  getBand,
+  mergeColumns,
+  type Column,
+} from './availability-strip'
 import type { ProbeBucket } from '../lib/types'
 
 function bucket(over: Partial<ProbeBucket> = {}): ProbeBucket {
@@ -23,7 +32,6 @@ function bucket(over: Partial<ProbeBucket> = {}): ProbeBucket {
  * construction, not added by the merge, because `getBand` never sees the fold's bookkeeping. */
 function column(key: string, value: ProbeBucket | null): Column {
   return {
-    key,
     bucketStart: Number(key),
     bucket: value,
     foldedFrom: 1,
@@ -31,13 +39,10 @@ function column(key: string, value: ProbeBucket | null): Column {
   }
 }
 
-// MIGRATION-STUB(w4): `getBand`/`bandSeries` (BandStripSeries-typed) were removed with the strip, and
-// `foldBands` is not exported by basalt-ui 2.8.1 (basalt ledger row 80). The helpers below return as
-//   import { VX } from 'basalt-ui/tokens'
-//   import { foldBands } from 'basalt-ui/charts'
-//   import { bandSeries, getBand, mergeColumns } from './availability-strip'
-//   const fold = (columns: Column[], cap: number) => foldBands(columns, cap, mergeColumns)
-//   const colorOf = (key: string) => bandSeries(10).find((s) => s.key === key)?.color
+/** The real grouping `BandStrip` runs (`foldBands`, exported from basalt-ui 2.9.0), with this
+ * strip's own merge — so a fold test exercises the kind's arithmetic, not a copy of it. */
+const fold = (columns: Column[], cap: number) => foldBands(columns, cap, mergeColumns)
+const colorOf = (key: string) => bandStates(10).find((s) => s.key === key)?.color
 
 /**
  * The reported bug, pinned: *why is reachability red all the time even though we are online?*
@@ -51,14 +56,13 @@ function column(key: string, value: ProbeBucket | null): Column {
  * entry (so the legend swatch cannot drift from the mark), and only the loss RAMP overrides it per
  * band. So does the assertion.
  */
-// MIGRATION-STUB(w4): exercises the removed `getBand`/`bandSeries`
-describe.skip('getBand', () => {
+describe('getBand', () => {
   test('a clean bucket is not drawn in the bad hue', () => {
     expect(getBand(column('0', bucket({ lossPct: 0, maxLossPct: 0 })))).toMatchObject({
       state: 'clean',
     })
-    expect(colorOf('clean')).toContain('neutral')
-    expect(colorOf('clean')).not.toContain('bad')
+    expect(colorOf('clean')).toBe(VX.neutral)
+    expect(colorOf('clean')).not.toBe(VX.badSolid)
   })
 
   test('a lossy bucket is', () => {
@@ -96,22 +100,20 @@ describe.skip('getBand', () => {
     )
   })
 
-  /** An absent bucket is never a fill: the whole band's width is the absence hatch, which is the
-   * kind's own vocabulary rather than a colour this file picks. */
-  test('an absent bucket is wholly hatched, never a fill', () => {
+  /** An absent bucket is never a measured fill: the whole band's width is the `absent` state. */
+  test('an absent bucket is wholly the absent state, never a measured fill', () => {
     expect(getBand(column('0', null))).toEqual({ state: 'absent', absentFraction: 1 })
   })
 
-  /** The share drawn hatched inside a partly-measured band — the fix for a 1-of-3-measured fold
+  /** The share painted absent inside a partly-measured band — the fix for a 1-of-3-measured fold
    * that used to paint as a clean, fully-measured column. */
-  test('a partly-measured fold hatches exactly the share nothing measured', () => {
+  test('a partly-measured fold paints exactly the share nothing measured', () => {
     const [folded] = fold([column('0', bucket()), column('1', null), column('2', null)], 1)
     expect(getBand(folded!).absentFraction).toBeCloseTo(2 / 3, 10)
   })
 })
 
-// MIGRATION-STUB(w4): `foldBands` is not exported by basalt-ui 2.8.1 (ledger row 80)
-describe.skip('mergeColumns, through foldBands', () => {
+describe('mergeColumns, through foldBands', () => {
   test('[measured, absent, absent] carries unmeasuredMembers 2, not a collapse to fully-measured', () => {
     const [folded] = fold([column('0', bucket()), column('1', null), column('2', null)], 1)
     expect(folded?.foldedFrom).toBe(3)
@@ -184,7 +186,7 @@ describe.skip('mergeColumns, through foldBands', () => {
     const [folded] = fold([column('0', bucket()), column('1', bucket()), column('2', bucket())], 1)
     const expectedCycles = 10
     expect(expectedCycles * (folded?.foldedFrom ?? 0)).toBe(30)
-    const absent = bandSeries(expectedCycles).find((s) => s.key === 'absent')
+    const absent = bandStates(expectedCycles).find((s) => s.key === 'absent')
     expect(absent?.formatValue?.({ ...folded!, bucket: null })).toBe('0 of 30 expected cycles')
   })
 
@@ -195,5 +197,40 @@ describe.skip('mergeColumns, through foldBands', () => {
 
   test('a non-positive cap folds nothing', () => {
     expect(fold([column('0', bucket())], 0)).toEqual([])
+  })
+})
+
+/**
+ * D2 (plan Wave 1, basalt-ui 2.9.0): with the hatch gone, "not measured" is a flat fill, and the
+ * only thing keeping it from reading as "zero" or "good" is that no measured state shares its
+ * colour. `neutral` (clean) and `badSolid` (loss, down) are the measured colours; the absent one
+ * must be a different token, not the same token at another alpha.
+ */
+describe('the absent state is told apart by colour, not only by opacity', () => {
+  test('its colour differs from every measured state', () => {
+    const measured = bandStates(10).filter((s) => s.key !== 'absent')
+    expect(measured.length).toBe(3)
+    for (const state of measured) expect(state.color).not.toBe(ABSENT_COLOR)
+    expect(colorOf('absent')).toBe(ABSENT_COLOR)
+  })
+
+  test('a partly-measured band paints the absent share in the strip\'s absent state', () => {
+    const [folded] = fold([column('0', bucket()), column('1', null)], 1)
+    expect(getBand(folded!)).toMatchObject({ state: 'clean', absentFraction: 0.5 })
+  })
+})
+
+describe('columnRows', () => {
+  test('a measured column lists the worst cycle, coverage and the anchor', () => {
+    const rows = columnRows(column('0', bucket({ maxLossPct: 4 })), 10, 'Cloudflare')
+    expect(rows.map((r) => r.label)).toEqual(['Worst cycle', 'Measured', 'Anchor'])
+    expect(rows.find((r) => r.label === 'Measured')?.value).toBe('10 of 10 expected cycles')
+  })
+
+  test('an absent column states no measurement, only its fold and the anchor', () => {
+    const [folded] = fold([column('0', bucket()), column('1', null), column('2', null)], 1)
+    const rows = columnRows({ ...folded!, bucket: null }, 10, 'Cloudflare')
+    expect(rows.map((r) => r.label)).toEqual(['Folded from', 'Anchor'])
+    expect(rows[0]?.value).toBe('3 buckets, 2 not measured')
   })
 })

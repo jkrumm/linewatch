@@ -82,16 +82,15 @@ describe('bucketAxisLabel', () => {
   })
 
   /**
-   * The bridge the four bucketed charts actually pass to `AxisBottomDate`: it takes the scale's
-   * domain value (an ISO bucket start, straight out of `densifyBuckets`) and returns the label.
-   * Pinning it matters because the two halves are now separately owned — a chart could hold a
-   * perfectly good ISO domain and still print `Invalid Date` across its axis if the parse and the
-   * emitter ever disagreed about the format, and nothing else in the suite would notice.
+   * The bridge the bucketed charts pass as `formatX`: it takes the x value (the bucket's start as a
+   * `Date`, the instant a chart keys on) and returns the label. Pinning it matters because a chart
+   * could hold a perfectly good instant and still print `Invalid Date` across its axis if the
+   * formatter and the x channel ever disagreed about the type, and nothing else would notice.
    */
-  test('bucketTickFormat renders a densified ISO key as its bucket label', () => {
-    const iso = new Date(JUL_31_2026_2305).toISOString()
-    expect(bucketTickFormat(300)(iso)).toBe('31.07 23:05')
-    expect(bucketTickFormat(86_400)(iso)).toBe('31.07.26')
+  test('bucketTickFormat renders a bucket-start Date as its bucket label', () => {
+    const start = new Date(JUL_31_2026_2305)
+    expect(bucketTickFormat(300)(start)).toBe('31.07 23:05')
+    expect(bucketTickFormat(86_400)(start)).toBe('31.07.26')
   })
 
   /** The exact failure the date prefix prevents, stated directly. */

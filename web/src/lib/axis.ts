@@ -20,7 +20,7 @@ export const AXIS_LABEL_PX = 96
  * seam's shape — `(keys, plotWidth) => keys` — so it is handed straight to the prop rather than
  * wrapped, and the width is the chart's OWN resolved plot rect rather than an estimate.
  *
- * The values are DOMAIN values, not labels — on the bucketed charts that is the bucket's ISO start,
+ * The values are x values, not labels — on the bucketed charts that is the bucket's start as a `Date`,
  * rendered through `bucketTickFormat`. `minPxPerTick` still measures the *drawn* label, which is
  * why it stays `AXIS_LABEL_PX` and not the width of an ISO string: spacing is a question about what
  * the reader sees, not about what the scale holds.
@@ -66,19 +66,10 @@ export function axisTickValues<T>(
  * axis reading `31.07 31.07 31.07 …` a dozen times: an axis that costs its full height and tells
  * the reader nothing about where they are in the window.
  *
- * **This is a formatter now, not a key.** The four bucketed charts keep the bucket's ISO start as
- * their scale domain and pass this in to render it — all four through `formatX`, on
- * `CartesianChart` and on the two band kinds alike, since none of them composes its own axis any
- * more. Before that seam existed there was no supported
- * exit: `fmtAxisDate` returns a non-ISO string unchanged, so a *pre-formatted* label was the only
- * thing that reached the axis, which forced the label to double as the scale's domain value and,
- * through it, as the cross-chart hover key. Two unrelated jobs on one string. Separating them also
- * bought the cursor: `useChartCursor` resolves a sibling's key by PARSING it, so an ISO domain is
- * what lets a folded strip track the unfolded latency band with no key map in between.
- *
- * The two run-series charts reach it the same way: `MultiLine` gained `formatX` in 1.17.0, so
- * `runTickFormat` renders their axis and `runAxisKey` is their identity. Nothing on this page
- * formats through its domain value any more.
+ * **This is a formatter, not a key.** The bucketed charts' x is the bucket's start as a `Date` (the
+ * instant) and `formatX` renders it at draw time; the label is never a domain value, because two
+ * unrelated jobs on one string (identity and rendering) is what forced the old seconds-tiebreak
+ * and UTC-offset-suffix machinery. The instant is also what puts every chart on the page cursor.
  *
  * Resolution still varies with the bucket size, but now for legibility rather than collision:
  *
@@ -114,18 +105,17 @@ export function bucketAxisLabel(ts: number, bucketSeconds: ProbeBucketSeconds): 
 }
 
 /**
- * `formatX` for a bucketed chart whose scale domain is the bucket's ISO start.
+ * `formatX` for a bucketed chart whose x is the bucket's start as a `Date`.
  *
- * A pure function of the domain value, deliberately — the alternative is a `Map<key, label>` built
+ * A pure function of the instant, deliberately — the alternative is a `Map<key, label>` built
  * alongside the points, which is one more structure to keep in step with a fold, a densify and a
- * re-render. `Date.parse` on the ISO string `densifyBuckets` emitted is exact, and it runs once
- * per drawn tick (order of ten), not once per bucket.
+ * re-render. It runs once per drawn tick (order of ten), not once per bucket.
  *
- * All four bucketed charts pass this, so a change to how a time reads on one axis is a change to
- * all of them. That was previously true only by four copies of the same call agreeing.
+ * Every bucketed chart passes this, so a change to how a time reads on one axis is a change to all
+ * of them. That was previously true only by four copies of the same call agreeing.
  */
-export function bucketTickFormat(bucketSeconds: ProbeBucketSeconds): (key: string) => string {
-  return (key) => bucketAxisLabel(Date.parse(key), bucketSeconds)
+export function bucketTickFormat(bucketSeconds: ProbeBucketSeconds): (x: Date) => string {
+  return (x) => bucketAxisLabel(x.getTime(), bucketSeconds)
 }
 
 /**

@@ -8,17 +8,15 @@ import type { ProbeBucketSeconds, ThroughputBucket } from './types'
  *
  * - **measured** — `downBytesPerS`/`upBytesPerS` are numbers, possibly 0. A quiet line.
  * - **unmeasured** — both null and `skipped` is 0. No cycle reported here at all; the chart
- *   hatches it, the same vocabulary the availability strip uses for absence.
+ *   marks it absent, the same vocabulary the availability strip uses.
  * - **partial** — a rate *and* `skipped > 0`. Something moved that the server could not place in
  *   time (a reboot reset the counters, the interface failed over, or the gap was too long), so the
  *   column is real but understates. Marked, never silently drawn as though complete.
  */
 export interface ThroughputPoint {
-  /** The bucket's ISO start, from `densifyBuckets`. The chart's scale domain, its hover key and
-   * the cursor's resolution key — an identity, never a rendering. The axis label is derived from it at
-   * draw time by `bucketTickFormat`; this type used to carry a pre-formatted `label` beside it
-   * because `AxisBottomDate` took no `tickFormat` and there was no other way to reach the axis. */
-  key: string
+  /** The bucket's start, epoch ms, from `densifyBuckets`. The chart's x (as a `Date`, the instant),
+   * its hover key and the cursor's resolution key — an identity, never a rendering. The axis label
+   * is derived from it at draw time by `bucketTickFormat`. */
   bucketStart: number
   downBytesPerS: number | null
   upBytesPerS: number | null
@@ -50,7 +48,6 @@ export function throughputPoints(
     const row = slot.value
     if (row === null || row.spanMs <= 0) {
       return {
-        key: slot.key,
         bucketStart: slot.bucketStart,
         downBytesPerS: null,
         upBytesPerS: null,
@@ -64,7 +61,6 @@ export function throughputPoints(
 
     const seconds = row.spanMs / 1000
     return {
-      key: slot.key,
       bucketStart: slot.bucketStart,
       downBytesPerS: row.inBytes / seconds,
       upBytesPerS: row.outBytes / seconds,

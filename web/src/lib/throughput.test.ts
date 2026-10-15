@@ -51,16 +51,13 @@ describe('throughputPoints', () => {
   })
 
   /**
-   * `key` is the chart's band-scale domain value and its hover key — which `useChartCursor`
-   * resolves by PARSING, so a folded column absorbs its members arithmetically — so it
-   * must be unique per bucket: two points sharing one collapse onto a single x position and one of
-   * them stops being drawn. This used to assert the same property of a pre-formatted `label`,
-   * which was the domain value back when `AxisBottomDate` took no `tickFormat` — the field is gone
-   * and the property moved to the identity that replaced it.
+   * `bucketStart` is the chart's x (a `Date` of it) and its hover key — which the cursor resolves by
+   * value — so it must be unique per bucket: two points sharing one collapse onto a single x
+   * position and one of them stops being drawn.
    */
-  test('every bucket gets a distinct scale key', () => {
-    const keys = throughputPoints([], OPTS).map((p) => p.key)
-    expect(new Set(keys).size).toBe(keys.length)
+  test('every bucket gets a distinct x instant', () => {
+    const starts = throughputPoints([], OPTS).map((p) => p.bucketStart)
+    expect(new Set(starts).size).toBe(starts.length)
   })
 })
 

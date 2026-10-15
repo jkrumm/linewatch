@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import type { PlotPoint } from './throughput-chart'
+import { foldBands } from 'basalt-ui/charts'
+import { mergePoints, pointRows, type PlotPoint } from './throughput-chart'
 import type { ThroughputPoint } from '../lib/throughput'
 
 function measured(over: Partial<ThroughputPoint> = {}): PlotPoint {
   return {
-    key: '0',
     bucketStart: 0,
     downBytesPerS: 1000,
     upBytesPerS: 100,
@@ -21,7 +21,6 @@ function measured(over: Partial<ThroughputPoint> = {}): PlotPoint {
 
 function absent(key: string): PlotPoint {
   return {
-    key,
     bucketStart: Number(key),
     downBytesPerS: null,
     upBytesPerS: null,
@@ -36,16 +35,14 @@ function absent(key: string): PlotPoint {
 }
 
 function keyed(p: PlotPoint, key: string): PlotPoint {
-  return { ...p, key, bucketStart: Number(key) }
+  return { ...p, bucketStart: Number(key) }
 }
 
-// MIGRATION-STUB(w4): `foldBands` is not exported by basalt-ui 2.8.1 (basalt ledger row 80). Returns as
-//   import { foldBands } from 'basalt-ui/charts'
-//   import { mergePoints } from './throughput-chart'
-//   const fold = (points: PlotPoint[], cap: number) => foldBands(points, cap, mergePoints)
+/** The real grouping `MirroredBars` runs (`foldBands`, exported from basalt-ui 2.9.0), with this
+ * chart's own merge — so a fold test exercises the kind's arithmetic, not a copy of it. */
+const fold = (points: PlotPoint[], cap: number) => foldBands(points, cap, mergePoints)
 
-// MIGRATION-STUB(w4): `foldBands` is not exported by basalt-ui 2.8.1 (ledger row 80)
-describe.skip('mergePoints, through foldBands', () => {
+describe('mergePoints, through foldBands', () => {
   /**
    * `spanMs > 0` after summing only requires ONE measured member — a `[measured, absent, absent]`
    * group sums to a positive `spanMs` and a real, non-null rate. That rate is not itself wrong (it
@@ -144,5 +141,30 @@ describe.skip('mergePoints, through foldBands', () => {
 
   test('a non-positive cap folds nothing', () => {
     expect(fold([keyed(measured(), '0')], 0)).toEqual([])
+  })
+})
+
+describe('pointRows', () => {
+  test('a measured point states its basis and nothing about folding', () => {
+    expect(pointRows(measured()).map((r) => r.label)).toEqual(['Measured'])
+  })
+
+  test('a partial point is named Understated', () => {
+    const rows = pointRows(measured({ skipped: 2 }))
+    expect(rows.map((r) => r.label)).toEqual(['Measured', 'Understated'])
+    expect(rows[1]?.value).toBe('2 intervals unplaceable')
+  })
+
+  test('an unmeasured point says so rather than printing a rate', () => {
+    expect(pointRows(absent('0'))).toEqual([
+      expect.objectContaining({ label: 'Not measured', value: 'no usable interval' }),
+    ])
+  })
+
+  test('a partial fold names how many of its buckets nothing measured', () => {
+    const [folded] = fold([keyed(measured(), '0'), absent('1'), absent('2')], 1)
+    expect(pointRows(folded!).find((r) => r.label === 'Folded from')?.value).toBe(
+      '3 buckets, 2 not measured',
+    )
   })
 })

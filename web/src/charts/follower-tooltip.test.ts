@@ -1,17 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 import { readFileSync } from 'node:fs'
 
-/** Every chart on the page cursor. Since basalt-ui 1.23.0 all six sit on a shipped kind — the two
- * strips on `BandStrip`, the throughput bars on `MirroredBars`, the other three on
- * `CartesianChart`/`MultiLine` — so all six reach the follower policy through the same prop. */
-const ON_THE_CURSOR = [
-  'availability-strip',
-  'link-speed-strip',
-  'throughput-chart',
-  'latency-band-chart',
-  'speed-chart',
-  'bufferbloat-chart',
-] as const
+/** Every chart on the page cursor. All six sit on a shipped basalt-ui 2.x kind — the two strips on
+ * `BandStrip`, the throughput bars on `MirroredBars`, the other three on `CartesianChart`/`Lines` —
+ * so all six reach the follower policy through the same `tooltip.onFollow` prop. `ON_THE_CURSOR`
+ * lists the ones ported so far; the rest join as their waves land (w5 latency band, w6 speed and
+ * bufferbloat). */
+const ON_THE_CURSOR = ['availability-strip', 'link-speed-strip', 'throughput-chart'] as const
 
 const read = (name: string, ext = 'tsx') =>
   readFileSync(new URL(`./${name}.${ext}`, import.meta.url), 'utf8')
@@ -40,8 +35,8 @@ const code = (name: string, ext?: string) =>
  * `charts/follower-anchor.ts` — the anchor arithmetic, the `<svg>` ref and the `aria-live` split.
  * `BandStrip`/`MirroredBars` own all three now; the file and its tests are deleted.
  */
-// MIGRATION-STUB(w4|w5|w6): every chart source it greps is a stub (w4 strips + throughput, w5 latency band, w6 speed + bufferbloat)
-describe.skip('follower tooltips', () => {
+// MIGRATION-STUB(w5|w6): the latency band, speed and bufferbloat charts join ON_THE_CURSOR when ported
+describe('follower tooltips', () => {
   test.each(ON_THE_CURSOR)('%s opts into onFollow, gated on being on screen', (name) => {
     // `onFollow: true` is the regression, not the fix — see the viewport half above.
     expect(code(name)).toContain('onFollow: inView')

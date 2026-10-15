@@ -22,18 +22,15 @@ that file under its size budget. The one-line rules stay there; this is the why.
   `BandStrip`, which derives the legend, each band's fill AND the one tooltip row
   from that same array — so a retuned state cannot leave its swatch behind. The
   throughput chart's three marks are a `ChartSeries[]` doing the same job on
-  `MirroredBars`. `speed-chart.tsx`'s reference legend —
-  the one legend on this page that `ChartFrame` cannot own, because `MultiLine`
-  draws `refLines` but names none of them — goes through the shipped
-  `deriveLegend(refSeries)` over the same array the rules are drawn from. Delete
-  that block the day `refLines` takes a `label`.
+  `MirroredBars`. `speed-chart.tsx`'s reference legend rides on the
+  rules themselves (`RefLine.legend`, 2.x), so the swatch, dash and label are one record.
 - **Every chart on the cursor shows a tooltip, and exactly one of them announces
   it.** For three releases only the pointer's own chart did: this directory drew a
   value chip on every synced sibling (`charts/synced-tip.tsx`) until the 1.15.0
   rebuild made tooltips source-only, and hovering a spike then moved a bare line
   across four charts with numbers on one — the position without the reading.
   `tooltip.onFollow` (1.18.0) is the shipped answer and **all six charts take it as
-  a prop now** — the app-side `useFollowerTooltip`/`tooltipAnchor`
+  a prop** — the app-side `useFollowerTooltip`/`tooltipAnchor`
   (`charts/follower-anchor.ts`) that reproduced it for the three hand-composed
   charts is deleted with them. The `aria-live` half came with it: a kind gives the
   live region to the cursor SOURCE alone, where four hand-composed charts once fired

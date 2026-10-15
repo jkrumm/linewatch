@@ -299,25 +299,25 @@ say they disagreed; the guards below exist so that cannot happen silently again.
   the check. `actions` is the 2.x tuple, first entry `primary: true` (the live
   chip), at most five; the bar folds by its measured width, so the version string
   stays on `filtersEnd`.
-- **Axis label vs. scale key are different things.** Bucketed charts key on the
-  bucket's ISO start (`formatX`/`bucketTickFormat`); run charts key on the run's ISO
-  instant (`runAxisKey`/`runTickFormat`). Never a pre-formatted display string as the
-  domain key — it collapses distinct buckets/runs onto one x position and drops a
+- **Axis label vs. scale key are different things.** Every chart's x is the
+  instant as a `Date` — a bucket's start (`formatX`/`bucketTickFormat`) or a run's `ts`
+  (`runTickFormat`). Never a pre-formatted display string as the domain key — it collapses distinct buckets/runs onto one x position and drops a
   measurement. Same rule for the tooltip header.
 - **Every chart shares one cursor, keyed on the instant.** All six charts sit in one
-  `ChartCursorScope`; every cartesian x scale is a `scalePoint` over the domain's
-  keys, so positions are evenly spaced regardless of the real time gaps — expected,
-  not a bug. Heatmaps join no cursor (hit-test per cell, never broadcast).
+  `ChartCursorScope`. A `Date` x is a proportional time scale over the data's OWN extent,
+  so the speed and bufferbloat charts (first run to last run) put the crosshair at a
+  different pixel column than the bucketed charts (the whole window) — same instant,
+  different x; expected until basalt takes an x domain. Heatmaps join no cursor (hit-test per cell, never broadcast).
 - **`tooltip.formatHeader` must format from the instant, never regex the domain
   key.** A UTC ISO key regexed for `YYYY-MM-DD` and rebuilt as a LOCAL `Date` can
   name the wrong calendar day. The strips and throughput now receive the `Date`
   itself, and so does the latency band; `charts/tooltip-header.test.ts` pins all of them. There
   is no `tooltip.label` slot, so the clock rides in the header (`fmtDateTime`).
-- **The bucketed band charts key on the instant and leave tick thinning to basalt.**
-  On 2.x `x` is `new Date(bucketStart)` and `xTicks` takes values, not a width callback,
-  so the two strips and the throughput bars hand basalt every bucket and it thins the
-  labels itself (checked at 1280 / 24 h and 352 px / 7 d: no overlap). `axisTickValues`
-  stays for the charts that still need it until their wave lands (Waves 5–6 decide).
+- **Every chart keys on the instant and leaves tick thinning to basalt.**
+  `xTicks` takes values, not a width callback, so each chart hands basalt every x and it
+  thins the labels itself (W6, 352 px chart width, 24 h / 7 d / 30 d: no overlap on any
+  chart; the tightest are the latency band and speed at 30 d, 5–8 px between four
+  labels). `axisTickValues` is deleted.
 - **`densifyBuckets` throws on an off-grid row INSIDE the window (a real bug) and
   skips one outside it (routine)** — `keepAcrossTimeAdvance` serves a stale window's
   placeholder data for well under a second when the window steps forward.

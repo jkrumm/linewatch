@@ -297,28 +297,42 @@ the only direct `@visx/shape` import). Rendered five times in `routes/index.tsx`
 5. MIGRATING does not say `tooltip.follow` is gone because the anchor is fixed to the column; it reads as a missing option. One sentence under § tooltips.
 
 
-## Wave 6 — Charts C: lines and sparklines (l4, l6, l9–l11) <!-- status: active -->
+## Wave 6 — Charts C: lines and sparklines (l4, l6, l9–l11) <!-- status: done -->
 
 `speed-chart.tsx` (214, `Lines`), `bufferbloat-chart.tsx` (129, `Lines`), and the three sparkline
 cells in `status-bar.tsx` (`Sparkline`, `mark: 'line' | 'bar'`). 20 of the probe's errors.
 
-- [ ] `speed-chart`: two lines, dynamic dashed reference lines with the reference legend
+- [x] `speed-chart`: two lines, dynamic dashed reference lines with the reference legend
       (`deriveLegend`/`ChartLegend` are internal now — `legend.placement: 'header'` or a
       `refLines` label; if neither carries the reference labels, ledger row), `SeriesStyle` folded
       into `ChartSeries`, compact height via `height`, `TS7006` untyped `p` callbacks gone with
       the typed `x`/`getValue`.
-- [ ] `bufferbloat-chart`: three lines (two dashed), `height: { base: 190, wide: 260 }`, the
+- [x] `bufferbloat-chart`: three lines (two dashed), `height: { base: 190, wide: 260 }`, the
       `bufferbloat-chart.module.css` floor; `pending.render.test.tsx` rewritten around `state`.
-- [ ] `status-bar.tsx`: `LineSparkline`/`BarSparkline` → `Sparkline`; `useChartSize` is deleted (the
+- [x] `status-bar.tsx`: `LineSparkline`/`BarSparkline` → `Sparkline`; `useChartSize` is deleted (the
       host measures), loss bar sparkline keeps pooled max and null gaps; sparkline `state` for
       pending/empty (added in 2.2.0); `status-bar.render.test.tsx` fully green. The bar stays the
       one standing deviation from `StatCard` (AGENTS.md).
-- [ ] Compare against baseline: speed chart reference lines at 7 d / 30 d, bufferbloat at both
+- [x] Compare against baseline: speed chart reference lines at 7 d / 30 d, bufferbloat at both
       heights, status-bar cells at six-cell density and mobile.
 
 **Evidence:** `w6.md` — before/after per chart, status-bar render test output.
 
-## Wave 7 — Charts D: heatmaps, the bespoke grid goes (l2, l5) <!-- status: pending -->
+**Left behind:**
+- `basalt-ui` stays **2.9.1** (2.9.2 not on npm). Rows 89/92/93/94–98: nothing changed for the paths this wave touched; the `legend: false`-while-pending workaround stays (row 89 unfixed). Evidence: `evidence/w6.md`.
+- `speed-chart` / `bufferbloat-chart` on `Lines`; x is `new Date(ts)` (proportional time), so `runAxisKey` is deleted and `runTickFormat` takes a `Date`; `lib/speed-runs.ts` holds `Run`/`toRuns`/`runHeader`. Reference labels ride on `RefLine.legend` (no `deriveLegend`). `tooltip.label` has no slot: the clock is in the header. Behaviour change owed to 2.x: runs are spaced by real time, not evenly, and the card `info` copy says so.
+- `status-bar` sparklines are three `Sparkline`s pooled to a fixed 56 points (the old width/3 cap needs a measured width `Sparkline` does not expose). They are withheld at 24h/1h by design when the trailing bucket is unmeasured (pre-existing).
+- `axisTickValues` / `AXIS_LABEL_PX` deleted; every chart leaves tick thinning to basalt. Checked at a 352 px chart width, 24h/7d/30d, all 10 x-axis charts: no overlap. Tightest: latency band 5.1 px and speed 8.0 px between four labels at 30d; bufferbloat falls to 2 labels at 30d.
+- Gates: `make check` green (577 root, web 354 pass / 5 skip / 0 fail; −7 = deleted `axisTickValues` tests), lint 0 errors, build, `check-theme --audit-allows` 1 live (pre-existing) / 0 dead, 0 new waivers. `grep MIGRATION-STUB web/src` is w7 only. `/review`: no blocking; 3 of 7 reviewers failed on shell denial (senior-dev, typescript, qa), not re-run. Taken: shared `speed-runs.ts`, stale axis docblock, wording. Declined: `kpi.ts` unused exports (pre-existing, untouched).
+- Not changed, flagged: the status bar's loading reflow (408→397 px when delta chips arrive) is identical on 1.41, so not a regression; the carrier-sync reference was verified on a fixture only, because the live router sample is ~70 days stale.
+- Wave 7 inherits: `CategoryGrid`/heatmap stubs, `follower-tooltip.test.ts` lists six charts; the two heatmaps join no cursor.
+
+**basalt friction** (for the orchestrator to file as `linewatch W6 …`; basalt-ui not edited):
+1. A `Date` x scale spans the data's own extent and `CartesianChart` has no x-domain prop, so a run series cannot line up under the window-spanning bucketed charts: same instant on the shared cursor, different pixel column (24h: 974 / 1005 / 1042 px). An `xDomain` prop would fix it.
+2. `Sparkline` exposes no measured width, so per-cell point pooling is a fixed ceiling.
+3. Faint reference lines on light at 1000 Mbit (the legend swatch is fine).
+
+## Wave 7 — Charts D: heatmaps, the bespoke grid goes (l2, l5) <!-- status: active -->
 
 `availability-heatmap.tsx` (216), `speed-heatmap.tsx` (253), `category-grid.tsx` (313; the bespoke
 grid that only exists because the 1.x `Heatmap` kind had no consumers). 18 errors plus the grid's

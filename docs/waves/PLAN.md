@@ -254,31 +254,50 @@ that stayed a stub.
 5. Row 86 covers `NumberFilter`'s stepper form only; the preset (`options`) form's pill still prints the filter label at an unmatched value, so a "no filter" state needs a literal `Any` row.
 6. `tooltip.label` (a badge naming what a chart is a strip OF) has no 2.x slot; `tooltip.follow: false` for the latency band is still unanswered (Wave 5's question).
 
-## Wave 5 — Charts B: the latency band (l3, ×5) <!-- status: active -->
+## Wave 5 — Charts B: the latency band (l3, ×5) <!-- status: done -->
 
 `latency-band-chart.tsx` alone (876 lines, 31 errors; the only bespoke composition in the repo and
 the only direct `@visx/shape` import). Rendered five times in `routes/index.tsx`.
 
-- [ ] Re-express as `CartesianChart` with consumer `marks` (`@tanstack/charts/*` subpaths per
+- [x] Re-express as `CartesianChart` with consumer `marks` (`@tanstack/charts/*` subpaths per
       `basalt/chart-engine-boundary`): `areaY` p5–p95 (`y1`/`y2`), `lineY` ×3 (median + two
       references), loss `dot`s, down-band and absent `rect`s, legend-only entries. The visx `Area`
       import and `LinePath`/`Group`/`curveMonotoneX` go (`chartCurve('monotone')` / `d3Curve`).
-- [ ] The overlay logic that read `PlotContext` (`data`, `xScale`, `yScale`, `xMax`, `yMax` — all
+- [x] The overlay logic that read `PlotContext` (`data`, `xScale`, `yScale`, `xMax`, `yMax` — all
       absent in the 2.x `PlotContext`) moves to `plot.rows(key)` / `plot.visible`; `overlay-color.test.ts`
       and `latency-domain.test.ts` keep their assertions, rewritten where they touched the old
       shape.
-- [ ] Tooltip: header + rows as data; the source-only anchor (`tooltip.follow: false` — there is no
+- [x] Tooltip: header + rows as data; the source-only anchor (`tooltip.follow: false` — there is no
       `follow` key in 2.7.3) is a D2/ledger item if the five instances sharing one column cannot be
       expressed any other way; `cursorResolution="leading"` and the shared cursor
       (`chartCursor()` / `cursorGroup`, replacing the implicit page-wide scope) verified across all
       six interactive charts as far as they exist at this point.
-- [ ] Compare against baseline: all five instances, both schemes, the p5–p95 envelope against the
+- [x] Compare against baseline: all five instances, both schemes, the p5–p95 envelope against the
       baseline pixel of the same window, loss dots, the hover tooltip at the left edge, centre, right
       edge.
 
 **Evidence:** `w5.md` — before/after of the five instances, tooltip rows, ledger rows.
 
-## Wave 6 — Charts C: lines and sparklines (l4, l6, l9–l11) <!-- status: pending -->
+**Left behind:**
+- First step of the wave, done: `basalt-ui` 2.9.0 → **2.9.1** exact, `basalt.shell: false` set in the `package.json` basalt block. `sync` dropped `src/lib/nav.tsx` and `src/routes/__root.tsx` from the manifest (W2 friction 1 closed); the preset's `only-export-components` no longer warns on route files (the remaining warnings are chart files that export helpers for tests).
+- `latency-band-chart.tsx` is `CartesianChart` + consumer marks (`areaY`, `lineY`, `dot`, `rect`, `ruleX`, `decorative`); `@visx/*` is no longer imported anywhere in `web/src`. All five instances render on live data in both schemes (folded + router, then gateway / Cloudflare / Google / Quad9); the envelope, band, loss dots and trailing unmeasured column match the 1.41 capture of the same window; no console message. `x` is `new Date(bucketStart)`, `Point.key` is deleted, `renderExtraTooltipRows` is now `extraTooltipRows: (bucket) => ChartTooltipRow[]` and `routes/index.tsx` has `internetFoldRows` back (the W2 stub is gone).
+- **Settled: `tooltip.follow: false`.** 2.x hard-wires `anchor: "group-center"` in `compile.js` `tooltipSpec`, so every chart's tooltip sits on the cursor column, never on the pointer: the 1.x flag opted out of pointer-following and there is nothing left to opt out of. Observed: one hover puts a tooltip and crosshair on the strip, the band and throughput at the same column. 2.x lacks only the ability to choose; nothing here needs it. **`tooltip.label`:** no slot; the clock rides in the header (`fmtDateTime`, as the strips).
+- Rows 89–93, as 2.9.1 behaves (details in `w5.md`): **91 landed** (legend swatches honour `fillOpacity`); 89 unchanged (the legend renders while pending, `legend: false` still passed); 92 unchanged (px rails converted at the frame height, ~10% thin); 90 and 93 not exercised here.
+- Behaviour changes owed to 2.x, owner may want either reverted: the hatch is a flat `ABSENT_COLOR` column with a new `Not measured` legend entry (1.x had none); the vantage rail is two flat rects (`unknown` neutral, other warn) instead of two hatches; the cursor dot on the median is the series colour, not the hovered bucket's worst-loss colour (`getMarker` is only drawn by `Lines`/`DualPanel`, not by the `CartesianChart` rung; the tooltip's `Worst cycle` row still names it); tooltip row swatches are `solid`/`dashed` only, no bar/dot/line shape.
+- Loss markers sit on the bucket's median, so a bucket with loss and no median draws none; the only such bucket is all-cycles-down, which the full-loss band paints in full. Same as 1.41, now stated in code.
+- Gates green: `make check` (577 root, web 355 pass / 9 skip / 0 fail; W4 341 / 17), lint 0 errors, `sync --check`, `doctor`, `check-theme --audit-allows` (1 live pre-existing, 0 new), build. `grep MIGRATION-STUB web/src` is w6 / w7 only. Guards un-stubbed and rewritten: `overlay-color`, `tooltip-header`, `pending.render` (latency), `follower-tooltip` (latency joins `ON_THE_CURSOR`), `latency-domain`; new `latency-outage.test.ts`.
+- `/review`: 2 blocking. Fixed: the outage rail was dropped on a single-slot grid (now `outageSpans`, clamped, tested). Declined with a reason: the loss dot at a null median (above, parity with 1.41). Taken: `HEAVY_LOSS_PCT` in the legend labels, dot colour read off `plot.visible`, nested ternary, parenthesised comparison, hoisted `pending`. **Declined / left:** memoising `extraTooltipRows` and `internetByBucket` in `DashboardPage` (they are rebuilt per render because `internetBuckets` is, pre-existing; costs one tooltip-config rebuild per 30 s heartbeat), reusing `foldedFromRows` for the fold row (that helper is a bucket-fold basis, the internet fold is an anchor-fold basis, different wording), splitting `latencyMarks` (245 lines, eight mark groups, flagged complexity; a clean follow-up, not a defect), the 13-line clone with the other two band charts, and `DashboardPage`'s complexity (pre-existing).
+- Wave 6 inherits: `axisTickValues` is still unused by the four ported charts (default `xTicks` thinning was legible on all five latency instances at 1142 px; not checked at 390 px), `lib/axis.ts` still carries `runAxisKey`/`runTickFormat` for the speed and bufferbloat charts, and AGENTS.md's "all six charts" cursor rule now holds for four.
+
+**basalt friction** (for the orchestrator to file as `linewatch W5 …`; basalt-ui not edited):
+1. `CartesianChart` has no way to draw a rect or rule at a pixel height: a rail pinned to the plot edge ("3 px along the top") needs `yMax - px * (yMax / plotHeight)` with `plot.height` the *frame* height, so it draws ~10% thin (row 92 from the other side). A `ruleBand`/pixel-extent mark option, or `plot.plotHeight`, would remove it.
+2. `rect`/`dot` take one `fillOpacity` per mark, so an opacity that carries a measurement (the full-loss share) has to be bucketed into N marks by the consumer (5% steps here). A per-datum `fillOpacity` channel would make it one mark.
+3. `getMarker` is honoured by `Lines`/`DualPanel` only; a consumer-`marks` `CartesianChart` gets the series colour on the cursor dot and must draw per-point markers itself, with no documented way to colour the *cursor* dot per datum.
+4. `plot.rows(key)` returns `[]` for a hidden series, so anything that is a property of the bucket (absent column, rails) must read the slot grid off whichever series is still visible; `PlotContext` exposes no `data`. A `plot.data` would remove the workaround.
+5. MIGRATING does not say `tooltip.follow` is gone because the anchor is fixed to the column; it reads as a missing option. One sentence under § tooltips.
+
+
+## Wave 6 — Charts C: lines and sparklines (l4, l6, l9–l11) <!-- status: active -->
 
 `speed-chart.tsx` (214, `Lines`), `bufferbloat-chart.tsx` (129, `Lines`), and the three sparkline
 cells in `status-bar.tsx` (`Sparkline`, `mark: 'line' | 'bar'`). 20 of the probe's errors.

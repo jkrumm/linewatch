@@ -216,6 +216,7 @@ export function LatencyBandChart({
   const expectedCycles = Math.max(1, Math.round((bucketSeconds * 1000) / PROBE_CYCLE_MS))
   const bucketMs = bucketSeconds * 1000
   const hasOutages = outages !== undefined && outages.length > 0
+  const pending = isPending === true
 
   // Alone, the primary is the bright neutral; against an overlay it takes the accent and the
   // overlay steps down to the mid grey. ONE binding each; the marks read it back off the series.
@@ -260,14 +261,14 @@ export function LatencyBandChart({
       // DRAWN when maxLossPct > 0, so a "No loss" swatch would name a mark this chart never draws.
       {
         key: 'loss-partial',
-        label: 'Loss under 20%',
+        label: `Loss under ${HEAVY_LOSS_PCT}%`,
         color: VX.warnSolid,
         mark: 'bar',
         getValue: () => null,
       },
       {
         key: 'loss-heavy',
-        label: 'Loss 20% or more',
+        label: `Loss ${HEAVY_LOSS_PCT}% or more`,
         color: VX.badSolid,
         mark: 'bar',
         getValue: () => null,
@@ -360,8 +361,8 @@ export function LatencyBandChart({
         // The legend is a KEY first and a control second: it is the only place on the page that
         // says what the amber and red dots mean, and `toggle` would let a reader hide the finding
         // they opened the page for. Dropped while pending (an encoding for marks that do not exist).
-        legend={isPending === true ? false : { toggle: false }}
-        state={{ pending: isPending === true }}
+        legend={pending ? false : { toggle: false }}
+        state={{ pending }}
         tooltip={tooltip}
         ariaLabel={
           overlay
@@ -476,46 +477,35 @@ function latencyMarks(
     }
   }
 
-  if (showOutages && slots.length > 1) {
-    // `GET /api/outages` filters on overlap, not containment, so an outage that began before the
-    // window arrives whole. Clamp to the drawn grid, never skip: a straddling outage that vanishes
-    // is the recorded fact this overlay exists to show, silently dropped.
-    const gridStart = slots[0]!.bucketStart - half
-    const gridEnd = slots[slots.length - 1]!.bucketStart + half
-    const spans = (outages ?? [])
-      .map((o) => ({
-        start: Math.max(gridStart, o.startedAt),
-        end: Math.min(gridEnd, Math.min(o.endedAt ?? windowTo, windowTo)),
-      }))
-      .filter((s) => s.end - s.start > 0)
-      .map((s) => ({
-        x1: new Date(s.start),
-        x2: new Date(s.end),
+  const spans = showOutages
+    ? outageSpans(slots, outages ?? [], bucketMs, windowTo).map((span) => ({
+        x1: new Date(span.start),
+        x2: new Date(span.end),
         y0: yMax - OUTAGE_RAIL_H * perPx,
         y1: yMax,
       }))
-    if (spans.length > 0) {
-      marks.push(
-        decorative(
-          rect(spans, {
-            id: 'outage-rail',
-            x1: 'x1',
-            x2: 'x2',
-            y1: 'y0',
-            y2: 'y1',
-            fill: VX.badSolid,
-            inset: 0,
-          }),
+    : []
+  if (spans.length > 0) {
+    marks.push(
+      decorative(
+        rect(spans, {
+          id: 'outage-rail',
+          x1: 'x1',
+          x2: 'x2',
+          y1: 'y0',
+          y2: 'y1',
+          fill: VX.badSolid,
+          inset: 0,
+        }),
+      ),
+      // The span's two edges, full height and faint.
+      decorative(
+        ruleX(
+          spans.flatMap((span) => [span.x1, span.x2]),
+          { id: 'outage-edge', x: (d: Date) => d, stroke: VX.badSolid, strokeOpacity: 0.5 },
         ),
-        // The span's two edges, full height and faint.
-        decorative(
-          ruleX(
-            spans.flatMap((s) => [s.x1, s.x2]),
-            { id: 'outage-edge', x: (d: Date) => d, stroke: VX.badSolid, strokeOpacity: 0.5 },
-          ),
-        ),
-      )
-    }
+      ),
+    )
   }
 
   if (primary !== undefined) {
@@ -583,23 +573,27 @@ function latencyMarks(
   }
 
   if (primary !== undefined) {
+    // A marker sits on the bucket's MEDIAN, so a bucket with no median has nowhere honest to put
+    // one — and the only such bucket is one where every cycle got nothing back, which the
+    // full-loss band already paints in full. Placing a dot at 0 ms would claim a reading.
     for (const heavy of [false, true]) {
       if (heavy ? !showLossHeavy : !showLossPartial) continue
+      const dotKey = heavy ? 'loss-heavy' : 'loss-partial'
       const dots = plot
         .rows(chartKey)
         .filter((r) => {
           const b = r.datum.bucket
-          return b !== null && b.maxLossPct > 0 && r.y !== null && b.maxLossPct >= HEAVY_LOSS_PCT === heavy
+          return b !== null && b.maxLossPct > 0 && r.y !== null && (b.maxLossPct >= HEAVY_LOSS_PCT) === heavy
         })
       if (dots.length === 0) continue
       marks.push(
         decorative(
           dot(dots, {
-            id: heavy ? 'loss-heavy' : 'loss-partial',
+            id: dotKey,
             x: rowX,
             y: 'y',
             r: 3,
-            fill: heavy ? VX.badSolid : VX.warnSolid,
+            fill: visible.find((s) => s.key === dotKey)?.color ?? VX.badSolid,
           }),
         ),
       )
@@ -639,6 +633,33 @@ function latencyMarks(
   }
 
   return marks
+}
+
+/**
+ * The recorded outages as spans on the drawn grid, clamped to it — never skipped.
+ *
+ * `GET /api/outages` filters on overlap, not containment, so an outage that began before the window
+ * arrives whole. A straddling outage that vanishes is the recorded fact this overlay exists to
+ * show, silently dropped; so is one inside a single-bucket window (one slot, no neighbour to
+ * measure a step against — the grid edge is the slot's own half-bucket either side).
+ */
+export function outageSpans(
+  slots: readonly Pick<Point, 'bucketStart'>[],
+  outages: readonly Pick<Outage, 'startedAt' | 'endedAt'>[],
+  bucketMs: number,
+  windowTo: number,
+): { start: number; end: number }[] {
+  const first = slots[0]
+  const last = slots[slots.length - 1]
+  if (first === undefined || last === undefined) return []
+  const gridStart = first.bucketStart - bucketMs / 2
+  const gridEnd = last.bucketStart + bucketMs / 2
+  return outages
+    .map((o) => ({
+      start: Math.max(gridStart, o.startedAt),
+      end: Math.min(gridEnd, Math.min(o.endedAt ?? windowTo, windowTo)),
+    }))
+    .filter((span) => span.end - span.start > 0)
 }
 
 /** The x channel of a `plot.rows()` row, as an accessor (a field name does not type-check against
@@ -707,15 +728,14 @@ function outageRows(
     (o) => o.startedAt < end && Math.min(o.endedAt ?? windowTo, windowTo) > p.bucketStart,
   )
   if (hits.length === 0) return []
-  const value =
-    hits.length > 1
-      ? `${hits.length} recorded`
-      : hits[0]!.endedAt === null
-        ? 'ongoing'
-        : fmtDuration(
-            hits[0]!.durationS ?? Math.round((hits[0]!.endedAt - hits[0]!.startedAt) / 1000),
-          )
-  return [{ label: 'Recorded outage', value, color: VX.badSolid }]
+  return [{ label: 'Recorded outage', value: outageValue(hits), color: VX.badSolid }]
+}
+
+function outageValue(hits: readonly Outage[]): string {
+  const [only] = hits
+  if (hits.length > 1 || only === undefined) return `${hits.length} recorded`
+  if (only.endedAt === null) return 'ongoing'
+  return fmtDuration(only.durationS ?? Math.round((only.endedAt - only.startedAt) / 1000))
 }
 
 /**

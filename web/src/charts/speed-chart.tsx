@@ -1,36 +1,6 @@
-import {
-  ChartCard,
-  ChartLegend,
-  MultiLine,
-  type SeriesStyle,
-  VX,
-  deriveLegend,
-} from 'basalt-ui/charts'
-import { useInViewport } from './use-in-viewport'
+// MIGRATION-STUB(w6): the MultiLine speed chart (download/upload traces, reference lines, ref legend)
+import { ChartCard } from 'basalt-ui/charts'
 import type { SpeedTest } from '../lib/types'
-import { fmtClock, fmtMbps } from '../lib/format'
-import { axisTickValues, runAxisKey, runTickFormat } from '../lib/axis'
-import { dashboard } from '../lib/dashboard-store'
-
-/**
- * It was 260, which was headroom above the download trace rather than resolution in it; 190 —
- * matching `latency-band-chart`, the other member of the same "lines over a window" idiom — turned
- * out to be one step too far. Two traces plus two horizontal references need room to sit apart from
- * each other, and at 190 the download line and the carrier-sync reference nearly touch on this
- * line. 220 keeps the cut without collapsing the gap the chart exists to show.
- */
-const SPEED_HEIGHT = 220
-
-/**
- * Compact draws this one chart shorter, and only this one.
- *
- * It is the chart with the least shape to lose: two near-flat traces plus two horizontal reference
- * lines, where the reading is *where they sit* against the references, not the wiggle. The latency
- * band and the throughput bars are the opposite — spikes and gaps are the whole content and 130px
- * would flatten them into a smear. So the height reduction is per-chart rather than a global
- * scale factor.
- */
-const SPEED_HEIGHT_COMPACT = 160
 
 /**
  * A horizontal reference at a rate the line is measured against — the host's negotiated link speed,
@@ -63,11 +33,7 @@ export type SpeedRefLine = {
  * saturate. One word for two measurements a screen apart is the confusion the Speed/Throughput
  * split exists to prevent. Each chart now takes its OWN section's word, so no word is used twice.
  */
-export function SpeedChart({
-  tests,
-  refLines = [],
-  isPending,
-}: {
+export function SpeedChart(_props: {
   tests: SpeedTest[]
   refLines?: SpeedRefLine[]
   /**
@@ -89,126 +55,5 @@ export function SpeedChart({
    */
   isPending?: boolean
 }) {
-  // Oldest first. `GET /api/speedtests` answers newest-first — right for a list, backwards for a
-  // time axis — and this chart plotted it in that order, so time ran right to left while every
-  // other chart on the page ran left to right. A reader comparing a dip here against the latency
-  // band above was reading two mirrored axes as though they aligned.
-  const ordered = tests.toSorted((a, b) => a.ts - b.ts)
-  // The key is the run's INSTANT and the label is drawn from it — see `runAxisKey`, including what
-  // keying on the instant costs and what it buys (this chart on the page's shared cursor). For two
-  // releases this line built a pre-formatted, collision-broken label instead, because `MultiLine`
-  // forwarded no formatter and the domain value was the only string that reached the axis.
-  const points = ordered.map((test) => ({ test, key: runAxisKey(test.ts) }))
-  const [compact] = dashboard.field.compact.use()
-  // ONE array behind both the drawn rules and their captions. `MultiLine` draws `refLines` but
-  // names none of them, so the labels ride in their own reference-role legend below the plot —
-  // and 1.20.0's widened `basalt/chart-legend-literal` is right that a legend authored beside the
-  // marks is a second source of truth. `deriveLegend` over the same `refLines` the plot draws is
-  // the shipped answer: the swatch, the dash and the label cannot drift from the rule, because
-  // they are computed from it. Drop the whole block the day `refLines` takes a `label`.
-  const refSeries: SeriesStyle[] = refLines.map((ref) => ({
-    key: ref.label,
-    label: ref.label,
-    color: ref.color,
-    mark: 'line',
-    dash: 'dashed',
-    role: 'reference',
-  }))
-  const height = compact ? SPEED_HEIGHT_COMPACT : SPEED_HEIGHT
-  const { ref: viewRef, inView } = useInViewport<HTMLDivElement>()
-
-  return (
-    <ChartCard
-      // Titled in compact only, where there is no section heading to name the block — see
-      // `GuidedChart` for the whole rule.
-      title={compact ? 'Speed' : undefined}
-      // The unit lives here, not on the y ticks. Formatting each tick as `600 Mbps` was the
-      // obvious fix for a unitless axis and it made things worse: `MultiLine` draws its axis inside
-      // basalt's shared 44 px gutter, sized for bare numbers, so every tick rendered as the bare
-      // word `Mbps` with its number clipped off — a unitless axis replaced by a numberless one.
-      // Only the unit survives the copy pass: "one point per run" is in the tooltip and
-      // "download against upload" is the legend.
-      subtitle="Mbps"
-      // The x-axis is categorical: runs are drawn at equal spacing whatever the real interval
-      // between them, so say so rather than let the spacing imply a cadence. The sentence also has
-      // to carry what that costs the shared cursor now that this chart is on it — a reader watching
-      // the crosshair land at a different x on this card than on the band above needs the rule,
-      // not a guess.
-      info="Ookla runs, one point each, drawn at equal spacing regardless of the gap between them — so the shared cursor marks the run nearest the moment you are hovering, not the same horizontal position. Download and upload share one axis."
-    >
-      {/* See `availability-strip.tsx`'s identical wrapper for why this is a floor, not a height. */}
-      <div ref={viewRef} style={{ minHeight: height }}>
-        <MultiLine
-          data={points}
-          chartId="speed-throughput"
-          ariaLabel="Download against upload in Mbps, one point per speed-test run"
-          isPending={isPending === true}
-          // Tick VALUES, not a count — see `latency-band-chart.tsx`'s identical prop. Left to
-          // its default, `smartTicks` spaces ticks by `VX.minPxPerTick` (55), sized for the bare
-          // `DD.MM` its own formatter produces rather than the `DD.MM HH:MM` these run labels
-          // carry, and every run in a 24 h window got a tick — one unbroken smear of overlapping
-          // timestamps. The kind now hands the picker its own resolved plot width, so the
-          // `useChartSize` box this chart wrapped itself in is gone.
-          xTickValues={axisTickValues}
-          getX={(p) => p.key}
-          formatX={runTickFormat}
-          // Numbers on this card while the cursor is on a chart above — see
-          // `latency-band-chart`'s `onFollow` for why every chart on this page opts in.
-          tooltip={{
-            onFollow: inView,
-            // The badge carries the run's clock, which the header format drops. It was tolerable
-            // while this card was the only thing on screen and is not now: the follower tooltip
-            // appears beside three that each name a time to the minute, and a reader comparing
-            // them needs to know this one is a run at 04:10 rather than "sometime on the 19th".
-            label: (p) => ({ text: fmtClock(p.test.ts), color: VX.legendText }),
-          }}
-          series={[
-            {
-              // Accent blue against `VX.line2`, the MID grey — one pair for these two
-              // concepts wherever they are drawn, here and in the throughput bars. Not
-              // `VX.line`: at 11.1:1 against the panel it is the brightest thing available
-              // and makes the secondary series louder than the accent. Not two greys
-              // either, which is what this chart's own history warns about.
-              key: 'download',
-              label: 'Download',
-              color: VX.accent,
-              mark: 'line',
-              getValue: (p) => p.test.downloadMbps,
-              formatValue: fmtMbps,
-            },
-            {
-              key: 'upload',
-              label: 'Upload',
-              color: VX.line2,
-              mark: 'line',
-              getValue: (p) => p.test.uploadMbps,
-              formatValue: fmtMbps,
-            },
-          ]}
-          refLines={refLines.map((ref) => ({
-            value: ref.value,
-            color: ref.color,
-            dashed: true,
-          }))}
-          // PER-SERIES, not `y.format`. An `AxisConfig.format` is the tick formatter AND the
-          // tooltip's — and the unit belongs to the subtitle here, not to every tick (see the
-          // `subtitle` prop above, and the clipped-axis bug its comment records). Measured margins
-          // would now fit `600 Mbps`, so it would no longer clip; it would just say Mbps five times
-          // over a card that already says it once.
-          y={{ domain: 'auto' }}
-          height={height}
-        />
-      </div>
-      {/* An unlabelled rule across a throughput chart is an assertion the reader has to guess at.
-          This legend sits outside `ChartFrame`, so its pending suppression is explicit — see the
-          `isPending` prop's docblock. */}
-      {refSeries.length > 0 && isPending !== true && (
-        <ChartLegend
-          chartId="speed-throughput-refs"
-          placement="bottom"
-          items={deriveLegend(refSeries)}
-        />
-      )}
-    </ChartCard>
-  )
+  return <ChartCard state={{ empty: 'Migrating to basalt-ui 2.0' }} />
 }

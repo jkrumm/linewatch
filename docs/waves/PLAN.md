@@ -208,7 +208,7 @@ localStorage, fallback), friction rows filed.
 4. The shipped oxlint preset's `react(only-export-components)` warns on every TanStack file route (`Route` + component in one file); the preset could exempt `routes/**` or that rule could take `allowExportNames: ['Route']`.
 5. MIGRATING row for `PageBar` does not say the primary action moved to the end of row 1 (observed), nor that `Section`'s anchor no longer clears a shell-less bar (friction 1).
 
-## Wave 4 — Charts A: strips and bars (l1, l7, l8) <!-- status: pending -->
+## Wave 4 — Charts A: strips and bars (l1, l7, l8) <!-- status: active -->
 
 `availability-strip.tsx` (399 lines, `BandStrip`), `link-speed-strip.tsx` (441, `BandStrip`),
 `throughput-chart.tsx` (278, `MirroredBars`) — they share `foldBands`/`fold`, `getBand`, the shared

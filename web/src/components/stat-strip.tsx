@@ -33,6 +33,8 @@ export interface Stat {
   group?: string | undefined
 }
 
+const TONE_COLOR: Record<NonNullable<Stat['tone']>, string> = { warn: VX.status.warn, bad: VX.status.bad }
+
 /** Split `stats` into runs of consecutive entries sharing a non-undefined `group`. An ungrouped
  * entry is its own run of one, rendered exactly as before. */
 function groupRuns(stats: Stat[]): Stat[][] {
@@ -116,7 +118,7 @@ function StatValue({ stat }: { stat: Stat }) {
       size="sm"
       fw={600}
       ff="monospace"
-      {...(stat.tone === undefined ? {} : { c: stat.tone === 'bad' ? VX.status.bad : VX.status.warn })}
+      {...(stat.tone === undefined ? {} : { c: TONE_COLOR[stat.tone] })}
       // A dotted underline is the only affordance saying a hover exists. Without it the hint is a
       // fact nobody finds, which is indistinguishable from a fact that was never written.
       {...(stat.hint === undefined ? {} : { style: { textDecoration: 'underline dotted', textUnderlineOffset: 3 } })}

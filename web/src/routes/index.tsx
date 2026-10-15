@@ -542,6 +542,9 @@ function DashboardPage() {
                 // per-anchor view below still holds every anchor in full. See
                 // `foldInternetBuckets` for what each statistic folds by and why.
                 <GuidedChart title="Ping" copy={INTERNET_LATENCY_COPY}>
+                  {/* MIGRATION-STUB(w5): `renderExtraTooltipRows` fed `InternetFoldRows` (anchors folded +
+                      worst single anchor) into the tooltip; the 2.x tooltip takes rows as data, so it
+                      returns with the latency band. The 1.41 version is in git history (d63aca7). */}
                   <LatencyBandChart
                     label="Internet"
                     chartKey="internet"
@@ -552,9 +555,6 @@ function DashboardPage() {
                     bucketSeconds={bucket}
                     isPending={seriesPending}
                     overlay={{ label: 'Router', buckets: bucketsByTarget.get('gateway') ?? [] }}
-                    // MIGRATION-STUB(w5): `renderExtraTooltipRows` fed `InternetFoldRows` (anchors folded +
-                    // worst single anchor) into the tooltip; the 2.x tooltip takes rows as data, so it
-                    // returns with the latency band. The 1.41 version is in git history (d63aca7).
                     // Scoped here, not in the chart: an Outage row with scope 'gateway' drawn
                     // across the internet band would assert something the row does not say, and
                     // the chart cannot tell which band it is drawing.

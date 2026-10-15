@@ -193,8 +193,9 @@ function useOpenOnHash({
   )
   const [open, setOpen] = usePersistedOpen()
 
-  // `open` in a ref so the listener below can read the current value without being torn down and
-  // rebuilt on every write — `createPersistedState`'s setter takes a value, not an updater.
+  // `open` in a ref so the listener below can read the latest committed value without being torn
+  // down and rebuilt on every write — `createPersistedState`'s setter takes a value, not an updater.
+  // Synced in an effect (the `react(refs)` rule forbids a render-time write); it lags by one flush.
   const openRef = useRef(open)
   useEffect(() => {
     openRef.current = open

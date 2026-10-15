@@ -109,13 +109,13 @@ Nothing ships. The before-picture every later wave is compared against.
 3. MIGRATING § 2.8.0 tells consumers to colour the absent state `VX.neutral`; a consumer whose "clean/no problem" state is also neutral gets the two separated by alpha alone. Doc advice, not a bug — candidate papercut: say the absent colour must differ from every measured state.
 4. Candidate, to confirm in Wave 4: toggling the absent legend entry zeroes every band's `absentFraction` (`resolveAbsent`, `BandStrip.js:41-42`), so a reader can make a folded band look fully measured. May want a non-toggleable legend entry.
 
-## Wave 2 — The 2.7.3 bump (atomic, D1) <!-- status: active -->
+## Wave 2 — The 2.7.3 bump (atomic, D1) <!-- status: done -->
 
 One worker on one change; the lead reviews and lands it. Sized from the probe: 123 `tsc` errors in
 19 files (107 in 9 chart files, 4 in `status-bar.tsx`, 12 wiring/import), 6 hard `doctor` failures,
 oxlint unable to parse its own config (Appendix C).
 
-- [ ] Dependencies: `basalt-ui` 2.7.3 exact; the now-required peers (`@mantine/modals`,
+- [x] Dependencies: `basalt-ui` 2.7.3 exact; the now-required peers (`@mantine/modals`,
       `@mantine/notifications`, `@mantine/spotlight`, `@mantine/core`/`hooks` ≥ 9.7.0); the exact
       font peers at their published versions; `@tanstack/charts` 1.1.0 and `d3-scale` 4.0.2 exact;
       `shiki` + `@shikijs/langs` + `@shikijs/themes` ^4.5.0 (`doctor` requires them for
@@ -125,29 +125,44 @@ oxlint unable to parse its own config (Appendix C).
       with grep, `doctor` exact-peers decides). `basalt-ui sync`, then `doctor` until clean:
       `tsconfig` files extend `basalt-ui/configs/tsconfig.react-app.json`, `.oxlintrc.json` and
       `lefthook.yml` / `check.yml` keep the repo-root layout (AGENTS.md § dashboard).
-- [ ] Wiring: `main.tsx` → `BasaltProvider router theme` (drop the hand-built
+- [x] Wiring: `main.tsx` → `BasaltProvider router theme` (drop the hand-built
       `QueryClientProvider`/`RouterProvider`); `lib/router.ts` → `createBasaltRouter({ routeTree,
       context?, query? })` carrying `defaultPreload: 'intent'` and the 30 s `staleTime` from
       `lib/query-client.ts` (then delete that file); `routes/__root.tsx` →
       `createRootRouteWithContext<BasaltRouterContext>()`; keep the `Register` augmentation. Delete
       the `@mantine/core/styles.layer.css` import (`styles.css` carries it). Telemetry: a dev-console
       stub, made real nowhere (this repo exports no OTel, AGENTS.md § Verify & Monitor).
-- [ ] Import moves: `VX`/`alpha` → `basalt-ui/tokens` (6 component files + chart files);
+- [x] Import moves: `VX`/`alpha` → `basalt-ui/tokens` (6 component files + chart files);
       `createSearchStore`/`field` → `basalt-ui/state` (`lib/dashboard-store.ts`);
       `routes/index.tsx` `PageBar` `secondary` → the `actions` tuple (first entry `primary: true`),
       and the `RangeField` index (`TS7053` at `index.tsx:293`).
-- [ ] Every chart file that does not compile becomes a `MIGRATION-STUB(w4|w5|w6|w7)` stub: l1/l8/l7
+- [x] Every chart file that does not compile becomes a `MIGRATION-STUB(w4|w5|w6|w7)` stub: l1/l8/l7
       → w4, l3 → w5, l4/l6/l9–l11 → w6, l2/l5 + `category-grid.tsx` → w7. Test files that import a
       removed export (`availability-strip.test.ts`: `VX`) take the specifier move; render tests of
       stubbed charts are skipped with the same `MIGRATION-STUB` marker, not deleted.
-- [ ] Gate: `make check`, `bun test` (D4), `bun run lint`, `bun run build` green on the merged head;
+- [x] Gate: `make check`, `bun test` (D4), `bun run lint`, `bun run build` green on the merged head;
       `sync --check` clean; `doctor` clean; `grep -rn "MIGRATION-STUB" web/src` lists exactly the
       stubs; nothing else is visibly unfinished (D1).
 
 **Evidence:** `w2.md` — `doctor` output, tsc/lint/test counts, stub list (file → owning wave),
 bundle bytes against baseline, screens of the non-chart surfaces.
 
-## Wave 3 — Non-chart surfaces: shell, stores, controls, content <!-- status: pending -->
+**Left behind:**
+- Pinned `basalt-ui` **2.8.1** exact (2.9.0 not on npm). `make check` green (577 root), `cd web && bun test` 277 pass / 66 skip / 0 fail = 343 (baseline 343), lint 0 errors, `doctor` clean, `sync --check` clean, build green, 0 new waivers (the one live `theme-allow` is `live-chip.tsx`'s, pre-existing). `oxlint` pinned 1.87.0: 1.88.0 is inside bun's 3-day release-age cooldown.
+- Stubs: charts → w4 (availability/link-speed strips, throughput), w5 (latency band; plus `routes/index.tsx`'s `renderExtraTooltipRows`/`InternetFoldRows`, removed — 1.41 source at `d63aca7`), w6 (speed, bufferbloat, status-bar's three sparklines), w7 (both heatmaps, `category-grid`). `getBand`/`bandSeries`/`bandFor`/`FILL_SERIES` removed with their tests skipped (w4); `foldBands` cases skipped `MIGRATION-STUB(w4)` per the plan. **Review gap accepted:** while stubbed there is no `getBand` / fold-merge-through-`foldBands` coverage and the stubs show "Migrating" even while a query is pending (the per-chart `pending.render` tests are skipped, w4–w7 un-skip them with the port). The pure helpers (`mergeColumns`, `foldStates`, `summariseLink`, `mergePoints`) stay exported and `mergeColumns`/`summariseLink`/`foldStates` tests live.
+- The dashboard's default colour scheme and router/query defaults were verified against 2.8.1 source (`BasaltProvider` defaults `dark`; `createBasaltRouter` carries `defaultPreload: 'intent'`, `defaultPreloadStaleTime: 0`, 30 s `staleTime`, no focus refetch) — no override needed. Telemetry sink deliberately not wired.
+- Bundle: JS 2374287 B raw / 525353 gz (baseline 1372859 / 429148), CSS 304293 / 48800. The delta is shiki chunks from `basalt-ui/content`, not charts.
+- Wave 3 inherits: new lint warnings (`react(hooks)` on `dashboard-section.tsx`'s dynamic `usePersistedOpen`; `only-export-components` on route files), the `field.range` cast and AGENTS.md paragraphs naming deleted symbols (untouched this wave), `web/AGENTS.md` managed block already refreshed by `sync`, `RangeFilter` type check passes without the old `TS7053`. Screens of non-chart surfaces were NOT captured: the live container serves master's 1.41 build and `make up` of this tree would replace it — Wave 3 owns the screens (plan item), via a build of this branch.
+- Four consumer `*.module.css.d.ts` files added (the strict preset forbids index-signature dot access); `shell/*.module.css.d.ts` and `components/{status-bar,table-card-swap}.module.css.d.ts` must be kept in step with their CSS by hand; `bufferbloat-chart.module.css` is unused until w6.
+
+**basalt friction** (for the orchestrator to file as `linewatch W2 …`; basalt-ui not edited):
+1. `basalt-ui sync` scaffolds `src/lib/nav.tsx` (`defineNav` + a Home entry) and records it in `.basalt/manifest.json`, with no shell-less/one-page opt-out; the file was deleted here and `sync --check` still passes, but the manifest keeps a hash for a file that does not exist.
+2. `exactOptionalPropertyTypes` + `noPropertyAccessFromIndexSignature` in the preset tsconfig bite every Mantine prop passed `x | undefined` (`c`, `td`, `pl`, `style`) — consumer code needs conditional spreads, since Mantine's own prop types do not carry `| undefined`. Doc-worthy in MIGRATING § tsconfig.
+3. The `react(refs)` rule in the 2.x oxlint preset errors on the render-time `ref.current = value` latest-value pattern (fixed here with an effect); not in MIGRATING's lint notes.
+4. `foldBands` still absent from 2.8.1 `dist` (Wave 1 friction 1 / ledger row 80, unchanged).
+
+
+## Wave 3 — Non-chart surfaces: shell, stores, controls, content <!-- status: active -->
 
 Depth and verification on a base that already compiles. Surfaces: `BasaltProvider`/router,
 `PageBar`, `Section`/`ViewTabs`, the search store and its three fields, `RangeFilter`/`NumberFilter`/

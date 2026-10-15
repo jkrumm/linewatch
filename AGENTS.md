@@ -117,8 +117,9 @@ say they disagreed; the guards below exist so that cannot happen silently again.
   `./node_modules/.bin/basalt-ui check-theme --audit-allows` exits 1 on a dead waiver.
 - **The dashboard's `<head>` is `basaltAppPlugin`'s, not `index.html`'s.**
   `basaltAppPlugin` (`web/vite.config.ts`) resolves `theme-color` from `SURFACE.bg`
-  so it tracks a retune; `manifest`/`icons` stay off (tailnet dashboard, no
-  `public/`). `check-theme` reads `index.html` as of 1.20.0, so a hex put back
+  so it tracks a retune; `manifest` stays off (tailnet dashboard) and the one icon is
+  `web/public/favicon.svg`, named in `icons` with `rel: 'icon'` so the plugin owns the `<link>` —
+  the browser then never asks for `/favicon.ico`, which the server correctly 404s (a bare `curl` still sees 404). `check-theme` reads `index.html` as of 1.20.0, so a hex put back
   there fails the build.
 - **Charts are basalt's kinds; the app draws marks, never a plot.** Every chart is on a shipped
   2.x kind — `CartesianChart` (latency band, with consumer `marks`), `Lines` (speed,
@@ -343,7 +344,8 @@ say they disagreed; the guards below exist so that cannot happen silently again.
 
 ## Validate
 
-`make check` (typecheck + `bun test`). The ping parser is tested against real
+`make check` (typecheck + `bun test`). A fresh worktree has no `node_modules` anywhere: `bun install`
+at the root **and** in `web/` first, or `make check` dies on `tsc: command not found` (exit 127). The ping parser is tested against real
 macOS `ping` output fixtures — including the 100%-loss case, where `ping` **exits
 non-zero and prints no round-trip summary line**. That is a valid measurement,
 not an error; never gate on the exit code.

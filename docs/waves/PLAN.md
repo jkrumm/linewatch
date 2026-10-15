@@ -448,7 +448,7 @@ container (the Waves 3–8 recipe); Wave 10 re-verifies on the real container af
 - Owner note (unchanged by design): throughput's amber "Not measured" shares a hue with the speed heatmap's "Failed run".
 - **basalt friction** (rows 107-111 filed upstream, in progress): the five Wave 9 items above stand; new from the live pass: availability strip and throughput bars end short of the plot's right edge at 390/30d and 1440/7d (unclear whether gutter or bucket padding); uptime/throughput x ticks touch at 1440.
 
-## Wave 11 — Fresh-agent DX trial <!-- status: active -->
+## Wave 11 — Fresh-agent DX trial <!-- status: done -->
 
 A fresh agent with only the repo, its AGENTS.md and the shipped `basalt-*` skills/rules (no plan,
 no memory of this migration) adds one new thing on basalt surfaces linewatch uses — **on the
@@ -456,16 +456,24 @@ existing page, since AGENTS.md forbids a second route**: a new `Section` with a 
 `Lines` chart (hourly loss, a `Heatmap`-free shape), a `Callout` verdict and a `RangeFilter`-scoped
 query. The branch is throwaway unless the lead keeps it.
 
-- [ ] Brief the trial agent with the user-visible ask only; capture its transcript path.
-- [ ] Every basalt-rooted wrong turn (wrong import path, a rule/skill that misled, a type that lied,
+- [x] Brief the trial agent with the user-visible ask only; capture its transcript path.
+- [x] Every basalt-rooted wrong turn (wrong import path, a rule/skill that misled, a type that lied,
       a `doctor` miss) becomes a row in `argo-friction.md` as `linewatch W11 …`; not-basalt wrong
       turns (this repo's AGENTS.md) become edits to AGENTS.md instead.
-- [ ] Re-run `make check`, `bun run lint`, `basalt-ui doctor` on the trial branch; record whether
+- [x] Re-run `make check`, `bun run lint`, `basalt-ui doctor` on the trial branch; record whether
       the guards caught what the agent got wrong, or the agent caught it by reading.
-- [ ] Verdict in `w11.md`: could a fresh agent do it unaided in one context, and which rule/skill
+- [x] Verdict in `w11.md`: could a fresh agent do it unaided in one context, and which rule/skill
       change would have saved the most steps.
 
 **Evidence:** `w11.md`.
+
+**Left behind:**
+- Favicon first, own commit `ba19f43`: `public/favicon.svg` + `icons: [{ src, sizes: 'any', type, rel: 'icon' }]` on `basaltAppPlugin`; deployed with `make up`. The browser now loads `/favicon.svg` (200), console clean, and never requests `/favicon.ico`; a bare `curl /favicon.ico` is still 404 by design (AGENTS.md says so).
+- Trial verdict in `evidence/w11.md`: a fresh agent did the Packet-loss section unaided in one context (25 turns). Guards caught its one basalt slip (`raw-breakpoint`, fixed from the lint message). Repo-side drift fixed in AGENTS.md: a fresh worktree needs root `bun install`; head/icon bullet updated.
+- It never opened `web/AGENTS.md` or the `basalt-*` skills/rules; it learned from existing code and `.d.ts`. Not a defect found, but the shipped prose was untested by this run.
+- The trial worktree and `w11-trial` branch are deleted; nothing from it was deployed. Master is production.
+- **basalt friction:** none new. Filed upstream and in progress, unchanged: rows 107-111 and 112.
+- Plan complete: no wave 12.
 
 ---
 

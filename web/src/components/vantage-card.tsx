@@ -59,7 +59,7 @@ function linkSpeedValue(vantage: Vantage): string {
 export function VantageCard({ vantage, now }: { vantage: Vantage | null | undefined; now: number }) {
   if (vantage === undefined) {
     return (
-      <Card py="xs" px="sm">
+      <Card>
         <Stack gap="sm">
           <Title order={4}>This machine → router</Title>
           <Skeleton h={90} />
@@ -70,7 +70,7 @@ export function VantageCard({ vantage, now }: { vantage: Vantage | null | undefi
 
   if (vantage === null) {
     return (
-      <Card py="xs" px="sm">
+      <Card>
         <Stack gap="sm">
           <Title order={4}>This machine → router</Title>
           <Callout kind="info" title="No cycle has reported a vantage">
@@ -86,7 +86,7 @@ export function VantageCard({ vantage, now }: { vantage: Vantage | null | undefi
   const chip = homeLineChip(vantage.onHomeLine)
 
   return (
-    <Card py="xs" px="sm">
+    <Card>
       <Stack gap="md">
         <Group justify="space-between" wrap="wrap">
           <Stack gap={0}>

@@ -82,7 +82,7 @@ say they disagreed; the guards below exist so that cannot happen silently again.
 - **No shade-pinned Mantine colours** (`c="yellow.7"` is one fixed swatch in both
   schemes, so a step legible on dark is the one that fails contrast on light) — use
   `VX.status.*` or a bare hue.
-- **One card idiom: `<Card py="xs" px="sm">`.** Never `withBorder` — card depth is
+- **One card idiom: bare `<Card>` (the theme owns the 12/16 inset; `basalt/card-inset` rejects `p`/`px`/`py`).** Never `withBorder` — card depth is
   `--vx-shadow-card`, which already bakes a 1px ring into the shadow, so `withBorder`
   draws a second real edge on top of it. Never an explicit `radius` or `padding`; the
   theme pins both.

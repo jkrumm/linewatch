@@ -22,7 +22,7 @@ function targetLabel(name: string): string {
  * `Table.ScrollContainer` so growth can never reproduce the clip silently.
  *
  * **The mobile rows are divided `Box`es, not their own `Card`s.** `index.tsx` already wraps the
- * whole Outages view in one `<Card py="xs" px="sm">` for the panel surface; a `Card` per row inside
+ * whole Outages view in one `<Card>` for the panel surface; a `Card` per row inside
  * it used to stack an identical `--vx-surface-panel` fill and `shadow-card` ring on top of that
  * same surface — no contrast step, just a doubled ring, which is what the one-card-idiom doctrine
  * exists to prevent. A `Divider` between rows reads as a list inside one panel, which is what this

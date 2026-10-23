@@ -39,7 +39,7 @@ export function LinkComparison({
 }) {
   if (router === undefined || vantage === undefined || speedTest === undefined) {
     return (
-      <Card py="xs" px="sm">
+      <Card>
         <Stack gap="sm">
           <Title order={4}>Router → carrier</Title>
           <Skeleton h={90} />
@@ -51,7 +51,7 @@ export function LinkComparison({
   const comparison = compareCarrierHost({ router, vantage, speedTest, now })
 
   return (
-    <Card py="xs" px="sm">
+    <Card>
       <Stack gap="md">
         <Stack gap={0}>
           <Title order={4}>Router → carrier</Title>

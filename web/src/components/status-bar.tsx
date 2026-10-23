@@ -392,7 +392,7 @@ export function StatusBar({
   ]
 
   return (
-    <Card py="xs" px="sm">
+    <Card>
       {/* Two-up from the bar's own `wide` class, and never three-up in the grid: at `regular`
           (480) a cell is ~230px and at three-up over 800 ~260px, both under the width at which the
           Download badge cut its period ("…vs 24h befo"). No container class sits between 800 and

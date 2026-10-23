@@ -155,7 +155,7 @@ function VerdictRow({ group }: { group: VerdictGroup }) {
         overflow: 'hidden',
       }}
     >
-      <UnstyledButton onClick={toggle} aria-expanded={opened} w="100%" px="sm" py={8}>
+      <UnstyledButton onClick={toggle} aria-expanded={opened} w="100%" px="sm" py="xs">
         <Group gap="xs" wrap="nowrap" align="center">
           <Chevron size={14} color={VX.faint} aria-hidden="true" />
           <Text size="sm" lineClamp={2} style={{ flex: 1, minWidth: 0 }}>
@@ -172,7 +172,7 @@ function VerdictRow({ group }: { group: VerdictGroup }) {
       </UnstyledButton>
       <Collapse expanded={opened}>
         <Box px="sm" pb="sm" pl={34}>
-          <Stack gap={8}>
+          <Stack gap="xs">
             {/* Unclamped, unlike the collapsed line above — see the comment on this component. */}
             <Text size="sm">{group.conclusion}</Text>
             <VerdictBody group={group} />
@@ -189,7 +189,7 @@ function VerdictRow({ group }: { group: VerdictGroup }) {
  * body starts at the evidence. */
 function VerdictBody({ group }: { group: VerdictGroup }) {
   return (
-    <Stack gap={8}>
+    <Stack gap="xs">
       <EvidenceList evidence={group.evidence} />
       {/*
         `uncertainty` is the sentence saying why a cause was withheld — typically that link

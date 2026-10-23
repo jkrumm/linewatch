@@ -1,18 +1,23 @@
 ---
 name: basalt-design
-description: Build or restyle dashboards and metric UIs in a basalt-ui app — read the law, decide, build, tune in the theme lab, verify.
+description: Build or restyle dashboards and metric UIs in a basalt-ui app — concept first, then encoding, build, then rounds of screenshots scored by a reviewer subagent.
 when_to_use: User is building or restyling dashboards, charts or metric UIs; tuning a palette; or says a UI looks inconsistent, over-colored or "AI default". Entry point for "make this look professional".
 ---
 
-Method only; the law is `.claude/rules/basalt-*.md` and `./DESIGN.md`.
+Method only; the law is `.claude/rules/basalt-*.md` and `./DESIGN.md`. Each step loads its reference on demand.
 
 ## Steps
 
-1. Read `./DESIGN.md` and the rules `basalt-tokens.md`, `basalt-mantine.md`, `basalt-controls.md`, `basalt-charts.md`. No `DESIGN.md`: run `/basalt-app` first.
-2. Decide before coding: which metrics earn a hue (trend, status, separation; the rest neutral), the one primary action per view, each control's home (a `SettingsRow` preference: `const [unit, setUnit] = prefs.field.unit.use()` from `createLocalStore`, then `control={<Select value={unit} onChange={(v) => v && setUnit(v)} />}`, never `useState`).
-3. Check the shipped composites first: `StatCard`, `ChartCard`, `Section`, `WidgetHeader`, `BasaltDataTable`, `EmptyState`. A gap is reported, not routed around.
-4. Build with Mantine primitives and the composites; take every color from `VX.*` or a series token.
-5. Tune by eye in the running app: open the theme lab with the `dev.theme` Spotlight command (dev only) and adjust in both color schemes.
-6. Bake the values back: identity changes go into the `derive` knobs of `createBasaltTheme`, series colors into `src/lib/series.ts` as `{ light, dark }` pairs. Clear the lab overrides and confirm the baked result matches.
-7. Run the repo's own gate (e.g. `make check`), which runs lint, the theme guard and typecheck; fix every finding at its source.
-8. Check both schemes, and below and above the `sm` breakpoint.
+1. **Concept — mandatory, gating.** Nothing is built before the concept exists: write `docs/design/<screen>.md` (the user's question, the decision, datasets and chosen encodings, layout at 1440 and 390, copy, pass criteria) before any component code. Template: `references/concept.md`. Also read `./DESIGN.md` and the rules `basalt-tokens.md`, `basalt-mantine.md`, `basalt-controls.md`, `basalt-charts.md`; no `DESIGN.md`: run `/basalt-app` first.
+2. **Scenario.** Realistic fixture data. Decide which metrics earn a hue (trend, status, separation; the rest neutral), the one primary action per view, each control's home (a `SettingsRow` preference via `createLocalStore`, never `useState`).
+3. **Encoding: is it even a chart?** Run the router, then pick each encoding from the data's shape, then the shipped composite. A gap is reported, not routed around; no row fits the data → say so, never default to a number in a box. `references/catalogue.md`. A metric tile follows the slot contract in `references/stat-tile.md`; a record page, decision card, entity card, list row or page summary follows `references/recipes.md`.
+4. **Build** with Mantine primitives and the composites; every color from `VX.*` or a series token. Chart kinds and `ChartCard` import from `basalt-ui/charts`, `BasaltDataTable` from `basalt-ui/table`, `FilterSet` and the other filters from `basalt-ui/controls`, the rest from `basalt-ui`. Hold the encoding law (`references/encoding-rules.md`: axes, color, tooltips, refetch, filters, number typography) and avoid the dashboard tells (`references/anti-defaults.md`: fact-only copy, uniform cards, one radius). Empty, loading and error copy follows `references/states.md`. Tune by eye in the theme lab (`dev.theme` Spotlight command, dev only) in both schemes, then bake values into the `derive` knobs of `createBasaltTheme` and series colors into `src/lib/series.ts`.
+5. **Mark up for the board.** Tag each scored component `data-shot="<name>"`; hover and tooltip targets inside it get `data-shot-hover` / `data-shot-tooltip`; when the target's centre paints no readout (a donut's hole), add `data-shot-at="x,y"` (fractions of its box, e.g. `0.25,0.2`) and the shot hovers there. Declare supported states with `data-shot-states="empty loading error"` and render them when the `shot-state` URL param asks; a route declaring none is a P2 (`craft-7/no-declared-states`), raised only when an anchor renders a state surface. An anchor legitimately absent in some states declares them with `data-shot-absent="empty error"`.
+6. **Rounds, at least three.** Playwright is the app's dev dependency: `bun add -d playwright && bunx playwright install chromium`. Then:
+   - `basalt-ui shot <routes> --dist <built app>` (or `--base <url>` for a running server); a real, signed-in app (live data, no `data-shot` yet): `basalt-ui shot /overview --dist dist --api /api=https://app.example.com --local-storage auth-token=@env:APP_TOKEN --auto-anchors` seeds the token (app origin only; `@env:`/`@file:`, never inline), proxies GET/HEAD under `/api` (writes get 405 unless `--api-allow-writes`) and crops every large Card, Paper and table. One `--header authorization=@env:NAME` goes to EVERY `--api` origin (https required for any secret), never on a navigation. A redirect, 401/403/404, 5xx or dead API fails every shot of that page; a key the app already holds is never overwritten. These shots reach the reviewer subagent's model provider, the session's own: an app holding third parties' data should point `--api` at staging or synthetic data;
+   - review with TWO isolated passes: (A) hand the out dir (`.basalt/shots`) to the `basalt-design-reviewer` subagent by name; it reads each component's contact sheet (`png/*__sheet.png`) and every page shot; (B) run the deterministic detector `basalt-ui shot detect` on the same out dir (exit 0 clean / 2 findings / 1 scan failure). A review the builder runs inline instead of the subagent starts with a `DEGRADED` banner and does not count as done;
+   - judge content first, then layout, then style; rank findings P0–P3;
+   - revise every failing item at its source, rebuild, and shoot again.
+     Boards stay local (gitignored); the scored verdict and notes are worth committing.
+7. **Done** only when both passes are clean (the reviewer passes every component, `basalt-ui shot detect` exits 0), and never before round three: a pass earlier does not end the loop. After five failed rounds stop and show the owner the boards and the failing items.
+8. Run the repo's own gate (e.g. `make check`); fix every finding at its source. `shot` captures desktop (1440) and mobile (390) in both schemes; check both.

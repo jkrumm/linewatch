@@ -1,3 +1,5 @@
 node_modules/
 dist/
 src/routeTree.gen.ts
+.design-parity/
+.basalt/shots/

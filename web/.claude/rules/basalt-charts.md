@@ -2,7 +2,7 @@
 source: basalt-ui
 description: Charts on TanStack Charts — compose CartesianChart or a shipped kind, never the engine host.
 paths:
-  - '**/charts/**'
+  - 'src/**'
 ---
 
 <!-- basalt:coverage -->
@@ -33,5 +33,5 @@ Every cartesian chart is `CartesianChart` or a kind built on it; props are in th
 
 - `@visx/*` is banned. [basalt/chart-engine-boundary]
 - Import engine marks only from `@tanstack/charts/{line,area,area-x,bar,rect,rule,dot,tick,text,vector,link,arrow,difference,stack,scales/*,transform/*,mark/decorative,d3/shape,types}`; the bare root and `@tanstack/charts/react` are errors. [basalt/chart-engine-boundary]
-- Wrap a chart kind in `ChartCard`, never a raw `Card` or `Paper`. [basalt/chart-in-raw-surface]
+- Wrap a chart kind in `ChartCard`, never a raw `Card` or `Paper`; its headline figure and period go in `facts`, not a filler `subtitle`. [basalt/chart-in-raw-surface] [type ChartCardProps]
 - Series colors are `{ light, dark }` pairs from the app's series file (`defineSeries`); write no hex or `rgba()` in a chart file. [check-theme raw-hex] [check-theme raw-color-fn]

@@ -3,7 +3,6 @@ source: basalt-ui
 description: Where state lives — search stores over typed fields, nav links by reference, defineNav, persisted state.
 paths:
   - 'src/**'
-  - 'apps/**/src/**'
 ---
 
 <!-- basalt:coverage -->
@@ -22,7 +21,7 @@ State a control reads or writes is a field on a store; the URL wins over localSt
 - Never `useState` for a filter, tab, range or view; a basalt control takes a `field` and has no `value` or `onChange`. A value another store owns (a zustand slice) binds as `externalField({ values, fallback, labels, store: { get, set, subscribe } })`, no lane, `clear()` writes the fallback. [check-theme raw-selection-control]
 - Declare lanes once at definition: `{ url, persist, history }`; `url: false` is local-only, `persist: false` is URL-only. [type field]
 - Option labels come from `.labels()` at definition, never a control prop. [type createSearchStore]
-- Route `validateSearch` is `store.validateSearch`; a wider search shape spreads `...store.validateSearch(raw)`. [type createSearchStore]
+- Route `validateSearch` is `store.validateSearch`; a wider search shape spreads `...store.validateSearch(raw)`. Under SSR it is URL ⊳ fallback until hydration commits (`window.$_TSR`), then readers adopt the mirror; never read a stored value in a server loader. [type createSearchStore]
 - Read with `store.useValues()` or take the value as a prop; never `useSearch({ from: '<literal>' })`. [basalt/use-search-from-literal]
 - A handle's `use()` returns `[value, setValue]`; the setter owns the navigate and the persist; on a `createLocalStore` field a prop-derived default is `store.field.x.withFallback(value)`, passed to `use()` and to any control as `field=` (unset only, never persisted, a reset returns to it, `isDefault` follows it; search stores lack it, a derived handle does not derive again), never a store rebuilt per prop. [type field]
 - Count active filters and reset them with the store's `useActiveCount()` and `useReset()`; a reset unsets, it does not write the fallback. [type createSearchStore]

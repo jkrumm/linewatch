@@ -9,7 +9,7 @@ Procedure only; the law is `.claude/rules/basalt-*.md`.
 ## Scaffold
 
 1. `bun add basalt-ui && bunx basalt-ui init` (the only `bunx` call; use `./node_modules/.bin/basalt-ui` after).
-2. Check the seeded `src/main.tsx` (`init` writes it when absent; on a TanStack Start app it seeds none: render `<BasaltProvider><Outlet /></BasaltProvider>` with no `router` in the root route component, `context.queryClient` set in `getRouter()`); `spotlight={false}` drops Basalt's Cmd+K for an app with its own. `basalt-ui/styles.css` is the only stylesheet import:
+2. Check the seeded `src/main.tsx` (`init` writes it when absent; on a TanStack Start app it seeds none: render `<BasaltProvider><Outlet /></BasaltProvider>` with no `router` in the root route component or a pathless layout, `context.queryClient` set in `getRouter()`); `spotlight={false}` drops Basalt's Cmd+K for an app with its own. `basalt-ui/styles.css` is the only stylesheet import:
 
 ```tsx
 // @check
@@ -74,7 +74,7 @@ const columns = [
   col.accessor('revenue', {
     header: 'Revenue',
     sortFn: 'basic', // v9 `sortFn`, not v8 `sortingFn`
-    meta: { align: 'right' }, // numbers are mono-numeral by default; `numeral: false` opts out
+    meta: { align: 'right' }, // table number columns are mono-numeral by default (Wave 37 revisits the table face); `numeral: false` opts out
     cell: (c) => money(c.getValue(), { currency: 'USD' }),
   }),
 ]
@@ -291,7 +291,7 @@ export function Chat() {
 
 1. Be on `1.41.0` with its deprecations cleared and the gate green first (2.0 retires the deprecation lifecycle, so a consumer below 1.41 stalls on removed names). Then `bun add basalt-ui@latest`, the peers each imported subpath needs from its `Install:` line in `llms.txt` (exact pins: `bun add` accepts a mismatch silently, `doctor` `exact-peers` names it) and an `oxlint` the shipped preset supports; then `./node_modules/.bin/basalt-ui sync` (prunes retired managed files, rewrites the AGENTS.md block).
 2. `./node_modules/.bin/basalt-ui doctor`; in a monorepo it targets the app package (`basalt.app` in the root `package.json` when two qualify). Fix each check: a tsconfig that does not extend the shipped base, retired `basalt/*` rule ids, dead `basalt` config keys, dropped subpaths.
-3. Fix `tsc` in this order, because errors cascade: (a) specifier moves, mechanical, CSS imports included (`MIGRATING.md` § Subpaths, peers and gates; `basalt-ui/tokens.css` is gone and only `vite build` reports it: emit `basalt-ui tokens:css --out src/tokens.css` and import that file); (b) wiring: `createBasaltRouter` + `BasaltProvider` + `interface Register` (until `Register` exists every router and query-client use is `never`: dozens of unrelated errors); (c) removed root exports; (d) charts, one file at a time, not mechanical: hand-composed marks become `Lines`/`Bars`/`Sparkline`/`Heatmap` or `CartesianChart`.
+3. Fix `tsc` in this order, because errors cascade: (a) specifier moves, mechanical, CSS imports included (`MIGRATING.md` § Subpaths, peers and gates; `basalt-ui/tokens.css` is gone and only `vite build` reports it: emit `basalt-ui tokens:css --out src/tokens.css` and import that file; a provider-free page also needs `basalt-ui fonts:css --out src/fonts.css`); (b) wiring: `createBasaltRouter` + `BasaltProvider` + `interface Register` (until `Register` exists every router and query-client use is `never`: dozens of unrelated errors); (c) removed root exports; (d) charts, one file at a time, not mechanical: hand-composed marks become `Lines`/`Bars`/`Sparkline`/`Heatmap` or `CartesianChart`.
 4. Read what compiles clean but behaves differently (`MIGRATING.md` § Agent runtime: `runs.has(id)` no longer means live; § Table v9: closed sort registry, debounced search; § Transitions) and grep your code for each. Fix the preset's newly-`error` React rules (`react/refs`, `react/set-state-in-effect`, `react/immutability`, `react/globals`) at the source, never with a waiver. Then run the Verify steps above.
 
 ## Not a React app

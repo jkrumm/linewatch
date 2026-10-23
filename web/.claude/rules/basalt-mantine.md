@@ -3,7 +3,6 @@ source: basalt-ui
 description: Mantine v9 in a basalt-ui app — provider, shell, surfaces, scroll, breakpoints, motion.
 paths:
   - 'src/**'
-  - 'apps/**/src/**'
 ---
 
 <!-- basalt:coverage -->
@@ -18,7 +17,7 @@ paths:
 
 ## Provider
 
-- Mount once: `createBasaltRouter({ routeTree })`, then `<BasaltProvider router={router} />`; in a router you do not own (TanStack Start root route) pass `children` instead, with `context.queryClient`. `spotlight={false}` for an app with its own Cmd+K. It owns Mantine, Query, modals, notifications and Spotlight. [type BasaltProvider]
+- Mount once: `createBasaltRouter({ routeTree })`, then `<BasaltProvider router={router} />`; in a router you do not own (TanStack Start root route) pass `children` instead, with `context.queryClient`. `spotlight={false}` for an app with its own Cmd+K. It owns Mantine, Query and notifications; Spotlight mounts once `defineNav`/`defineCommands` ran, `ModalsProvider` (a sibling, no `useModals()` context) once `defineOverlays`/`overlays.confirm` ran. [type BasaltProvider]
 - Never pass `cssVariablesResolver` to `BasaltProvider`; retune with `theme={createBasaltTheme(...)}`. [type BasaltProvider]
 - Read and write the color scheme with `useMantineColorScheme()` only. [check-theme localstorage-theme]
 
@@ -33,7 +32,7 @@ paths:
 ## Surfaces
 
 - Never pass `withBorder` to `Card` or `Paper`; the theme draws the ring (`<Card.Section withBorder>` is fine). [check-theme card-with-border]
-- Card/Paper insets are `py="xs" px="sm"` with the theme radius; no explicit `p`, `padding` or `radius`. [basalt/card-inset]
+- The theme owns the Card/Paper inset (12/16) and radius: write no `p`, `padding`, `py`, `px` or `radius`, not even `py="sm" px="md"`. Flush is `variant="flush"` (whole card) or `<Card.Section>` (a full-bleed region). [basalt/card-inset]
 - Lay out with `Box`/`Flex`/`Grid`/`Stack`/`Group`, not a `<div>` with `style`. [check-theme raw-html-layout] [check-theme hidden-inline-style]
 - No inline `display: flex|grid`; no inline spacing; spacing props take `xs..xl`. [check-theme inline-display] [check-theme inline-spacing] [check-theme raw-spacing]
 - Inputs come from `@mantine/core`, never `<input>`, `<select>` or `<textarea>`. [check-theme raw-form-control]
@@ -41,7 +40,7 @@ paths:
 
 ## Scroll and breakpoints
 
-- A scroll region is a Mantine `ScrollArea`, not a raw `overflow: auto` box. [basalt/raw-scroll-container]
+- A scroll region is a Mantine `ScrollArea`, not a raw `overflow: auto` box; a page that fills the scrollport sets `height: var(--basalt-main-content-h)`, never a hand-built `calc(100dvh - …)`. [basalt/raw-scroll-container]
 - Never use `visibleFrom`/`hiddenFrom` or a raw `@media` width; chrome follows `useSizeClass()`, page layout follows container queries: `<SimpleGrid type="container" cols={{ base: 1, [CONTAINER_KEYS.regular]: 2 }} />` (`CONTAINER_KEYS` from `basalt-ui/tokens`), never `cols={{ base: 1, lg: 2 }}`. [basalt/raw-breakpoint] [check-theme raw-media-query]
 
 ## Motion

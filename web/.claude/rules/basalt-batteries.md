@@ -3,7 +3,6 @@ source: basalt-ui
 description: The adapter batteries — query, forms, table, content, agent. Use the shipped seam.
 paths:
   - 'src/**'
-  - 'apps/**/src/**'
 ---
 
 <!-- basalt:coverage -->
@@ -29,7 +28,7 @@ paths:
 
 ## Table
 
-- Tables are `BasaltDataTable` with columns from `createColumnHelper` (`basalt-ui/table`, TanStack Table v9: `sortFn`, not v8's `sortingFn`); column `meta` is `{ align, numeral }`; a streamed table's fallback is the same table with `isLoading` and `skeletonRows`. [type createColumnHelper] [type BasaltDataTable]
+- Tables are `BasaltDataTable` with columns from `createColumnHelper` (`basalt-ui/table`, TanStack Table v9: `sortFn`, not v8's `sortingFn`); column `meta` is `{ align, numeral, priority, kind }`, `kind` one of `entity`, `status`, `number`, `money`, `relative-time`, `meter`, `text` (figures are sans `tabular-nums`, `meta.numeral: false` opts out; units go in the header; a cell holds one line, only `kind: 'text'` wraps); a streamed table's fallback is the same table with `isLoading` and `skeletonRows`. [type createColumnHelper] [type BasaltDataTable]
 
 ## Content
 

@@ -3,7 +3,6 @@ source: basalt-ui
 description: Where an interactive control lives and how it binds — homes, slots, store-bound filters and tabs, aside, sidebar blocks.
 paths:
   - 'src/**'
-  - 'apps/**/src/**'
 ---
 
 <!-- basalt:coverage -->
@@ -34,7 +33,8 @@ A control has one home and takes its state from a store field; the home sets its
 ## Binding
 
 - A filter or tab takes `field={store.field.x}` and nothing else about state; `value`, `onChange` and `size` are type errors. [type ViewTabs]
-- Filters are `RangeFilter`, `MultiSelectFilter`, `SelectFilter`, `SearchFilter`, `NumberFilter`, `ToggleFilter`, inside one `FilterSet` in `PageBar.filters`; `ViewTabs` goes in `PageBar.tabs`. [type FilterSet]
+- Filters are `RangeFilter`, `MultiSelectFilter`, `SelectFilter`, `SearchFilter`, `NumberFilter`, `ToggleFilter`, inside one `FilterSet` in `PageBar.filters`. [type FilterSet]
+- `ViewTabs` goes in a `tabs` slot (`PageBar.tabs`, `Section.tabs`) when it switches a page or section, or in a `ChartCard`/`WidgetHeader` `actions` slot when it switches only that card's view; every other `PageBar` slot, `Section.actions` and a `FilterSet` refuse it (the lint reads the slot it is written in, not a hoisted binding). [basalt/bound-control-outside-home]
 - `FilterSet` folds overflow and the mobile `Filters (n)` sheet itself; never build either. [type FilterSet]
 - Import `DateRangePicker` from `basalt-ui/controls-dates` and pass it as `RangeFilter` `customPicker`; never import `@mantine/dates` in a shared module. [type RangeFilter]
 - Refresh is `SyncButton`: `scope="page"` in `PageBar.sync`, `scope="global"` in the shell's `globalActions`. [type SyncButton]

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { captureWifi, parseAirportInfo, type WifiSampleInput } from './wifi.js'
+import { parseAirportInfo, type WifiSampleInput } from './wifi.js'
 
 /**
  * Fixtures follow the structure of this Mac mini's real `system_profiler

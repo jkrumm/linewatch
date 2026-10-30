@@ -1,0 +1,15 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "ignorePatterns": ["drizzle/**"],
+  "rules": {
+    "typescript/no-base-to-string": "off"
+  },
+  "overrides": [
+    {
+      "files": ["**/*.test.ts"],
+      "rules": {
+        "typescript/await-thenable": "off"
+      }
+    }
+  ]
+}

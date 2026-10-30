@@ -68,7 +68,7 @@ export const interventionsRoutes = new Elysia().post(
         // is the exact lie this route exists to prevent, arriving by the back
         // door instead of the front.
         detail: JSON.stringify({
-          ...(body.detail ?? {}),
+          ...body.detail,
           source: body.source,
           action: body.action,
           ...(body.note !== undefined ? { note: body.note } : {}),

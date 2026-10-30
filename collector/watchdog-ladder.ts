@@ -576,7 +576,7 @@ function sharedBlockers(input: LadderInput, outageClass: OutageClass): string[] 
   return blocked
 }
 
-function reconnectBlockers(input: LadderInput, t0: number): string[] {
+function reconnectBlockers(input: LadderInput, _t0: number): string[] {
   const { policy, ledger, now, record } = input
   const blocked: string[] = []
 

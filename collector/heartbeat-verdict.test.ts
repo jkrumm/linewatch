@@ -35,7 +35,7 @@ function samples(ts: number, overrides: Partial<StatusSample>[] = []): StatusSam
     { target: 'google', scope: 'wan', ts, received: 20, lossPct: 0, medMs: 5.1 },
     { target: 'quad9', scope: 'wan', ts, received: 20, lossPct: 0, medMs: 6.0 },
   ]
-  return base.map((sample, i) => ({ ...sample, ...(overrides[i] ?? {}) }))
+  return base.map((sample, i) => ({ ...sample, ...overrides[i] }))
 }
 
 function snapshot(over: Partial<StatusSnapshot> = {}): StatusSnapshot {

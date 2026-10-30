@@ -744,7 +744,12 @@ watchdog-readiness: ## Measure the conditions for arming: poll coverage, p90 spa
 	@echo "  agreeing with every would_* trigger. 'make watchdog-state' shows the budgets."
 
 
-check: ## Typecheck (API + collector, then the dashboard) + run the test suite
+check: ## Install (frozen), format check, lint, typecheck (API + collector, then the dashboard) + run the test suite
+	bun install --frozen-lockfile
+	cd web && bun install --frozen-lockfile
+	bun run format:check
+	bun run lint
+	cd web && bun run lint
 	bun run typecheck
 	@# The root tsconfig's `include` is src/collector only, so the dashboard needs
 	@# its own pass — it has different lib/jsx settings and a generated route tree.

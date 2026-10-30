@@ -8,6 +8,9 @@
     "start": "LINEWATCH_DB=${LINEWATCH_DB:-./.dev-data/linewatch.db} bun run src/index.ts",
     "dev": "LINEWATCH_DB=${LINEWATCH_DB:-./.dev-data/linewatch.db} bun run --hot src/index.ts",
     "collector": "bun run collector/probe.ts",
+    "lint": "oxlint --type-aware src collector scripts",
+    "format": "oxfmt --write",
+    "format:check": "oxfmt --check",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "db:generate": "drizzle-kit generate",
@@ -23,6 +26,9 @@
   "devDependencies": {
     "bun-types": "1.4.2",
     "drizzle-kit": "0.31.10",
+    "oxfmt": "^0.72.0",
+    "oxlint": "^1.87.0",
+    "oxlint-tsgolint": "^7.0.2003",
     "typescript": "6.0.3"
   }
 }

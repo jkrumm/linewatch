@@ -13,9 +13,8 @@
 # Both go through the LOCAL bin. `bunx basalt-ui` resolves a copy from npm and caches it without
 # re-resolving, so CI can enforce a version the lockfile does not contain.
 #
-# `oxfmt --check` is deliberately NOT wired in yet. oxfmt reflows to a ~100-column print width and
-# would rewrite 40 of the dashboard's 68 files on first run; that is a real change to make, but it
-# is its own commit, not a rider on the one that turned the guards on.
+# `oxfmt --check` (root `bun run format:check`) covers the API, collector and dashboard sources;
+# `.oxfmtrc.json` ignores docs, JSON/YAML, generated and basalt-managed files.
 name: check
 on:
   pull_request:
@@ -37,6 +36,8 @@ jobs:
         with:
           bun-version: 1.4.3
       - run: bun install --frozen-lockfile
+      - run: bun run format:check
+      - run: bun run lint
       - run: bun run typecheck
       # Scoped, because this job installs the root package only and a bare `bun test` at the root
       # also collects web/src — where the render tests import react-dom, @mantine and

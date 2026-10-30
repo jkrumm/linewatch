@@ -11,7 +11,15 @@ import {
   routerWanSample,
 } from '../../db/schema.js'
 import { RouterReadError, type RouterOperation } from './client.js'
-import { compareVantage, detectResync, detectRestart, disagreementSignature, type Disagreement, type HostVantage, type RouterVantage } from './derive.js'
+import {
+  compareVantage,
+  detectResync,
+  detectRestart,
+  disagreementSignature,
+  type Disagreement,
+  type HostVantage,
+  type RouterVantage,
+} from './derive.js'
 import {
   checkListLength,
   parseEthPorts,
@@ -202,7 +210,10 @@ export class RouterPoller {
         // Anything else — no session, no route to the device — invalidates every
         // remaining read, so stop asking. What the earlier reads bought is still
         // a set of real values read at `ts`, and it gets persisted below.
-        abandonedAt = { oid: plan.oid, reason: error instanceof Error ? error.message : String(error) }
+        abandonedAt = {
+          oid: plan.oid,
+          reason: error instanceof Error ? error.message : String(error),
+        }
         break
       }
     }
@@ -239,7 +250,9 @@ export class RouterPoller {
     // interfaces are configured-but-idle WAN profiles (USB 3G/4G, SFP, the two
     // spare PPPoE profiles for the fibre migration) reporting zeros; storing
     // them would be half a million rows a year of "0".
-    const persistedInterfaces = interfaces.filter((intf) => intf.role === 'wan' || intf.role === 'lan')
+    const persistedInterfaces = interfaces.filter(
+      (intf) => intf.role === 'wan' || intf.role === 'lan',
+    )
     // Only active hosts. An inactive DEV2_HOST_ENTRY row is a stale DHCP lease,
     // not a connection, so its absence from a poll is the truthful record.
     const activeHosts = hosts.filter((host) => host.active === 1)
@@ -251,7 +264,9 @@ export class RouterPoller {
       .limit(1)
       .all()[0]
     const resync = detectResync(
-      previousShowtime === undefined ? null : { ts: previousShowtime.ts, seconds: previousShowtime.showtimeStartS },
+      previousShowtime === undefined
+        ? null
+        : { ts: previousShowtime.ts, seconds: previousShowtime.showtimeStartS },
       { ts, seconds: line.showtimeStartS },
     )
 
@@ -262,8 +277,9 @@ export class RouterPoller {
     // this DS-Lite line `uptimeV4S` is pinned at 0 and `uptimeV6S` carries the
     // session, and that flips on a line with native IPv4.
     const sessionRestarts = (['v4', 'v6'] as const).filter((stack) => {
-      const previousSeconds = stack === 'v4' ? (previousWan?.uptimeV4S ?? null) : (previousWan?.uptimeV6S ?? null)
-      const currentSeconds = stack === 'v4' ? wan?.uptimeV4S ?? null : wan?.uptimeV6S ?? null
+      const previousSeconds =
+        stack === 'v4' ? (previousWan?.uptimeV4S ?? null) : (previousWan?.uptimeV6S ?? null)
+      const currentSeconds = stack === 'v4' ? (wan?.uptimeV4S ?? null) : (wan?.uptimeV6S ?? null)
       return detectRestart(
         previousWan === undefined ? null : { ts: previousWan.ts, seconds: previousSeconds },
         { ts, seconds: currentSeconds },
@@ -466,7 +482,11 @@ export class RouterPoller {
           })
           .run()
       }
-      if (signatureChanged && disagreements.length === 0 && this.lastDisagreementSignature !== null) {
+      if (
+        signatureChanged &&
+        disagreements.length === 0 &&
+        this.lastDisagreementSignature !== null
+      ) {
         tx.insert(event)
           .values({
             ts,
@@ -528,7 +548,9 @@ export class RouterPoller {
   }
 
   private routerVantage(
-    collectorHost: { ip: string | null; interfaceType: string | null; active: number | null } | undefined,
+    collectorHost:
+      | { ip: string | null; interfaceType: string | null; active: number | null }
+      | undefined,
     port: EthPort | null,
   ): RouterVantage {
     return {
@@ -649,7 +671,9 @@ export function readRouterSnapshot(
         .all()[0],
     )
 
-  const line = observeRow(db.select().from(routerLineSample).orderBy(desc(routerLineSample.ts)).limit(1).all()[0])
+  const line = observeRow(
+    db.select().from(routerLineSample).orderBy(desc(routerLineSample.ts)).limit(1).all()[0],
+  )
   const collector = observeRow(
     db
       .select()
@@ -659,11 +683,19 @@ export function readRouterSnapshot(
       .limit(1)
       .all()[0],
   )
-  const latestPortTs = db.select({ ts: routerEthPort.ts }).from(routerEthPort).orderBy(desc(routerEthPort.ts)).limit(1).all()[0]
+  const latestPortTs = db
+    .select({ ts: routerEthPort.ts })
+    .from(routerEthPort)
+    .orderBy(desc(routerEthPort.ts))
+    .limit(1)
+    .all()[0]
   const ports =
     latestPortTs === undefined
       ? null
-      : observe(db.select().from(routerEthPort).where(eq(routerEthPort.ts, latestPortTs.ts)).all(), latestPortTs.ts)
+      : observe(
+          db.select().from(routerEthPort).where(eq(routerEthPort.ts, latestPortTs.ts)).all(),
+          latestPortTs.ts,
+        )
 
   const wanConnection = observeRow(
     db.select().from(routerWanSample).orderBy(desc(routerWanSample.ts)).limit(1).all()[0],

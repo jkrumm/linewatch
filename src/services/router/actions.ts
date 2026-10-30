@@ -132,7 +132,6 @@ const STEP_SPACING_MS = 1_500
  */
 const DEVICE_STACK = '0,0,0,0,0,0'
 
-
 export class LiveExecutor implements RouterActionExecutor {
   readonly capability = 'live' as const
 
@@ -157,19 +156,32 @@ export class LiveExecutor implements RouterActionExecutor {
     const rows = await this.client.read('DEV2_ADT_WAN', 'gl')
     const wan = parseLiveWan(rows)
     if (wan === null || wan.stack === null) {
-      return this.refused('reconnect', null, 'the router reports no connected WAN instance — nothing was sent')
+      return this.refused(
+        'reconnect',
+        null,
+        'the router reports no connected WAN instance — nothing was sent',
+      )
     }
 
     const plan = wan.connType === null ? undefined : RECONNECT_PLAN[wan.connType]
     if (plan === undefined) {
-      return this.refused('reconnect', wan, `unrecognised connType ${JSON.stringify(wan.connType)} — refusing to guess a reconnect verb`)
+      return this.refused(
+        'reconnect',
+        wan,
+        `unrecognised connType ${JSON.stringify(wan.connType)} — refusing to guess a reconnect verb`,
+      )
     }
 
     const steps: ActionResult['steps'] = []
     for (const [index, intent] of plan.entries()) {
       if (index > 0) await this.sleep(STEP_SPACING_MS)
       const response = await this.client.sendAction({ intent, stack: wan.stack })
-      steps.push({ oid: response.oid, ok: response.ok, errorcode: response.errorcode, httpStatus: response.httpStatus })
+      steps.push({
+        oid: response.oid,
+        ok: response.ok,
+        errorcode: response.errorcode,
+        httpStatus: response.httpStatus,
+      })
       // A failed disconnect does not license firing the connect: the pair is a
       // sequence, and half of it is a state nobody asked for.
       if (!response.ok) break
@@ -239,7 +251,11 @@ export class LiveExecutor implements RouterActionExecutor {
     const rows = await this.client.read('DEV2_ADT_WAN', 'gl')
     const wan = parseLiveWan(rows)
     if (wan === null) {
-      return this.refused('reboot', null, 'could not read the WAN state to snapshot before rebooting — refusing to write to a control path we cannot read')
+      return this.refused(
+        'reboot',
+        null,
+        'could not read the WAN state to snapshot before rebooting — refusing to write to a control path we cannot read',
+      )
     }
 
     let response
@@ -269,7 +285,14 @@ export class LiveExecutor implements RouterActionExecutor {
       ok: response.ok,
       capability: 'live',
       outcome: response.ok ? 'executed' : 'failed',
-      steps: [{ oid: response.oid, ok: response.ok, errorcode: response.errorcode, httpStatus: response.httpStatus }],
+      steps: [
+        {
+          oid: response.oid,
+          ok: response.ok,
+          errorcode: response.errorcode,
+          httpStatus: response.httpStatus,
+        },
+      ],
       before: wan,
       detail: response.ok
         ? 'reboot acknowledged (errorcode 0) — the device is going down; expect ~130s before it answers again'

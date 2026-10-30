@@ -47,7 +47,12 @@ export class OutageDetector {
       // lastTs is unknown across a restart — startedAt is the best available
       // watermark, so a replay of the exact opening cycle (the only cycle a
       // freshly-booted process could possibly have seen before) is still caught.
-      this.open.set(row.scope, { id: row.id, startedAt: row.startedAt, lastTs: row.startedAt, cycles: row.cycles })
+      this.open.set(row.scope, {
+        id: row.id,
+        startedAt: row.startedAt,
+        lastTs: row.startedAt,
+        cycles: row.cycles,
+      })
     }
     this.loaded = true
   }
@@ -85,7 +90,11 @@ export class OutageDetector {
     if (down) {
       if (current) {
         const cycles = current.cycles + 1
-        this.db.update(outage).set({ cycles, evidence: JSON.stringify(evidence) }).where(eq(outage.id, current.id)).run()
+        this.db
+          .update(outage)
+          .set({ cycles, evidence: JSON.stringify(evidence) })
+          .where(eq(outage.id, current.id))
+          .run()
         this.open.set(scope, { ...current, lastTs: ts, cycles })
         return
       }

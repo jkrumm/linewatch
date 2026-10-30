@@ -23,7 +23,15 @@ const WINDOW_YEAR = 365 * 86_400
 const FULLY_COVERED = 1
 
 function point(patch: Partial<LatencyComparePoint>): LatencyComparePoint {
-  return { key: 'k', bucketStart: 0, gatewayMs: null, wanMs: null, wanAnchors: 0, worstLossPct: 0, ...patch }
+  return {
+    key: 'k',
+    bucketStart: 0,
+    gatewayMs: null,
+    wanMs: null,
+    wanAnchors: 0,
+    worstLossPct: 0,
+    ...patch,
+  }
 }
 
 describe('denseSparkline', () => {
@@ -141,7 +149,9 @@ describe('downtimeTint', () => {
    */
   test('zero downtime from an unwatched window must not read as green', () => {
     expect(downtimeTint({ seconds: 0, openCount: 0 }, WINDOW_24H, 0)).toBeUndefined()
-    expect(downtimeTint({ seconds: 0, openCount: 0 }, WINDOW_24H, COMPARABLE_COVERAGE - 0.01)).toBeUndefined()
+    expect(
+      downtimeTint({ seconds: 0, openCount: 0 }, WINDOW_24H, COMPARABLE_COVERAGE - 0.01),
+    ).toBeUndefined()
   })
 
   test('coverage exactly at the comparable-coverage bar still earns green', () => {
@@ -169,7 +179,9 @@ describe('downtimeTint', () => {
   test('the absolute threshold still catches a substantial outage the fraction rule cannot see', () => {
     // 4 hours inside a 365-day window is 0.05% — invisible to the 0.5% fraction rule, and still
     // unmistakably bad: the exact case the absolute rule was written to catch.
-    expect(downtimeTint({ seconds: 4 * 3600, openCount: 0 }, WINDOW_YEAR, FULLY_COVERED)).toBe('bad')
+    expect(downtimeTint({ seconds: 4 * 3600, openCount: 0 }, WINDOW_YEAR, FULLY_COVERED)).toBe(
+      'bad',
+    )
     expect(downtimeTint({ seconds: 3_599, openCount: 0 }, WINDOW_YEAR, FULLY_COVERED)).toBe('warn')
     expect(downtimeTint({ seconds: 3_600, openCount: 0 }, WINDOW_YEAR, FULLY_COVERED)).toBe('bad')
   })
@@ -202,13 +214,17 @@ describe('downtimeTint', () => {
 
 describe('windowDownloadMedian', () => {
   test('takes the median of the runs that reported throughput', () => {
-    expect(windowDownloadMedian([{ downloadMbps: 100 }, { downloadMbps: 300 }, { downloadMbps: 200 }])).toBe(200)
+    expect(
+      windowDownloadMedian([{ downloadMbps: 100 }, { downloadMbps: 300 }, { downloadMbps: 200 }]),
+    ).toBe(200)
   })
 
   /** A failed run has no throughput. Counting it as 0 would report a slower line for a window that
    * measured less of it — the same fabrication `median` refuses everywhere else. */
   test('skips a failed run rather than counting it as zero', () => {
-    expect(windowDownloadMedian([{ downloadMbps: 100 }, { downloadMbps: null }, { downloadMbps: 300 }])).toBe(200)
+    expect(
+      windowDownloadMedian([{ downloadMbps: 100 }, { downloadMbps: null }, { downloadMbps: 300 }]),
+    ).toBe(200)
   })
 
   test('no successful run is null, not zero', () => {
@@ -220,7 +236,12 @@ describe('windowDownloadMedian', () => {
 describe('measuredFraction', () => {
   test('counts a bucket as measured when either side reported', () => {
     expect(
-      measuredFraction([point({ gatewayMs: 1 }), point({ wanAnchors: 2, wanMs: 5 }), point({}), point({})]),
+      measuredFraction([
+        point({ gatewayMs: 1 }),
+        point({ wanAnchors: 2, wanMs: 5 }),
+        point({}),
+        point({}),
+      ]),
     ).toBe(0.5)
   })
 
@@ -236,23 +257,49 @@ describe('compareWindows', () => {
   const mbps = (v: number) => `${v.toFixed(1)} Mbps`
 
   test('signs the label by arithmetic and the tone by goodness, and they disagree on up-is-bad', () => {
-    const worse = compareWindows({ current: 20, previous: 12, direction: 'up-is-bad', format: mbps, ...covered })
+    const worse = compareWindows({
+      current: 20,
+      previous: 12,
+      direction: 'up-is-bad',
+      format: mbps,
+      ...covered,
+    })
     expect(worse?.label).toBe('+8.0 Mbps')
     expect(worse?.tone).toBeLessThan(0)
 
-    const better = compareWindows({ current: 20, previous: 12, direction: 'up-is-good', format: mbps, ...covered })
+    const better = compareWindows({
+      current: 20,
+      previous: 12,
+      direction: 'up-is-good',
+      format: mbps,
+      ...covered,
+    })
     expect(better?.label).toBe('+8.0 Mbps')
     expect(better?.tone).toBeGreaterThan(0)
   })
 
   test('a fall on an up-is-bad metric is an improvement', () => {
-    const d = compareWindows({ current: 5, previous: 9, direction: 'up-is-bad', format: mbps, ...covered })
+    const d = compareWindows({
+      current: 5,
+      previous: 9,
+      direction: 'up-is-bad',
+      format: mbps,
+      ...covered,
+    })
     expect(d?.label).toBe('−4.0 Mbps')
     expect(d?.tone).toBeGreaterThan(0)
   })
 
   test('an unchanged figure says so rather than rendering a signed zero', () => {
-    expect(compareWindows({ current: 7, previous: 7, direction: 'up-is-good', format: mbps, ...covered })).toEqual({
+    expect(
+      compareWindows({
+        current: 7,
+        previous: 7,
+        direction: 'up-is-good',
+        format: mbps,
+        ...covered,
+      }),
+    ).toEqual({
       tone: 0,
       label: 'no change',
     })
@@ -260,8 +307,24 @@ describe('compareWindows', () => {
 
   /** Nothing measured on either side is not a change of zero. */
   test('withholds the comparison when either side is absent', () => {
-    expect(compareWindows({ current: null, previous: 7, direction: 'up-is-good', format: mbps, ...covered })).toBeNull()
-    expect(compareWindows({ current: 7, previous: null, direction: 'up-is-good', format: mbps, ...covered })).toBeNull()
+    expect(
+      compareWindows({
+        current: null,
+        previous: 7,
+        direction: 'up-is-good',
+        format: mbps,
+        ...covered,
+      }),
+    ).toBeNull()
+    expect(
+      compareWindows({
+        current: 7,
+        previous: null,
+        direction: 'up-is-good',
+        format: mbps,
+        ...covered,
+      }),
+    ).toBeNull()
   })
 
   /**
@@ -272,10 +335,24 @@ describe('compareWindows', () => {
   test('withholds the comparison when either window is too sparsely measured', () => {
     const thin = COMPARABLE_COVERAGE - 0.01
     expect(
-      compareWindows({ current: 20, previous: 1, direction: 'up-is-bad', format: mbps, currentCoverage: 1, previousCoverage: thin }),
+      compareWindows({
+        current: 20,
+        previous: 1,
+        direction: 'up-is-bad',
+        format: mbps,
+        currentCoverage: 1,
+        previousCoverage: thin,
+      }),
     ).toBeNull()
     expect(
-      compareWindows({ current: 20, previous: 1, direction: 'up-is-bad', format: mbps, currentCoverage: thin, previousCoverage: 1 }),
+      compareWindows({
+        current: 20,
+        previous: 1,
+        direction: 'up-is-bad',
+        format: mbps,
+        currentCoverage: thin,
+        previousCoverage: 1,
+      }),
     ).toBeNull()
   })
 

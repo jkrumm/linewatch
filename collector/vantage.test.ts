@@ -190,14 +190,21 @@ describe('parseDefaultRoute', () => {
     // is no default route at all (link down). Anything that names no interface
     // must come back null — captureVantage turns that into an absent vantage
     // rather than a fabricated one.
-    expect(parseDefaultRoute('route: writing to routing socket: not in table\n')).toEqual({ iface: null, gateway: null })
+    expect(parseDefaultRoute('route: writing to routing socket: not in table\n')).toEqual({
+      iface: null,
+      gateway: null,
+    })
     expect(parseDefaultRoute('')).toEqual({ iface: null, gateway: null })
   })
 })
 
 describe('parseLinkState', () => {
   test('parses a negotiated gigabit link', () => {
-    expect(parseLinkState(IFCONFIG_EN0_GIGABIT)).toEqual({ linkMedia: '1000baseT', linkMbit: 1000, linkDuplex: 'full' })
+    expect(parseLinkState(IFCONFIG_EN0_GIGABIT)).toEqual({
+      linkMedia: '1000baseT',
+      linkMbit: 1000,
+      linkDuplex: 'full',
+    })
   })
 
   test('parses a link that renegotiated down to 100baseTX', () => {
@@ -211,11 +218,19 @@ describe('parseLinkState', () => {
   })
 
   test('returns null speed for Wi-Fi, which prints no speed token', () => {
-    expect(parseLinkState(IFCONFIG_EN1_WIFI)).toEqual({ linkMedia: 'autoselect', linkMbit: null, linkDuplex: null })
+    expect(parseLinkState(IFCONFIG_EN1_WIFI)).toEqual({
+      linkMedia: 'autoselect',
+      linkMbit: null,
+      linkDuplex: null,
+    })
   })
 
   test('returns null speed for an unknown media type', () => {
-    expect(parseLinkState(IFCONFIG_BRIDGE0)).toEqual({ linkMedia: '<unknown type>', linkMbit: null, linkDuplex: null })
+    expect(parseLinkState(IFCONFIG_BRIDGE0)).toEqual({
+      linkMedia: '<unknown type>',
+      linkMbit: null,
+      linkDuplex: null,
+    })
   })
 
   test('parses the 10baseT and multi-gig token families', () => {
@@ -224,7 +239,9 @@ describe('parseLinkState', () => {
     // Thunderbolt adapter is a planned upgrade per docs/DESIGN.md) and drivers
     // disagree about capitalising `base`, which is why the parser ignores case.
     expect(parseLinkState('\tmedia: autoselect (10baseT/UTP <half-duplex>)').linkMbit).toBe(10)
-    expect(parseLinkState('\tmedia: autoselect (10baseT/UTP <half-duplex>)').linkDuplex).toBe('half')
+    expect(parseLinkState('\tmedia: autoselect (10baseT/UTP <half-duplex>)').linkDuplex).toBe(
+      'half',
+    )
     expect(parseLinkState('\tmedia: autoselect (2500Base-T <full-duplex>)')).toEqual({
       linkMedia: '2500Base-T',
       linkMbit: 2500,
@@ -261,7 +278,11 @@ describe('parseLinkState', () => {
     // matching is what keeps them out; a substring match would not.
     expect(parseLinkState('\tmedia: autoselect <full-duplex>').linkMbit).toBeNull()
     expect(parseLinkState('\tmedia: none').linkMbit).toBeNull()
-    expect(parseLinkState('\tmedia: none')).toEqual({ linkMedia: 'none', linkMbit: null, linkDuplex: null })
+    expect(parseLinkState('\tmedia: none')).toEqual({
+      linkMedia: 'none',
+      linkMbit: null,
+      linkDuplex: null,
+    })
   })
 
   test('parses a manually configured media line with no autoselect wrapper', () => {
@@ -294,8 +315,12 @@ describe('parseSupportedMedia', () => {
   test('takes the maximum, not the first or last entry', () => {
     // The list is not sorted by speed on every driver, and `media none` /
     // `media autoselect` bracket it at both ends.
-    expect(parseSupportedMedia('\t\tmedia 1000baseT\n\t\tmedia 100baseTX\n\t\tmedia none\n')).toBe(1000)
-    expect(parseSupportedMedia('\t\tmedia 10baseT/UTP\n\t\tmedia 2500Base-T\n\t\tmedia 100baseTX\n')).toBe(2500)
+    expect(parseSupportedMedia('\t\tmedia 1000baseT\n\t\tmedia 100baseTX\n\t\tmedia none\n')).toBe(
+      1000,
+    )
+    expect(
+      parseSupportedMedia('\t\tmedia 10baseT/UTP\n\t\tmedia 2500Base-T\n\t\tmedia 100baseTX\n'),
+    ).toBe(2500)
   })
 
   test('is null when nothing in the output is a media line', () => {
@@ -351,7 +376,15 @@ describe('parseDhcpLeaseStart', () => {
    * Offset is resolved twice because the first lookup samples it at the wrong instant; the second
    * pass settles any reading that is not itself inside a DST transition.
    */
-  function wallClockToUtc(tz: string, y: number, mo: number, d: number, h: number, mi: number, s: number): number {
+  function wallClockToUtc(
+    tz: string,
+    y: number,
+    mo: number,
+    d: number,
+    h: number,
+    mi: number,
+    s: number,
+  ): number {
     const naive = Date.UTC(y, mo - 1, d, h, mi, s)
     const offsetAt = (guess: number): number => {
       const parts = Object.fromEntries(
@@ -398,7 +431,9 @@ describe('parseDhcpLeaseStart', () => {
     // link-down it is supposed to explain. Asserted as an inequality so it cannot be satisfied by
     // the implementation being copied into the oracle.
     const asIfUtc = Date.UTC(2026, 6, 30, 15, 48, 29)
-    expect(inTimeZone('Etc/GMT-5', () => parseDhcpLeaseStart(IPCONFIG_GETSUMMARY))).not.toBe(asIfUtc)
+    expect(inTimeZone('Etc/GMT-5', () => parseDhcpLeaseStart(IPCONFIG_GETSUMMARY))).not.toBe(
+      asIfUtc,
+    )
     expect(inTimeZone('UTC', () => parseDhcpLeaseStart(IPCONFIG_GETSUMMARY))).toBe(asIfUtc)
   })
 
@@ -416,7 +451,9 @@ describe('parseDhcpLeaseStart', () => {
     )
     // And the two really do differ by an hour of offset, or the assertions above would both hold
     // under a parser that ignored DST entirely.
-    const offsetOf = (month: number) => wallClockToUtc('Australia/Sydney', 2026, month, 30, 15, 48, 29) - Date.UTC(2026, month - 1, 30, 15, 48, 29)
+    const offsetOf = (month: number) =>
+      wallClockToUtc('Australia/Sydney', 2026, month, 30, 15, 48, 29) -
+      Date.UTC(2026, month - 1, 30, 15, 48, 29)
     expect(offsetOf(1) - offsetOf(7)).toBe(-3_600_000)
   })
 
@@ -486,8 +523,20 @@ describe('parseIfCounters', () => {
 
   test('yields nulls for a header-only or empty output', () => {
     const headerOnly = NETSTAT_EN0.split('\n')[0] ?? ''
-    expect(parseIfCounters(`${headerOnly}\n`)).toEqual({ ifIerrs: null, ifOerrs: null, ifColl: null, ifIbytes: null, ifObytes: null })
-    expect(parseIfCounters('')).toEqual({ ifIerrs: null, ifOerrs: null, ifColl: null, ifIbytes: null, ifObytes: null })
+    expect(parseIfCounters(`${headerOnly}\n`)).toEqual({
+      ifIerrs: null,
+      ifOerrs: null,
+      ifColl: null,
+      ifIbytes: null,
+      ifObytes: null,
+    })
+    expect(parseIfCounters('')).toEqual({
+      ifIerrs: null,
+      ifOerrs: null,
+      ifColl: null,
+      ifIbytes: null,
+      ifObytes: null,
+    })
   })
 })
 
@@ -542,11 +591,23 @@ describe('classifyPath', () => {
 
     // Same rule for the less dramatic clashes: anything outranks `ethernet`,
     // because only `ethernet` can claim the home line.
-    expect(classifyPath({ iface: 'en5', services: [stale, { hardwarePort: 'Wi-Fi', device: 'en5' }] })).toBe('wifi')
-    expect(classifyPath({ iface: 'en5', services: [stale, { hardwarePort: 'Thunderbolt Bridge', device: 'en5' }] })).toBe('other')
+    expect(
+      classifyPath({ iface: 'en5', services: [stale, { hardwarePort: 'Wi-Fi', device: 'en5' }] }),
+    ).toBe('wifi')
+    expect(
+      classifyPath({
+        iface: 'en5',
+        services: [stale, { hardwarePort: 'Thunderbolt Bridge', device: 'en5' }],
+      }),
+    ).toBe('other')
 
     // Two Ethernet services on one device is agreement, not a clash.
-    expect(classifyPath({ iface: 'en5', services: [stale, { hardwarePort: 'USB 10/100/1000 LAN', device: 'en5' }] })).toBe('ethernet')
+    expect(
+      classifyPath({
+        iface: 'en5',
+        services: [stale, { hardwarePort: 'USB 10/100/1000 LAN', device: 'en5' }],
+      }),
+    ).toBe('ethernet')
   })
 })
 
@@ -573,17 +634,27 @@ describe('deriveOnHomeLine', () => {
   const expectedGateway = '192.168.1.1'
 
   test('is 1 only for Ethernet on the expected gateway', () => {
-    expect(deriveOnHomeLine({ pathClass: 'ethernet', gatewayAddr: '192.168.1.1', expectedGateway })).toBe(1)
+    expect(
+      deriveOnHomeLine({ pathClass: 'ethernet', gatewayAddr: '192.168.1.1', expectedGateway }),
+    ).toBe(1)
   })
 
   test('is 0 for every other path class, however healthy the probes look', () => {
-    expect(deriveOnHomeLine({ pathClass: 'wifi', gatewayAddr: '192.168.1.1', expectedGateway })).toBe(0)
-    expect(deriveOnHomeLine({ pathClass: 'cellular', gatewayAddr: '172.20.10.1', expectedGateway })).toBe(0)
-    expect(deriveOnHomeLine({ pathClass: 'other', gatewayAddr: '192.168.1.1', expectedGateway })).toBe(0)
+    expect(
+      deriveOnHomeLine({ pathClass: 'wifi', gatewayAddr: '192.168.1.1', expectedGateway }),
+    ).toBe(0)
+    expect(
+      deriveOnHomeLine({ pathClass: 'cellular', gatewayAddr: '172.20.10.1', expectedGateway }),
+    ).toBe(0)
+    expect(
+      deriveOnHomeLine({ pathClass: 'other', gatewayAddr: '192.168.1.1', expectedGateway }),
+    ).toBe(0)
   })
 
   test('is 0 for Ethernet through a gateway that is not the expected one', () => {
-    expect(deriveOnHomeLine({ pathClass: 'ethernet', gatewayAddr: '10.0.0.1', expectedGateway })).toBe(0)
+    expect(
+      deriveOnHomeLine({ pathClass: 'ethernet', gatewayAddr: '10.0.0.1', expectedGateway }),
+    ).toBe(0)
   })
 
   test('is 0 for a known non-Ethernet path even with nothing to compare gateways against', () => {
@@ -591,16 +662,26 @@ describe('deriveOnHomeLine', () => {
     // the path settles the question on its own. This is the mirror of the
     // missing-gateway case below — the two together are the whole rule.
     expect(deriveOnHomeLine({ pathClass: 'cellular', gatewayAddr: null, expectedGateway })).toBe(0)
-    expect(deriveOnHomeLine({ pathClass: 'wifi', gatewayAddr: '192.168.1.1', expectedGateway: null })).toBe(0)
+    expect(
+      deriveOnHomeLine({ pathClass: 'wifi', gatewayAddr: '192.168.1.1', expectedGateway: null }),
+    ).toBe(0)
   })
 
   test('is null — never 0 or 1 — when an input is unknown', () => {
     // Unclassifiable path: 0 would claim "not the home line", which is a
     // different statement from "cannot tell" and would let a read path discard
     // good samples.
-    expect(deriveOnHomeLine({ pathClass: null, gatewayAddr: '192.168.1.1', expectedGateway })).toBeNull()
+    expect(
+      deriveOnHomeLine({ pathClass: null, gatewayAddr: '192.168.1.1', expectedGateway }),
+    ).toBeNull()
     // No configured gateway target to compare against.
-    expect(deriveOnHomeLine({ pathClass: 'ethernet', gatewayAddr: '192.168.1.1', expectedGateway: null })).toBeNull()
+    expect(
+      deriveOnHomeLine({
+        pathClass: 'ethernet',
+        gatewayAddr: '192.168.1.1',
+        expectedGateway: null,
+      }),
+    ).toBeNull()
   })
 
   test('is null, not 0, for Ethernet on a default route that names no gateway', () => {
@@ -610,10 +691,14 @@ describe('deriveOnHomeLine', () => {
     // home line "not the home line", and a read path filtering on on_home_line
     // would then throw away the entire dataset. Absence of evidence is not
     // evidence of absence.
-    expect(deriveOnHomeLine({ pathClass: 'ethernet', gatewayAddr: null, expectedGateway })).toBeNull()
+    expect(
+      deriveOnHomeLine({ pathClass: 'ethernet', gatewayAddr: null, expectedGateway }),
+    ).toBeNull()
     // End to end, from the route output that provokes it.
     const route = parseDefaultRoute(ROUTE_NO_GATEWAY)
-    expect(deriveOnHomeLine({ pathClass: 'ethernet', gatewayAddr: route.gateway, expectedGateway })).toBeNull()
+    expect(
+      deriveOnHomeLine({ pathClass: 'ethernet', gatewayAddr: route.gateway, expectedGateway }),
+    ).toBeNull()
   })
 })
 
@@ -640,7 +725,10 @@ describe('captureVantage', () => {
       // back from JSON.stringify, which collapsed these multi-line fixtures onto
       // one line and made the stub look like a host with no default route.
       writeFileSync(join(dir, 'route.out'), stdout)
-      writeFileSync(join(dir, 'route'), `#!/bin/sh\ncat ${JSON.stringify(join(dir, 'route.out'))}\nexit ${exitCode}\n`)
+      writeFileSync(
+        join(dir, 'route'),
+        `#!/bin/sh\ncat ${JSON.stringify(join(dir, 'route.out'))}\nexit ${exitCode}\n`,
+      )
       chmodSync(join(dir, 'route'), 0o755)
       const script = join(dir, 'capture.ts')
       writeFileSync(

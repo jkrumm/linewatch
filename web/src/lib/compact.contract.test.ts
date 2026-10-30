@@ -30,7 +30,9 @@ describe('compact mode never hides a finding', () => {
   })
 
   test('the routine group is the only gated branch in the band', () => {
-    const gated = panel.split('\n').filter((line) => line.includes('compact') && line.includes('&&'))
+    const gated = panel
+      .split('\n')
+      .filter((line) => line.includes('compact') && line.includes('&&'))
     expect(gated).toHaveLength(1)
     expect(gated[0]).toContain('routine')
   })

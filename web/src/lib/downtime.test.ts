@@ -34,8 +34,14 @@ function ongoing(startedAt: number, id = 2): Outage {
 
 describe('windowDowntime', () => {
   test('sums closed outages inside the window from their recorded duration', () => {
-    const outages = [closed(TO - 5 * HOUR_MS, TO - 5 * HOUR_MS + 120_000, 1), closed(TO - 2 * HOUR_MS, TO - 2 * HOUR_MS + 45_000, 2)]
-    expect(windowDowntime(outages, { from: FROM, to: TO }, TO)).toEqual({ seconds: 165, openCount: 0 })
+    const outages = [
+      closed(TO - 5 * HOUR_MS, TO - 5 * HOUR_MS + 120_000, 1),
+      closed(TO - 2 * HOUR_MS, TO - 2 * HOUR_MS + 45_000, 2),
+    ]
+    expect(windowDowntime(outages, { from: FROM, to: TO }, TO)).toEqual({
+      seconds: 165,
+      openCount: 0,
+    })
   })
 
   test('an ongoing outage counts from its start to now — never as zero', () => {
@@ -62,7 +68,10 @@ describe('windowDowntime', () => {
 
   test('an outage entirely before the window contributes nothing but is still not negative', () => {
     const outage = closed(FROM - 2 * HOUR_MS, FROM - HOUR_MS)
-    expect(windowDowntime([outage], { from: FROM, to: TO }, TO)).toEqual({ seconds: 0, openCount: 0 })
+    expect(windowDowntime([outage], { from: FROM, to: TO }, TO)).toEqual({
+      seconds: 0,
+      openCount: 0,
+    })
   })
 
   test('counts every open row, including one whose measured overlap rounds to nothing', () => {

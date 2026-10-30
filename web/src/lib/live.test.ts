@@ -19,7 +19,10 @@ function sample(patch: Partial<StatusSample> & Pick<StatusSample, 'target'>): St
 
 describe('liveGateway', () => {
   test('reports the single gateway sample as itself', () => {
-    const reading = liveGateway([sample({ target: 'gateway', medMs: 1.2 }), sample({ target: 'cloudflare', medMs: 9 })])
+    const reading = liveGateway([
+      sample({ target: 'gateway', medMs: 1.2 }),
+      sample({ target: 'cloudflare', medMs: 9 }),
+    ])
     expect(reading).toMatchObject({ medMs: 1.2, total: 1, upCount: 1 })
   })
 
@@ -85,6 +88,12 @@ describe('liveInternet', () => {
   })
 
   test('nothing reporting is an empty reading', () => {
-    expect(liveInternet([])).toMatchObject({ medMs: null, worstLossPct: null, ts: null, total: 0, upCount: 0 })
+    expect(liveInternet([])).toMatchObject({
+      medMs: null,
+      worstLossPct: null,
+      ts: null,
+      total: 0,
+      upCount: 0,
+    })
   })
 })

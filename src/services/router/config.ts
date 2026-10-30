@@ -76,9 +76,13 @@ const FALLBACK_INTERVAL_MS = 10 * 60 * 1000
 /** How many poll intervals a reading may age before `GET /api/router` marks it stale. */
 const STALE_AFTER_INTERVALS = 2
 
-function resolvePassword(env: NodeJS.ProcessEnv): { password: string | null; reason: string | null } {
+function resolvePassword(env: NodeJS.ProcessEnv): {
+  password: string | null
+  reason: string | null
+} {
   const fromEnv = env['LINEWATCH_ROUTER_PASSWORD']
-  if (fromEnv !== undefined && fromEnv.trim() !== '') return { password: fromEnv.trim(), reason: null }
+  if (fromEnv !== undefined && fromEnv.trim() !== '')
+    return { password: fromEnv.trim(), reason: null }
 
   const path = env['LINEWATCH_ROUTER_PASSWORD_FILE'] ?? PASSWORD_FILE
   if (!existsSync(path)) {
@@ -97,12 +101,20 @@ function resolvePassword(env: NodeJS.ProcessEnv): { password: string | null; rea
  * rather than by parsing it. An unparseable pattern would throw here *and* later
  * in the scheduler, so it is caught once and reported as a fallback.
  */
-export function resolvePollCron(pattern: string): { cron: string; intervalMs: number; reason: string | null } {
+export function resolvePollCron(pattern: string): {
+  cron: string
+  intervalMs: number
+  reason: string | null
+} {
   try {
     const runs = new Cron(pattern).nextRuns(2)
     const [first, second] = runs
     if (first === undefined || second === undefined) {
-      return { cron: DEFAULT_CRON, intervalMs: FALLBACK_INTERVAL_MS, reason: `cron pattern '${pattern}' never runs twice — using ${DEFAULT_CRON}` }
+      return {
+        cron: DEFAULT_CRON,
+        intervalMs: FALLBACK_INTERVAL_MS,
+        reason: `cron pattern '${pattern}' never runs twice — using ${DEFAULT_CRON}`,
+      }
     }
     return { cron: pattern, intervalMs: second.getTime() - first.getTime(), reason: null }
   } catch (error) {

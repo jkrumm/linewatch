@@ -101,13 +101,21 @@ export function quantiseWindow(
  * `from`/`to` are expected to differ every time by construction; a genuine range change is what
  * changes the span itself.
  */
-export function sameWindowedQuery(currentKey: readonly unknown[], previousKey: readonly unknown[]): boolean {
+export function sameWindowedQuery(
+  currentKey: readonly unknown[],
+  previousKey: readonly unknown[],
+): boolean {
   if (currentKey.length !== previousKey.length || currentKey.length < 2) return false
   const from = currentKey[currentKey.length - 2]
   const to = currentKey[currentKey.length - 1]
   const prevFrom = previousKey[previousKey.length - 2]
   const prevTo = previousKey[previousKey.length - 1]
-  if (typeof from !== 'number' || typeof to !== 'number' || typeof prevFrom !== 'number' || typeof prevTo !== 'number') {
+  if (
+    typeof from !== 'number' ||
+    typeof to !== 'number' ||
+    typeof prevFrom !== 'number' ||
+    typeof prevTo !== 'number'
+  ) {
     return false
   }
   if (to - from !== prevTo - prevFrom) return false
@@ -129,7 +137,9 @@ function keepAcrossTimeAdvance<TData>(
   previousQuery: { queryKey: readonly unknown[] } | undefined,
 ): TData | undefined {
   if (previousQuery === undefined) return undefined
-  return sameWindowedQuery(currentKey, previousQuery.queryKey) ? keepPreviousData(previousData) : undefined
+  return sameWindowedQuery(currentKey, previousQuery.queryKey)
+    ? keepPreviousData(previousData)
+    : undefined
 }
 
 /** `staleTime` matches the collector's 30s probe cycle (DESIGN.md "Cadence") — no point polling
@@ -153,17 +163,23 @@ export const probeBucketsQuery = (params: {
     queryKey,
     queryFn: () => getProbeBuckets(params),
     staleTime: 60_000,
-    placeholderData: (previousData, previousQuery) => keepAcrossTimeAdvance(queryKey, previousData, previousQuery),
+    placeholderData: (previousData, previousQuery) =>
+      keepAcrossTimeAdvance(queryKey, previousData, previousQuery),
   })
 }
 
-export const throughputQuery = (params: { from: number; to: number; bucket: ProbeBucketSeconds }) => {
+export const throughputQuery = (params: {
+  from: number
+  to: number
+  bucket: ProbeBucketSeconds
+}) => {
   const queryKey = ['throughput', params.bucket, params.from, params.to]
   return queryOptions({
     queryKey,
     queryFn: () => getThroughput(params),
     staleTime: 60_000,
-    placeholderData: (previousData, previousQuery) => keepAcrossTimeAdvance(queryKey, previousData, previousQuery),
+    placeholderData: (previousData, previousQuery) =>
+      keepAcrossTimeAdvance(queryKey, previousData, previousQuery),
   })
 }
 
@@ -177,7 +193,8 @@ export const outagesQuery = (params: { from: number; to: number; minDuration?: n
     queryKey,
     queryFn: () => getOutages(params),
     staleTime: 60_000,
-    placeholderData: (previousData, previousQuery) => keepAcrossTimeAdvance(queryKey, previousData, previousQuery),
+    placeholderData: (previousData, previousQuery) =>
+      keepAcrossTimeAdvance(queryKey, previousData, previousQuery),
   })
 }
 
@@ -187,7 +204,8 @@ export const speedTestsQuery = (params: { from: number; to: number }) => {
     queryKey,
     queryFn: () => getSpeedTests(params),
     staleTime: 60_000,
-    placeholderData: (previousData, previousQuery) => keepAcrossTimeAdvance(queryKey, previousData, previousQuery),
+    placeholderData: (previousData, previousQuery) =>
+      keepAcrossTimeAdvance(queryKey, previousData, previousQuery),
   })
 }
 
@@ -209,7 +227,8 @@ export const verdictsQuery = (params: { from: number; to: number }) => {
     queryKey,
     queryFn: () => getVerdicts(params),
     staleTime: 60_000,
-    placeholderData: (previousData, previousQuery) => keepAcrossTimeAdvance(queryKey, previousData, previousQuery),
+    placeholderData: (previousData, previousQuery) =>
+      keepAcrossTimeAdvance(queryKey, previousData, previousQuery),
   })
 }
 
@@ -219,6 +238,7 @@ export const eventsQuery = (params: { from: number; to: number }) => {
     queryKey,
     queryFn: () => getEvents(params),
     staleTime: 60_000,
-    placeholderData: (previousData, previousQuery) => keepAcrossTimeAdvance(queryKey, previousData, previousQuery),
+    placeholderData: (previousData, previousQuery) =>
+      keepAcrossTimeAdvance(queryKey, previousData, previousQuery),
   })
 }

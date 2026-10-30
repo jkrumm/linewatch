@@ -1,9 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import {
-  bucketAxisLabel,
-  bucketTickFormat,
-  runTickFormat,
-} from './axis'
+import { bucketAxisLabel, bucketTickFormat, runTickFormat } from './axis'
 
 // Built from LOCAL components, not `Date.UTC`. These labels are the host's wall clock now, so an
 // instant pinned in UTC would render differently on every machine the suite runs on; pinning the

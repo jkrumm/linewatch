@@ -20,7 +20,8 @@ function homeLineSentence(summary: RangeSummary): string {
 
   // Nothing recorded is its own sentence: `homeLineVerdict` reports `unknown` for an empty range,
   // and "no cycle reported a vantage" would read as a collector that was running and silent.
-  if (recordedCycles === 0) return 'Nothing was recorded in this range, so there is no vantage to report.'
+  if (recordedCycles === 0)
+    return 'Nothing was recorded in this range, so there is no vantage to report.'
   if (verdict === 'all') return `All ${recordedCycles} recorded cycles measured the home line.`
   if (verdict === 'none') {
     return `None of the ${recordedCycles} recorded cycles measured the home line — this range describes some other path.`
@@ -69,9 +70,11 @@ function CompactCoverage({ summary }: { summary: RangeSummary }) {
   const [opened, { toggle }] = useDisclosure(false)
   const Chevron = opened ? IconChevronDown : IconChevronRight
 
-  const details = [sinceSentence(summary), degradedSentence(summary), homeLineSentence(summary)].filter(
-    (sentence): sentence is string => sentence !== null,
-  )
+  const details = [
+    sinceSentence(summary),
+    degradedSentence(summary),
+    homeLineSentence(summary),
+  ].filter((sentence): sentence is string => sentence !== null)
 
   return (
     <Box>

@@ -91,7 +91,9 @@ export function bucketLabel(seconds: number): string {
  * server's `p50` is, and computing both sides of the comparison the same way is the only way the
  * comparison means anything. Failed runs carry no throughput and are skipped, never counted as 0.
  */
-export function windowDownloadMedian(tests: readonly { downloadMbps: number | null }[]): number | null {
+export function windowDownloadMedian(
+  tests: readonly { downloadMbps: number | null }[],
+): number | null {
   return median(tests.map((t) => t.downloadMbps)).value
 }
 
@@ -287,7 +289,11 @@ export const DOWNTIME_BAD_FRACTION = 0.005
  * An open outage is `bad` regardless of seconds accrued or coverage: "still open" is itself the bad
  * fact, and the figure beside it is a floor that is out of date as it renders.
  */
-export function downtimeTint(downtime: WindowDowntime, windowSeconds: number, coverage: number): ThresholdTint {
+export function downtimeTint(
+  downtime: WindowDowntime,
+  windowSeconds: number,
+  coverage: number,
+): ThresholdTint {
   if (downtime.openCount > 0) return 'bad'
   if (downtime.seconds > 0) {
     if (downtime.seconds >= DOWNTIME_BAD_SECONDS) return 'bad'

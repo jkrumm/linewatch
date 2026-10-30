@@ -18,7 +18,14 @@
  * success. Never gate on ping's exit code — 100% loss is a valid measurement
  * (exit 2 on macOS), not a fault.
  */
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -81,7 +88,9 @@ function resolveToken(): string {
     const fileToken = readFileSync(TOKEN_FILE_PATH, 'utf-8').trim()
     if (fileToken) return fileToken
   }
-  throw new Error(`No bearer token: set LINEWATCH_TOKEN or write one to ${TOKEN_FILE_PATH} (chmod 600).`)
+  throw new Error(
+    `No bearer token: set LINEWATCH_TOKEN or write one to ${TOKEN_FILE_PATH} (chmod 600).`,
+  )
 }
 
 const moduleDir = dirname(fileURLToPath(import.meta.url))
@@ -124,7 +133,9 @@ const config = {
    * Rotation refuses to touch this path unless fd 1 really is that file
    * (collector/log-rotate.ts), so a wrong value costs the bound, never the log.
    */
-  logPath: process.env['LINEWATCH_LOG_PATH'] ?? join(homedir(), 'Library', 'Logs', 'linewatch-collector.log'),
+  logPath:
+    process.env['LINEWATCH_LOG_PATH'] ??
+    join(homedir(), 'Library', 'Logs', 'linewatch-collector.log'),
   logMaxBytes: Number(process.env['LINEWATCH_LOG_MAX_BYTES'] ?? DEFAULT_LOG_MAX_BYTES),
 }
 
@@ -273,14 +284,30 @@ function log(event: string, fields: Record<string, unknown> = {}): void {
 }
 
 async function pingTarget(target: Target): Promise<TargetSample> {
-  const args = ['ping', '-c', String(config.pingCount), '-i', String(config.pingIntervalSeconds), '-W', '1000', target.addr]
+  const args = [
+    'ping',
+    '-c',
+    String(config.pingCount),
+    '-i',
+    String(config.pingIntervalSeconds),
+    '-W',
+    '1000',
+    target.addr,
+  ]
   let stdout = ''
   try {
     const proc = Bun.spawn(args, { stdout: 'pipe', stderr: 'pipe' })
-    const [out] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited])
+    const [out] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ])
     stdout = out
   } catch (err) {
-    log('ping.spawn_error', { target: target.name, error: err instanceof Error ? err.message : String(err) })
+    log('ping.spawn_error', {
+      target: target.name,
+      error: err instanceof Error ? err.message : String(err),
+    })
   }
 
   let parsed: PingResult
@@ -289,7 +316,14 @@ async function pingTarget(target: Target): Promise<TargetSample> {
   } catch {
     // No usable output at all (binary missing, DNS failure, etc.) — record
     // it as a full-loss cycle rather than silently dropping the target.
-    parsed = { sent: config.pingCount, received: 0, lossPct: 100, rtts: [], duplicates: 0, outOfWaitTime: 0 }
+    parsed = {
+      sent: config.pingCount,
+      received: 0,
+      lossPct: 100,
+      rtts: [],
+      duplicates: 0,
+      outOfWaitTime: 0,
+    }
   }
 
   const rtts = parsed.rtts
@@ -337,12 +371,15 @@ async function runCycle(): Promise<Batch> {
     // the cycle its measurements. Its own timeout keeps a wedged
     // `system_profiler` from stretching the cycle past its 30 s budget.
     sampleWifi && wifiPingTarget !== null
-      ? captureWifi({ iface: config.wifiIface, pingTarget: wifiPingTarget, timeoutMs: config.wifiTimeoutMs, report: log }).catch(
-          (err: unknown) => {
-            log('wifi.error', { error: err instanceof Error ? err.message : String(err) })
-            return null
-          },
-        )
+      ? captureWifi({
+          iface: config.wifiIface,
+          pingTarget: wifiPingTarget,
+          timeoutMs: config.wifiTimeoutMs,
+          report: log,
+        }).catch((err: unknown) => {
+          log('wifi.error', { error: err instanceof Error ? err.message : String(err) })
+          return null
+        })
       : Promise.resolve(null),
   ])
 
@@ -418,7 +455,10 @@ async function postBatch(batch: Batch): Promise<PostOutcome> {
     // A body that will not parse does not undo an accepted batch: the samples
     // are stored either way, and re-sending them would duplicate work the
     // server already did. The outcome is simply unknown.
-    const body = (await response.json().catch(() => ({}))) as { skipped?: unknown; cycleStored?: unknown }
+    const body = (await response.json().catch(() => ({}))) as {
+      skipped?: unknown
+      cycleStored?: unknown
+    }
     return {
       ok: true,
       skipped: typeof body.skipped === 'boolean' ? body.skipped : undefined,
@@ -480,7 +520,10 @@ async function replaySpool(batches: Batch[]): Promise<boolean> {
     if (!ok) {
       const remaining = batches.slice(i)
       const tmpPath = `${config.spoolPath}.tmp`
-      writeFileSync(tmpPath, remaining.map((b) => JSON.stringify(b)).join('\n') + (remaining.length > 0 ? '\n' : ''))
+      writeFileSync(
+        tmpPath,
+        remaining.map((b) => JSON.stringify(b)).join('\n') + (remaining.length > 0 ? '\n' : ''),
+      )
       renameSync(tmpPath, config.spoolPath)
       spoolLineCount = remaining.length
       return false
@@ -496,7 +539,13 @@ async function processCycle(batch: Batch): Promise<void> {
     const drained = await replaySpool(spooled)
     if (!drained) {
       appendToSpool(batch)
-      log('cycle', { ts: batch.ts, status: 'spooled', reason: 'replay_failed', spoolDepth: spoolLineCount, ...vantageFields(batch) })
+      log('cycle', {
+        ts: batch.ts,
+        status: 'spooled',
+        reason: 'replay_failed',
+        spoolDepth: spoolLineCount,
+        ...vantageFields(batch),
+      })
       return
     }
   }
@@ -523,7 +572,13 @@ async function processCycle(batch: Batch): Promise<void> {
   }
 
   appendToSpool(batch)
-  log('cycle', { ts: batch.ts, status: 'spooled', reason: 'post_failed', spoolDepth: spoolLineCount, ...vantageFields(batch) })
+  log('cycle', {
+    ts: batch.ts,
+    status: 'spooled',
+    reason: 'post_failed',
+    spoolDepth: spoolLineCount,
+    ...vantageFields(batch),
+  })
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {

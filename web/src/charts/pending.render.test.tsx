@@ -111,7 +111,9 @@ describe('LinkSpeedStrip isPending', () => {
   })
 
   test('does not claim to be pending once resolved', () => {
-    const html = renderToStaticMarkup(<LinkSpeedStrip vantage={[]} {...BUCKETED} isPending={false} />)
+    const html = renderToStaticMarkup(
+      <LinkSpeedStrip vantage={[]} {...BUCKETED} isPending={false} />,
+    )
     expect(html).not.toContain(PENDING)
     expect(html).toContain('Negotiated speed')
   })
@@ -173,7 +175,9 @@ describe('BufferbloatChart isPending', () => {
   })
 
   test('does not claim to be pending once resolved', () => {
-    const html = renderToStaticMarkup(<BufferbloatChart tests={[TEST_RUN]} {...BUCKETED} isPending={false} />)
+    const html = renderToStaticMarkup(
+      <BufferbloatChart tests={[TEST_RUN]} {...BUCKETED} isPending={false} />,
+    )
     expect(html).not.toContain(PENDING)
   })
 })
@@ -184,7 +188,14 @@ describe('LatencyBandChart isPending', () => {
    * encoding for marks that are not drawn is a legend describing nothing. */
   test('marks itself busy and conceals the loss encoding', () => {
     const html = renderToStaticMarkup(
-      <LatencyBandChart label="Internet" chartKey="internet" buckets={[]} vantage={[]} {...BUCKETED} isPending />,
+      <LatencyBandChart
+        label="Internet"
+        chartKey="internet"
+        buckets={[]}
+        vantage={[]}
+        {...BUCKETED}
+        isPending
+      />,
     )
     expect(html).toContain('aria-busy="true"')
     expectConcealedLegend(html)

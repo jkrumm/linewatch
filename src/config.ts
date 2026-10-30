@@ -103,7 +103,9 @@ function resolveHomeGateway(targets: Target[]): string {
   if (explicit) return explicit
   const gateway = targets.find((t) => t.scope === 'gateway')
   if (gateway) return gateway.addr
-  throw new Error('No home gateway: LINEWATCH_TARGETS has no `gateway`-scoped entry — set LINEWATCH_HOME_GATEWAY')
+  throw new Error(
+    'No home gateway: LINEWATCH_TARGETS has no `gateway`-scoped entry — set LINEWATCH_HOME_GATEWAY',
+  )
 }
 
 const targets = parseTargets(process.env['LINEWATCH_TARGETS'])
@@ -115,7 +117,9 @@ export const config: Config = {
   pingCount: Number(process.env['LINEWATCH_PING_COUNT'] ?? 20),
   pingIntervalSeconds: Number(process.env['LINEWATCH_PING_INTERVAL_S'] ?? 0.2),
   speedtestCron: process.env['LINEWATCH_SPEEDTEST_CRON'] ?? '0 * * * *',
-  speedtestMinIntervalS: Number(process.env['LINEWATCH_SPEEDTEST_MIN_INTERVAL_S'] ?? SPEEDTEST_MIN_INTERVAL_S),
+  speedtestMinIntervalS: Number(
+    process.env['LINEWATCH_SPEEDTEST_MIN_INTERVAL_S'] ?? SPEEDTEST_MIN_INTERVAL_S,
+  ),
   targets,
   homeGatewayAddr: resolveHomeGateway(targets),
   degradedLossPct: Number(process.env['LINEWATCH_DEGRADED_LOSS_PCT'] ?? DEGRADED_LOSS_PCT),

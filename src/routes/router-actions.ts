@@ -44,13 +44,20 @@ const POLL_MIN_INTERVAL_S = 60
  * container must not reset the budget.
  */
 function secondsSinceLastPoll(now: number): number | null {
-  const row = db.select({ ts: routerLineSample.ts }).from(routerLineSample).orderBy(desc(routerLineSample.ts)).limit(1).get()
+  const row = db
+    .select({ ts: routerLineSample.ts })
+    .from(routerLineSample)
+    .orderBy(desc(routerLineSample.ts))
+    .limit(1)
+    .get()
   return row === undefined ? null : Math.floor((now - row.ts) / 1000)
 }
 
 const ActionResultSchema = z.object({
   ok: z.boolean(),
-  capability: z.enum(['live', 'null']).describe('`null` means nothing was sent — the write capability is off'),
+  capability: z
+    .enum(['live', 'null'])
+    .describe('`null` means nothing was sent — the write capability is off'),
   outcome: z
     .enum(['executed', 'failed', 'not_executed', 'refused', 'unknown'])
     .describe(
@@ -85,7 +92,8 @@ const ActionResultSchema = z.object({
  * on its own.
  */
 function recordAndAnswer(action: 'router_reconnect' | 'router_reboot', result: ActionResult) {
-  const touchedTheLine = result.outcome === 'executed' || result.outcome === 'failed' || result.outcome === 'unknown'
+  const touchedTheLine =
+    result.outcome === 'executed' || result.outcome === 'failed' || result.outcome === 'unknown'
   db.insert(event)
     .values({
       ts: Date.now(),
@@ -130,12 +138,18 @@ export const routerActionRoutes = new Elysia()
     async ({ headers, status }) => {
       if (!hasValidBearer(headers)) return status(401, 'Unauthorized')
       if (getRouterPoller() === null) {
-        return status(503, { error: 'router poller not configured', disabledReason: routerConfig.disabledReason })
+        return status(503, {
+          error: 'router poller not configured',
+          disabledReason: routerConfig.disabledReason,
+        })
       }
 
       const since = secondsSinceLastPoll(Date.now())
       if (since !== null && since < POLL_MIN_INTERVAL_S) {
-        return status(429, { error: 'polled too recently', secondsUntilNext: POLL_MIN_INTERVAL_S - since })
+        return status(429, {
+          error: 'polled too recently',
+          secondsUntilNext: POLL_MIN_INTERVAL_S - since,
+        })
       }
 
       await pollOnDemand()
@@ -183,7 +197,7 @@ export const routerActionRoutes = new Elysia()
         tags: ['Router'],
         summary: 'Re-dial the WAN connection',
         description:
-          'Reads DEV2_ADT_WAN on the session it acts over, takes that instance\'s own stack — which is not the interface\'s — and branches on connType exactly as the firmware\'s WAN page does: a PPP disconnect/connect pair, or a DHCP renew. An unrecognised connType is refused rather than guessed. **This drops the line**: it changes the public IPv4 address and can change the delegated IPv6 prefix, and on a DS-Lite line IPv4 rides the v6 session being bounced. Whatever happens is written to the event table with the pre-action connection state.',
+          "Reads DEV2_ADT_WAN on the session it acts over, takes that instance's own stack — which is not the interface's — and branches on connType exactly as the firmware's WAN page does: a PPP disconnect/connect pair, or a DHCP renew. An unrecognised connType is refused rather than guessed. **This drops the line**: it changes the public IPv4 address and can change the delegated IPv6 prefix, and on a DS-Lite line IPv4 rides the v6 session being bounced. Whatever happens is written to the event table with the pre-action connection state.",
         security: [{ BearerAuth: [] }],
       },
     },

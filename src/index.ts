@@ -72,8 +72,15 @@ export const app = new Elysia()
           { name: 'Probes', description: 'Ping-cycle ingest and the bucketed latency timeseries.' },
           { name: 'Outages', description: 'Materialised outage history.' },
           { name: 'Speed Tests', description: 'Hourly Ookla throughput + loaded-latency runs.' },
-          { name: 'Events', description: 'Timeline overlay (interventions, link/config changes, notes).' },
-          { name: 'Router', description: 'Carrier-side line health and per-interface throughput, polled read-only from the router.' },
+          {
+            name: 'Events',
+            description: 'Timeline overlay (interventions, link/config changes, notes).',
+          },
+          {
+            name: 'Router',
+            description:
+              'Carrier-side line health and per-interface throughput, polled read-only from the router.',
+          },
           { name: 'Status', description: 'Current line status in one call.' },
           { name: 'System', description: 'Health and discovery.' },
         ],

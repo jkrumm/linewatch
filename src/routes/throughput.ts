@@ -58,7 +58,12 @@ export const throughputRoutes = new Elysia().get(
     query: z.object({
       from: z.coerce.number().int(),
       to: z.coerce.number().int(),
-      bucket: z.coerce.number().int().min(1).default(3600).describe('Bucket width in seconds (default 3600 = hourly)'),
+      bucket: z.coerce
+        .number()
+        .int()
+        .min(1)
+        .default(3600)
+        .describe('Bucket width in seconds (default 3600 = hourly)'),
     }),
     response: z.object({
       from: z.number().int(),
@@ -67,7 +72,9 @@ export const throughputRoutes = new Elysia().get(
       maxIntervalMs: z
         .number()
         .int()
-        .describe('Longest cycle-to-cycle gap whose bytes are still attributed to a point in time; longer intervals count toward `skipped`.'),
+        .describe(
+          'Longest cycle-to-cycle gap whose bytes are still attributed to a point in time; longer intervals count toward `skipped`.',
+        ),
       buckets: z.array(ThroughputBucketSchema),
     }),
     detail: {

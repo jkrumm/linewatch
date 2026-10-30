@@ -33,7 +33,10 @@ export interface Stat {
   group?: string | undefined
 }
 
-const TONE_COLOR: Record<NonNullable<Stat['tone']>, string> = { warn: VX.status.warn, bad: VX.status.bad }
+const TONE_COLOR: Record<NonNullable<Stat['tone']>, string> = {
+  warn: VX.status.warn,
+  bad: VX.status.bad,
+}
 
 /** Split `stats` into runs of consecutive entries sharing a non-undefined `group`. An ungrouped
  * entry is its own run of one, rendered exactly as before. */
@@ -71,7 +74,13 @@ export function StatStrip({ stats }: { stats: Stat[] }) {
     // A real `ul`/`li`, not a `div` carrying `role="list"`. The roles said the right thing to a
     // screen reader and nothing to anything else; the elements say it to both, and `listStyle:
     // none` is the whole cost. `Group` keeps the flex layout either way.
-    <Group component="ul" gap="md" wrap="wrap" align="baseline" style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+    <Group
+      component="ul"
+      gap="md"
+      wrap="wrap"
+      align="baseline"
+      style={{ listStyle: 'none', margin: 0, padding: 0 }}
+    >
       {groupRuns(stats).map((run) => {
         const runKey = run[0]?.id ?? run[0]?.label ?? ''
         if (run.length === 1) {
@@ -121,7 +130,9 @@ function StatValue({ stat }: { stat: Stat }) {
       {...(stat.tone === undefined ? {} : { c: TONE_COLOR[stat.tone] })}
       // A dotted underline is the only affordance saying a hover exists. Without it the hint is a
       // fact nobody finds, which is indistinguishable from a fact that was never written.
-      {...(stat.hint === undefined ? {} : { style: { textDecoration: 'underline dotted', textUnderlineOffset: 3 } })}
+      {...(stat.hint === undefined
+        ? {}
+        : { style: { textDecoration: 'underline dotted', textUnderlineOffset: 3 } })}
     >
       {stat.value}
     </Text>
@@ -132,7 +143,13 @@ function StatValue({ stat }: { stat: Stat }) {
     // touch + focus, not Mantine's hover-only default: the dotted underline is an affordance for
     // information a phone could not open and a keyboard could not reach, and these hints are where
     // the page states its floors and its coverage caveats.
-    <Tooltip label={stat.hint} multiline w={280} withArrow events={{ hover: true, focus: true, touch: true }}>
+    <Tooltip
+      label={stat.hint}
+      multiline
+      w={280}
+      withArrow
+      events={{ hover: true, focus: true, touch: true }}
+    >
       <Box tabIndex={0}>{value}</Box>
     </Tooltip>
   )

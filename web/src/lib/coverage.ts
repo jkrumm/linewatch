@@ -70,7 +70,6 @@ export function coverageSinceFirst(summary: RangeSummary): MeasuredFrom | null {
   return {
     firstTs,
     expectedCycles: expectedSince,
-    coveragePct:
-      expectedSince === 0 ? null : Math.min(100, (100 * recordedCycles) / expectedSince),
+    coveragePct: expectedSince === 0 ? null : Math.min(100, (100 * recordedCycles) / expectedSince),
   }
 }

@@ -21,7 +21,9 @@ function vantage(over: Partial<Vantage> = {}): Vantage {
   }
 }
 
-function router(over: { observedAt?: number; stale?: boolean; downSyncKbps?: number | null } = {}): RouterSnapshot {
+function router(
+  over: { observedAt?: number; stale?: boolean; downSyncKbps?: number | null } = {},
+): RouterSnapshot {
   const observedAt = over.observedAt ?? NOW - 60_000
   return {
     pollerEnabled: true,
@@ -173,7 +175,12 @@ describe('compareCarrierHost', () => {
     expect(missingLink.hostVsCarrierPct).toBeNull()
     expect(missingLink.refusal).toContain('absent')
 
-    const noRouter = compareCarrierHost({ router: null, vantage: vantage(), speedTest: null, now: NOW })
+    const noRouter = compareCarrierHost({
+      router: null,
+      vantage: vantage(),
+      speedTest: null,
+      now: NOW,
+    })
     expect(noRouter.carrier.mbps).toBeNull()
     // No reading means no age to judge — `stale: false` here would read as a fresh null.
     expect(noRouter.carrier.stale).toBeNull()
@@ -206,7 +213,12 @@ describe('compareCarrierHost', () => {
   })
 
   test('the measured throughput is typed apart from the two negotiated rates', () => {
-    const result = compareCarrierHost({ router: router(), vantage: vantage(), speedTest: SPEED_TEST, now: NOW })
+    const result = compareCarrierHost({
+      router: router(),
+      vantage: vantage(),
+      speedTest: SPEED_TEST,
+      now: NOW,
+    })
     expect(result.carrier.kind).toBe('negotiated')
     expect(result.host.kind).toBe('negotiated')
     expect(result.throughput.kind).toBe('measured')

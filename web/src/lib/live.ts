@@ -47,7 +47,14 @@ export interface LiveReading {
   samples: StatusSample[]
 }
 
-const NOTHING: LiveReading = { medMs: null, worstLossPct: null, ts: null, total: 0, upCount: 0, samples: [] }
+const NOTHING: LiveReading = {
+  medMs: null,
+  worstLossPct: null,
+  ts: null,
+  total: 0,
+  upCount: 0,
+  samples: [],
+}
 
 /**
  * Fold a set of samples into one reading.

@@ -48,7 +48,15 @@ function seedLine(db: Db, options: { start: number; count: number; showtimeReset
 
 function seedIntf(
   db: Db,
-  rows: Array<{ ts: number; name: string; role: 'wan' | 'lan'; rxKbps: number; txKbps: number; bytesRx: number; bytesTx: number }>,
+  rows: Array<{
+    ts: number
+    name: string
+    role: 'wan' | 'lan'
+    rxKbps: number
+    txKbps: number
+    bytesRx: number
+    bytesTx: number
+  }>,
 ) {
   for (const row of rows) {
     db.insert(routerIntfSample)
@@ -107,7 +115,11 @@ describe('bucketRouterLine', () => {
       })
       .run()
 
-    const [bucket] = bucketRouterLine(db, { from: START, to: START + 12 * POLL_MS, bucketSeconds: HOUR_S })
+    const [bucket] = bucketRouterLine(db, {
+      from: START,
+      to: START + 12 * POLL_MS,
+      bucketSeconds: HOUR_S,
+    })
     expect(bucket!.samples).toBe(13)
     expect(bucket!.downSyncKbpsMin).toBe(100_000)
     expect(bucket!.downSyncKbpsMax).toBe(803140)
@@ -121,7 +133,11 @@ describe('bucketRouterLine', () => {
     const db = createTestDb()
     seedLine(db, { start: START, count: 24, showtimeResetAt: 15 })
 
-    const buckets = bucketRouterLine(db, { from: START, to: START + 24 * POLL_MS, bucketSeconds: HOUR_S })
+    const buckets = bucketRouterLine(db, {
+      from: START,
+      to: START + 24 * POLL_MS,
+      bucketSeconds: HOUR_S,
+    })
     const resyncs = buckets.reduce((sum, bucket) => sum + bucket.resyncs, 0)
     expect(resyncs).toBe(1)
     // Row 15 sits in the second hour (rows 12–23).
@@ -139,13 +155,49 @@ describe('bucketRouterThroughput', () => {
   it('sums real traffic from consecutive counter deltas, per role', () => {
     const db = createTestDb()
     seedIntf(db, [
-      { ts: START, name: 'ppp0', role: 'wan', rxKbps: 400, txKbps: 1800, bytesRx: 1_000_000, bytesTx: 2_000_000 },
-      { ts: START, name: 'br0', role: 'lan', rxKbps: 1800, txKbps: 400, bytesRx: 5_000_000, bytesTx: 9_000_000 },
-      { ts: START + POLL_MS, name: 'ppp0', role: 'wan', rxKbps: 800, txKbps: 100, bytesRx: 1_500_000, bytesTx: 2_100_000 },
-      { ts: START + POLL_MS, name: 'br0', role: 'lan', rxKbps: 100, txKbps: 800, bytesRx: 5_100_000, bytesTx: 9_500_000 },
+      {
+        ts: START,
+        name: 'ppp0',
+        role: 'wan',
+        rxKbps: 400,
+        txKbps: 1800,
+        bytesRx: 1_000_000,
+        bytesTx: 2_000_000,
+      },
+      {
+        ts: START,
+        name: 'br0',
+        role: 'lan',
+        rxKbps: 1800,
+        txKbps: 400,
+        bytesRx: 5_000_000,
+        bytesTx: 9_000_000,
+      },
+      {
+        ts: START + POLL_MS,
+        name: 'ppp0',
+        role: 'wan',
+        rxKbps: 800,
+        txKbps: 100,
+        bytesRx: 1_500_000,
+        bytesTx: 2_100_000,
+      },
+      {
+        ts: START + POLL_MS,
+        name: 'br0',
+        role: 'lan',
+        rxKbps: 100,
+        txKbps: 800,
+        bytesRx: 5_100_000,
+        bytesTx: 9_500_000,
+      },
     ])
 
-    const buckets = bucketRouterThroughput(db, { from: START, to: START + POLL_MS, bucketSeconds: HOUR_S })
+    const buckets = bucketRouterThroughput(db, {
+      from: START,
+      to: START + POLL_MS,
+      bucketSeconds: HOUR_S,
+    })
     expect(buckets).toHaveLength(2)
 
     const wan = buckets.find((bucket) => bucket.role === 'wan')!
@@ -163,13 +215,41 @@ describe('bucketRouterThroughput', () => {
   it('drops a backwards counter to zero instead of inventing traffic after a reboot', () => {
     const db = createTestDb()
     seedIntf(db, [
-      { ts: START, name: 'ppp0', role: 'wan', rxKbps: 400, txKbps: 100, bytesRx: 9_000_000, bytesTx: 9_000_000 },
+      {
+        ts: START,
+        name: 'ppp0',
+        role: 'wan',
+        rxKbps: 400,
+        txKbps: 100,
+        bytesRx: 9_000_000,
+        bytesTx: 9_000_000,
+      },
       // Router rebooted: counters restart near zero.
-      { ts: START + POLL_MS, name: 'ppp0', role: 'wan', rxKbps: 400, txKbps: 100, bytesRx: 4_000, bytesTx: 1_000 },
-      { ts: START + 2 * POLL_MS, name: 'ppp0', role: 'wan', rxKbps: 400, txKbps: 100, bytesRx: 60_000, bytesTx: 5_000 },
+      {
+        ts: START + POLL_MS,
+        name: 'ppp0',
+        role: 'wan',
+        rxKbps: 400,
+        txKbps: 100,
+        bytesRx: 4_000,
+        bytesTx: 1_000,
+      },
+      {
+        ts: START + 2 * POLL_MS,
+        name: 'ppp0',
+        role: 'wan',
+        rxKbps: 400,
+        txKbps: 100,
+        bytesRx: 60_000,
+        bytesTx: 5_000,
+      },
     ])
 
-    const [bucket] = bucketRouterThroughput(db, { from: START, to: START + 2 * POLL_MS, bucketSeconds: HOUR_S })
+    const [bucket] = bucketRouterThroughput(db, {
+      from: START,
+      to: START + 2 * POLL_MS,
+      bucketSeconds: HOUR_S,
+    })
     // The reset interval contributes 0, the interval after it contributes 56000.
     // Under-reporting one interval is honest; a negative or a 9 MB spike is not.
     expect(bucket!.bytesRxDelta).toBe(56_000)
@@ -182,7 +262,12 @@ describe('bucketRouterThroughput', () => {
       { ts: START, name: 'ppp0', role: 'wan', rxKbps: 1, txKbps: 1, bytesRx: 1, bytesTx: 1 },
       { ts: START, name: 'br0', role: 'lan', rxKbps: 2, txKbps: 2, bytesRx: 2, bytesTx: 2 },
     ])
-    const buckets = bucketRouterThroughput(db, { from: START, to: START + 1, bucketSeconds: HOUR_S, role: 'wan' })
+    const buckets = bucketRouterThroughput(db, {
+      from: START,
+      to: START + 1,
+      bucketSeconds: HOUR_S,
+      role: 'wan',
+    })
     expect(buckets).toHaveLength(1)
     expect(buckets[0]!.role).toBe('wan')
   })
@@ -204,7 +289,11 @@ describe('bucketRouterThroughput', () => {
     }
     seedIntf(db, rows)
 
-    const buckets = bucketRouterThroughput(db, { from: START, to: START + (count - 1) * POLL_MS, bucketSeconds: HOUR_S })
+    const buckets = bucketRouterThroughput(db, {
+      from: START,
+      to: START + (count - 1) * POLL_MS,
+      bucketSeconds: HOUR_S,
+    })
     expect(buckets.reduce((sum, bucket) => sum + bucket.samples, 0)).toBe(count)
     expect(buckets[0]!.firstTs).toBe(START)
   })
@@ -214,7 +303,11 @@ describe('resolveRange', () => {
   it('defaults to the last 24 hours', () => {
     const range = resolveRange({ bucketSeconds: HOUR_S, now: START })
     expect(isRangeError(range)).toBe(false)
-    expect(range).toMatchObject({ from: START - DEFAULT_WINDOW_MS, to: START, bucketSeconds: HOUR_S })
+    expect(range).toMatchObject({
+      from: START - DEFAULT_WINDOW_MS,
+      to: START,
+      bucketSeconds: HOUR_S,
+    })
   })
 
   it('refuses a range too fine for its bucket instead of answering a prefix of it', () => {
@@ -228,7 +321,9 @@ describe('resolveRange', () => {
   })
 
   it('accepts a month of five-minute buckets — the honest ceiling is generous', () => {
-    expect(isRangeError(resolveRange({ from: START - 30 * DAY_MS, to: START, bucketSeconds: 300 }))).toBe(false)
+    expect(
+      isRangeError(resolveRange({ from: START - 30 * DAY_MS, to: START, bucketSeconds: 300 })),
+    ).toBe(false)
   })
 
   it('rejects a reversed range', () => {

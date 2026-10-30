@@ -25,7 +25,14 @@ const T0 = Date.UTC(2026, 7, 1, 10, 9, 4)
 function ledger(over: Partial<Ledger> = {}): Ledger {
   return {
     version: 1,
-    ladder: { outageKey: null, t0: null, rung: 'observe', enteredAt: 0, settleUntil: null, announcedAt: null },
+    ladder: {
+      outageKey: null,
+      t0: null,
+      rung: 'observe',
+      enteredAt: 0,
+      settleUntil: null,
+      announcedAt: null,
+    },
     actions: [],
     pending: null,
     v6: { lastUpTs: null, lastCheckedTs: null },
@@ -115,12 +122,17 @@ describe('classify', () => {
       { target: 'google', received: 5 },
       { target: 'quad9', received: 5 },
     ]
-    const input = armedInput({ record: record({ wanAnchors: anchors }), self: self({ wanAnchors: anchors }) })
+    const input = armedInput({
+      record: record({ wanAnchors: anchors }),
+      self: self({ wanAnchors: anchors }),
+    })
     expect(classify(input)).toBe('partial')
   })
 
   test('a reachable v6 anchor makes it v4-only, not a full WAN failure', () => {
-    const input = armedInput({ self: self({ wanAnchors: ALL_WAN_DOWN, v6: { target: 'v6', received: 5 } }) })
+    const input = armedInput({
+      self: self({ wanAnchors: ALL_WAN_DOWN, v6: { target: 'v6', received: 5 } }),
+    })
     expect(classify(input)).toBe('v4_only_down')
   })
 
@@ -143,29 +155,48 @@ describe('classify', () => {
   })
 
   test('an unreachable gateway is named as the router, not the WAN', () => {
-    const input = armedInput({ self: self({ wanAnchors: ALL_WAN_DOWN, gateway: { target: 'gateway', received: 0 } }) })
+    const input = armedInput({
+      self: self({ wanAnchors: ALL_WAN_DOWN, gateway: { target: 'gateway', received: 0 } }),
+    })
     expect(classify(input)).toBe('local_link_down')
   })
 
   test('a line not in showtime cannot be helped locally', () => {
-    const carrier: CarrierEvidence = { stale: false, lineStatus: 'Down', showtimeStartS: null, freshPollAgeS: 5 }
+    const carrier: CarrierEvidence = {
+      stale: false,
+      lineStatus: 'Down',
+      showtimeStartS: null,
+      freshPollAgeS: 5,
+    }
     expect(classify(armedInput({ carrier }))).toBe('carrier_down')
   })
 
   /** Absence of carrier evidence is not evidence. The poller stores under half its due polls. */
   test('a stale carrier reading does not veto anything', () => {
-    const carrier: CarrierEvidence = { stale: true, lineStatus: 'Down', showtimeStartS: null, freshPollAgeS: null }
+    const carrier: CarrierEvidence = {
+      stale: true,
+      lineStatus: 'Down',
+      showtimeStartS: null,
+      freshPollAgeS: null,
+    }
     expect(classify(armedInput({ carrier }))).toBe('full_wan_down')
   })
 
   test('measuring some other uplink outranks every WAN class', () => {
-    expect(classify(armedInput({ self: self({ wanAnchors: ALL_WAN_DOWN, onHomeLine: 0 }) }))).toBe('off_home_line')
-    expect(classify(armedInput({ self: self({ wanAnchors: ALL_WAN_DOWN, onHomeLine: null }) }))).toBe('off_home_line')
+    expect(classify(armedInput({ self: self({ wanAnchors: ALL_WAN_DOWN, onHomeLine: 0 }) }))).toBe(
+      'off_home_line',
+    )
+    expect(
+      classify(armedInput({ self: self({ wanAnchors: ALL_WAN_DOWN, onHomeLine: null }) })),
+    ).toBe('off_home_line')
   })
 
   /** Disagreement is never resolved by believing the alarming source. */
   test('a self-probe that disagrees with the record does not produce an outage class', () => {
-    const input = armedInput({ record: record({ newestSampleTs: T0 + 240_000 }), self: self({ wanAnchors: ALL_WAN_DOWN }) })
+    const input = armedInput({
+      record: record({ newestSampleTs: T0 + 240_000 }),
+      self: self({ wanAnchors: ALL_WAN_DOWN }),
+    })
     expect(classify(input)).toBe('partial')
   })
 
@@ -251,7 +282,12 @@ describe('decide', () => {
   })
 
   test('a line that just resynced is given a moment', () => {
-    const carrier: CarrierEvidence = { stale: false, lineStatus: 'Up', showtimeStartS: 23, freshPollAgeS: 5 }
+    const carrier: CarrierEvidence = {
+      stale: false,
+      lineStatus: 'Up',
+      showtimeStartS: 23,
+      freshPollAgeS: 5,
+    }
     expect(decide(armedInput({ carrier })).blockedBy).toContain('resync_grace')
   })
 
@@ -273,7 +309,9 @@ describe('decide', () => {
 
   test('a pending action is treated as having fired', () => {
     const decision = decide(
-      armedInput({ ledger: ledger({ pending: { ts: T0, kind: 'reconnect', outageKey: 'wan:1' } }) }),
+      armedInput({
+        ledger: ledger({ pending: { ts: T0, kind: 'reconnect', outageKey: 'wan:1' } }),
+      }),
     )
     expect(decision.state).toBe('settling')
     expect(decision.action).toBe('none')
@@ -295,7 +333,10 @@ describe('decide', () => {
       outageKey: `wan:${i}`,
       outcome: 'executed' as const,
     }))
-    const decision = decide({ ...input, ledger: ledger({ actions, v6: { lastUpTs: input.now, lastCheckedTs: input.now } }) })
+    const decision = decide({
+      ...input,
+      ledger: ledger({ actions, v6: { lastUpTs: input.now, lastCheckedTs: input.now } }),
+    })
     expect(decision.blockedBy).toContain('reconnect_rate_limit')
   })
 })
@@ -312,7 +353,14 @@ describe('the reboot rung', () => {
       self: { ...input.self!, probeTs: now },
       carrier: { stale: false, lineStatus: 'Up', showtimeStartS: 4000, freshPollAgeS: 10 },
       ledger: ledger({
-        ladder: { outageKey: `wan:${T0}`, t0: T0, rung: 'reconnect', enteredAt: T0, settleUntil: null, announcedAt: null },
+        ladder: {
+          outageKey: `wan:${T0}`,
+          t0: T0,
+          rung: 'reconnect',
+          enteredAt: T0,
+          settleUntil: null,
+          announcedAt: null,
+        },
         v6: { lastUpTs: now - 60_000, lastCheckedTs: now },
       }),
       ...over,
@@ -343,7 +391,13 @@ describe('the reboot rung', () => {
 
     // …and refuses while it is still standing, which is what makes the abort
     // window real rather than nominal.
-    const tooSoon = decide({ ...input, ledger: { ...input.ledger, ladder: { ...input.ledger.ladder, announcedAt: input.now - 1_000 } } })
+    const tooSoon = decide({
+      ...input,
+      ledger: {
+        ...input.ledger,
+        ladder: { ...input.ledger.ladder, announcedAt: input.now - 1_000 },
+      },
+    })
     expect(tooSoon.blockedBy).toContain('announce_pending')
     expect(tooSoon.action).toBe('none')
   })
@@ -352,7 +406,10 @@ describe('the reboot rung', () => {
     const input = rebootDue()
     const decision = decide({
       ...input,
-      ledger: { ...input.ledger, ladder: { ...input.ledger.ladder, rung: 'observe', announcedAt: input.now - 61_000 } },
+      ledger: {
+        ...input.ledger,
+        ladder: { ...input.ledger.ladder, rung: 'observe', announcedAt: input.now - 61_000 },
+      },
     })
     // At this point the reconnect rung is what is due instead.
     expect(decision.rung).toBe('reconnect')
@@ -363,7 +420,10 @@ describe('the reboot rung', () => {
     const decision = decide({
       ...input,
       carrier: { stale: false, lineStatus: 'Up', showtimeStartS: 4000, freshPollAgeS: 900 },
-      ledger: { ...input.ledger, ladder: { ...input.ledger.ladder, announcedAt: input.now - 61_000 } },
+      ledger: {
+        ...input.ledger,
+        ladder: { ...input.ledger.ladder, announcedAt: input.now - 61_000 },
+      },
     })
     expect(decision.blockedBy).toContain('no_fresh_poll')
   })
@@ -373,7 +433,10 @@ describe('the reboot rung', () => {
     const decision = decide({
       ...input,
       policy: { ...input.policy, rebootEnabled: false },
-      ledger: { ...input.ledger, ladder: { ...input.ledger.ladder, announcedAt: input.now - 61_000 } },
+      ledger: {
+        ...input.ledger,
+        ladder: { ...input.ledger.ladder, announcedAt: input.now - 61_000 },
+      },
     })
     expect(decision.blockedBy).toContain('reboot_disabled')
   })
@@ -397,7 +460,10 @@ describe('the reboot rung', () => {
     const decision = decide({
       ...v4Only,
       record: { ...v4Only.record!, newestSampleTs: v4Only.now - 10_000 },
-      ledger: { ...input.ledger, ladder: { ...input.ledger.ladder, announcedAt: v4Only.now - 61_000 } },
+      ledger: {
+        ...input.ledger,
+        ladder: { ...input.ledger.ladder, announcedAt: v4Only.now - 61_000 },
+      },
     })
     expect(decision.outageClass).toBe('v4_only_down')
     expect(decision.blockedBy).toContain('reboot_on_v4_only_disabled')
@@ -405,8 +471,12 @@ describe('the reboot rung', () => {
 
   /** Every rung must fire strictly before the ladder gives up, or ordering decides. */
   test('no rung becomes due on the same tick the ladder exhausts', () => {
-    expect(DEFAULT_POLICY.rebootAtS + DEFAULT_POLICY.announceLeadS).toBeLessThan(DEFAULT_POLICY.exhaustAtS)
-    expect(DEFAULT_POLICY.rebootAtSv4Only + DEFAULT_POLICY.announceLeadS).toBeLessThan(DEFAULT_POLICY.exhaustAtS)
+    expect(DEFAULT_POLICY.rebootAtS + DEFAULT_POLICY.announceLeadS).toBeLessThan(
+      DEFAULT_POLICY.exhaustAtS,
+    )
+    expect(DEFAULT_POLICY.rebootAtSv4Only + DEFAULT_POLICY.announceLeadS).toBeLessThan(
+      DEFAULT_POLICY.exhaustAtS,
+    )
     expect(DEFAULT_POLICY.observeS).toBeLessThan(DEFAULT_POLICY.rebootAtS)
   })
 })
@@ -418,7 +488,11 @@ describe('the reboot rung', () => {
  * is: one event it should act on, three it must leave alone.
  */
 describe('replaying the record', () => {
-  function atOutage(startedAt: number, elapsedS: number, over: Partial<LadderInput> = {}): LadderInput {
+  function atOutage(
+    startedAt: number,
+    elapsedS: number,
+    over: Partial<LadderInput> = {},
+  ): LadderInput {
     const now = startedAt + elapsedS * 1000
     const cycles = Math.floor(elapsedS / 30)
     const input = armedInput()
@@ -558,7 +632,11 @@ describe('replaying the record', () => {
     const decision = decide({
       ...input,
       self: { ...input.self!, gateway: { target: 'gateway', received: 0 } },
-      record: { ...input.record!, gateway: { target: 'gateway', received: 0 }, ongoingGatewayOutage: { startedAt } },
+      record: {
+        ...input.record!,
+        gateway: { target: 'gateway', received: 0 },
+        ongoingGatewayOutage: { startedAt },
+      },
     })
     expect(decision.action).toBe('escalate')
     expect(decision.rung).toBe('exhausted')
@@ -621,14 +699,23 @@ describe('replaying the record', () => {
 describe('the ledger the decision writes', () => {
   test('a healthy tick starts the clean clock and a non-healthy one stops it', () => {
     const now = T0 + 250_000
-    const clean = decide(armedInput({ now, record: record({ newestSampleTs: now }), self: self({ probeTs: now }) }))
+    const clean = decide(
+      armedInput({ now, record: record({ newestSampleTs: now }), self: self({ probeTs: now }) }),
+    )
     expect(clean.outageClass).toBe('healthy')
     expect(clean.ledger.healthySince).toBe(now)
 
     // Keeps the v6 baseline armedInput seeds: without it the class is
     // `wan_down_v6_unknown`, which is a different (and equally non-healthy)
     // answer for a reason this test is not about.
-    const down = decide(armedInput({ ledger: ledger({ healthySince: T0, v6: { lastUpTs: T0 + 190_000, lastCheckedTs: T0 + 250_000 } }) }))
+    const down = decide(
+      armedInput({
+        ledger: ledger({
+          healthySince: T0,
+          v6: { lastUpTs: T0 + 190_000, lastCheckedTs: T0 + 250_000 },
+        }),
+      }),
+    )
     expect(down.outageClass).toBe('full_wan_down')
     expect(down.ledger.healthySince).toBeNull()
   })
@@ -640,7 +727,10 @@ describe('the ledger the decision writes', () => {
     const tooSoon = decide(
       armedInput({
         ...base,
-        ledger: ledger({ consecutiveActions: 2, healthySince: now - (DEFAULT_POLICY.latchClearAfterCleanS - 1) * 1000 }),
+        ledger: ledger({
+          consecutiveActions: 2,
+          healthySince: now - (DEFAULT_POLICY.latchClearAfterCleanS - 1) * 1000,
+        }),
       }),
     )
     expect(tooSoon.ledger.consecutiveActions).toBe(2)
@@ -648,7 +738,10 @@ describe('the ledger the decision writes', () => {
     const longEnough = decide(
       armedInput({
         ...base,
-        ledger: ledger({ consecutiveActions: 2, healthySince: now - DEFAULT_POLICY.latchClearAfterCleanS * 1000 }),
+        ledger: ledger({
+          consecutiveActions: 2,
+          healthySince: now - DEFAULT_POLICY.latchClearAfterCleanS * 1000,
+        }),
       }),
     )
     expect(longEnough.ledger.consecutiveActions).toBe(0)
@@ -660,11 +753,18 @@ describe('the ledger the decision writes', () => {
     // resume a total, or half an hour of flapping clears a latch that a
     // continuously clean half hour is supposed to earn.
     const now = T0 + 3_600_000
-    const down = decide(armedInput({ now, ledger: ledger({ consecutiveActions: 2, healthySince: now - 1_700_000 }) }))
+    const down = decide(
+      armedInput({ now, ledger: ledger({ consecutiveActions: 2, healthySince: now - 1_700_000 }) }),
+    )
     expect(down.ledger.healthySince).toBeNull()
 
     const up = decide(
-      armedInput({ now: now + 30_000, record: record({ newestSampleTs: now + 30_000 }), self: self({ probeTs: now + 30_000 }), ledger: down.ledger }),
+      armedInput({
+        now: now + 30_000,
+        record: record({ newestSampleTs: now + 30_000 }),
+        self: self({ probeTs: now + 30_000 }),
+        ledger: down.ledger,
+      }),
     )
     expect(up.ledger.healthySince).toBe(now + 30_000)
     expect(up.ledger.consecutiveActions).toBe(2)
@@ -673,9 +773,15 @@ describe('the ledger the decision writes', () => {
   test('an authorised action is written ahead before it can be performed', () => {
     const out = decide(armedInput())
     expect(out.action).toBe('reconnect')
-    expect(out.ledger.pending).toEqual({ ts: out.ledger.pending?.ts ?? 0, kind: 'reconnect', outageKey: `wan:${T0}` })
+    expect(out.ledger.pending).toEqual({
+      ts: out.ledger.pending?.ts ?? 0,
+      kind: 'reconnect',
+      outageKey: `wan:${T0}`,
+    })
     expect(out.ledger.consecutiveActions).toBe(1)
-    expect(out.ledger.ladder.settleUntil).toBe(armedInput().now + DEFAULT_POLICY.reconnectSettleS * 1000)
+    expect(out.ledger.ladder.settleUntil).toBe(
+      armedInput().now + DEFAULT_POLICY.reconnectSettleS * 1000,
+    )
   })
 
   test('a suppressed action still advances the ladder but counts against nothing', () => {
@@ -697,7 +803,20 @@ describe('the ledger the decision writes', () => {
   })
 
   test('the ladder climbs and never descends', () => {
-    const out = decide(armedInput({ ledger: ledger({ ladder: { outageKey: `wan:${T0}`, t0: T0, rung: 'reboot', enteredAt: T0, settleUntil: null, announcedAt: null } }) }))
+    const out = decide(
+      armedInput({
+        ledger: ledger({
+          ladder: {
+            outageKey: `wan:${T0}`,
+            t0: T0,
+            rung: 'reboot',
+            enteredAt: T0,
+            settleUntil: null,
+            announcedAt: null,
+          },
+        }),
+      }),
+    )
     // The decision at 250s is the reconnect rung; the ledger already stands at
     // reboot. Slipping back would hand out a second reboot window per outage,
     // because `ladder_not_advanced` only refuses while the rung reads `observe`.
@@ -708,14 +827,23 @@ describe('the ledger the decision writes', () => {
     const first = decide(armedInput())
     expect(first.ledger.ladder.t0).toBe(T0)
 
-    const later = decide(armedInput({ now: T0 + 400_000, ledger: { ...first.ledger, pending: null } }))
+    const later = decide(
+      armedInput({ now: T0 + 400_000, ledger: { ...first.ledger, pending: null } }),
+    )
     expect(later.ledger.ladder.t0).toBe(T0)
     expect(later.ledger.ladder.outageKey).toBe(`wan:${T0}`)
   })
 
   test('recovering after an action arms the cooldown; recovering on its own does not', () => {
     const now = T0 + 600_000
-    const laddered = { outageKey: `wan:${T0}`, t0: T0, rung: 'reconnect' as const, enteredAt: T0, settleUntil: null, announcedAt: null }
+    const laddered = {
+      outageKey: `wan:${T0}`,
+      t0: T0,
+      rung: 'reconnect' as const,
+      enteredAt: T0,
+      settleUntil: null,
+      announcedAt: null,
+    }
     const healthy = { now, record: record({ newestSampleTs: now }), self: self({ probeTs: now }) }
     // Healthy long enough that the recovery counts as held — otherwise the
     // ladder is deliberately kept standing and none of this applies yet.
@@ -724,13 +852,23 @@ describe('the ledger the decision writes', () => {
     const afterAction = decide(
       armedInput({
         ...healthy,
-        ledger: ledger({ ladder: laddered, healthySince: held, actions: [{ ts: T0 + 240_000, kind: 'reconnect', outageKey: `wan:${T0}`, outcome: 'executed' }] }),
+        ledger: ledger({
+          ladder: laddered,
+          healthySince: held,
+          actions: [
+            { ts: T0 + 240_000, kind: 'reconnect', outageKey: `wan:${T0}`, outcome: 'executed' },
+          ],
+        }),
       }),
     )
-    expect(afterAction.ledger.postActionCooldownUntil).toBe(now + DEFAULT_POLICY.postActionCooldownS * 1000)
+    expect(afterAction.ledger.postActionCooldownUntil).toBe(
+      now + DEFAULT_POLICY.postActionCooldownS * 1000,
+    )
     expect(afterAction.ledger.ladder.t0).toBeNull()
 
-    const selfHealed = decide(armedInput({ ...healthy, ledger: ledger({ ladder: laddered, healthySince: held }) }))
+    const selfHealed = decide(
+      armedInput({ ...healthy, ledger: ledger({ ladder: laddered, healthySince: held }) }),
+    )
     expect(selfHealed.note).toContain('self_recovery')
     expect(selfHealed.ledger.postActionCooldownUntil).toBeNull()
   })
@@ -758,7 +896,12 @@ describe('the ledger the decision writes', () => {
     // An anchor that answers this tick must not be able to vouch for itself:
     // classification reads the baseline as it stood, and only then is the
     // reading recorded.
-    const out = decide(armedInput({ now, self: self({ probeTs: now, wanAnchors: ALL_WAN_DOWN, v6: { target: 'v6', received: 3 } }) }))
+    const out = decide(
+      armedInput({
+        now,
+        self: self({ probeTs: now, wanAnchors: ALL_WAN_DOWN, v6: { target: 'v6', received: 3 } }),
+      }),
+    )
     expect(out.outageClass).toBe('v4_only_down')
     expect(out.ledger.v6.lastUpTs).toBe(now)
     expect(out.ledger.v6.lastCheckedTs).toBe(now)
@@ -766,15 +909,30 @@ describe('the ledger the decision writes', () => {
 
   test('an unanswered v6 anchor updates the check time but not the baseline', () => {
     const now = T0 + 250_000
-    const out = decide(armedInput({ now, ledger: ledger({ v6: { lastUpTs: T0 - 10_000, lastCheckedTs: T0 - 10_000 } }) }))
+    const out = decide(
+      armedInput({
+        now,
+        ledger: ledger({ v6: { lastUpTs: T0 - 10_000, lastCheckedTs: T0 - 10_000 } }),
+      }),
+    )
     expect(out.ledger.v6.lastUpTs).toBe(T0 - 10_000)
     expect(out.ledger.v6.lastCheckedTs).toBe(now)
   })
 
   test('action history is pruned past every window that reads it', () => {
     const now = T0 + 250_000
-    const stale = { ts: now - 3 * 86_400_000, kind: 'reboot' as const, outageKey: 'wan:old', outcome: 'executed' as const }
-    const recent = { ts: now - 86_400_000 + 60_000, kind: 'reboot' as const, outageKey: 'wan:newer', outcome: 'executed' as const }
+    const stale = {
+      ts: now - 3 * 86_400_000,
+      kind: 'reboot' as const,
+      outageKey: 'wan:old',
+      outcome: 'executed' as const,
+    }
+    const recent = {
+      ts: now - 86_400_000 + 60_000,
+      kind: 'reboot' as const,
+      outageKey: 'wan:newer',
+      outcome: 'executed' as const,
+    }
     const out = decide(armedInput({ now, ledger: ledger({ actions: [stale, recent] }) }))
     // The 24h budget and the 6h spacing are the longest lookbacks; anything
     // beyond two days cannot change a decision and only grows the file.
@@ -783,11 +941,30 @@ describe('the ledger the decision writes', () => {
 
   test('an escalation records when it happened, so the quiet period can hold', () => {
     const now = T0 + 950_000
-    const out = decide(armedInput({ now, record: record({ newestSampleTs: now, wanAnchors: ALL_WAN_DOWN, ongoingWanOutage: { startedAt: T0, cycles: 30 } }) }))
+    const out = decide(
+      armedInput({
+        now,
+        record: record({
+          newestSampleTs: now,
+          wanAnchors: ALL_WAN_DOWN,
+          ongoingWanOutage: { startedAt: T0, cycles: 30 },
+        }),
+      }),
+    )
     expect(out.action).toBe('escalate')
     expect(out.ledger.lastEscalationTs).toBe(now)
 
-    const again = decide(armedInput({ now: now + 30_000, ledger: out.ledger, record: record({ newestSampleTs: now + 30_000, wanAnchors: ALL_WAN_DOWN, ongoingWanOutage: { startedAt: T0, cycles: 31 } }) }))
+    const again = decide(
+      armedInput({
+        now: now + 30_000,
+        ledger: out.ledger,
+        record: record({
+          newestSampleTs: now + 30_000,
+          wanAnchors: ALL_WAN_DOWN,
+          ongoingWanOutage: { startedAt: T0, cycles: 31 },
+        }),
+      }),
+    )
     expect(again.action).toBe('none')
   })
 })
@@ -804,7 +981,16 @@ describe('what is worth waking a human for', () => {
     decide(
       armedInput({
         now: T0 + 950_000,
-        ledger: ledger({ ladder: { outageKey: `wan:${T0}`, t0: T0, rung: 'reconnect', enteredAt: T0, settleUntil: null, announcedAt: null } }),
+        ledger: ledger({
+          ladder: {
+            outageKey: `wan:${T0}`,
+            t0: T0,
+            rung: 'reconnect',
+            enteredAt: T0,
+            settleUntil: null,
+            announcedAt: null,
+          },
+        }),
         ...over,
       }),
     )
@@ -839,8 +1025,16 @@ describe('what is worth waking a human for', () => {
   test('a dead gateway escalates, and says nothing about a ladder it never ran', () => {
     const now = T0 + 950_000
     const out = exhausted({
-      self: self({ probeTs: now, gateway: { target: 'gateway', received: 0 }, wanAnchors: ALL_WAN_DOWN }),
-      record: record({ newestSampleTs: now, gateway: { target: 'gateway', received: 0 }, wanAnchors: ALL_WAN_DOWN }),
+      self: self({
+        probeTs: now,
+        gateway: { target: 'gateway', received: 0 },
+        wanAnchors: ALL_WAN_DOWN,
+      }),
+      record: record({
+        newestSampleTs: now,
+        gateway: { target: 'gateway', received: 0 },
+        wanAnchors: ALL_WAN_DOWN,
+      }),
     })
     expect(out.outageClass).toBe('local_link_down')
     expect(out.action).toBe('escalate')
@@ -852,13 +1046,26 @@ describe('what is worth waking a human for', () => {
   })
 
   test('but shadow mode still escalates, because a notification is not a write', () => {
-    expect(exhausted({ policy: { ...DEFAULT_POLICY, armed: false }, capability: 'null' }).action).toBe('escalate')
+    expect(
+      exhausted({ policy: { ...DEFAULT_POLICY, armed: false }, capability: 'null' }).action,
+    ).toBe('escalate')
   })
 })
 
 describe('closing a write-ahead entry', () => {
   const pending = { ts: T0 + 240_000, kind: 'reconnect' as const, outageKey: `wan:${T0}` }
-  const written = ledger({ pending, consecutiveActions: 1, ladder: { outageKey: `wan:${T0}`, t0: T0, rung: 'reconnect', enteredAt: T0, settleUntil: T0 + 330_000, announcedAt: null } })
+  const written = ledger({
+    pending,
+    consecutiveActions: 1,
+    ladder: {
+      outageKey: `wan:${T0}`,
+      t0: T0,
+      rung: 'reconnect',
+      enteredAt: T0,
+      settleUntil: T0 + 330_000,
+      announcedAt: null,
+    },
+  })
 
   test('an executed action clears the entry and keeps its cost', () => {
     const after = recordOutcome(written, { ...pending, outcome: 'executed' })
@@ -886,8 +1093,13 @@ describe('closing a write-ahead entry', () => {
 
   test('two actions without a clean window latch the watchdog', () => {
     const first = recordOutcome(written, { ...pending, outcome: 'executed' })
-    const second = recordOutcome({ ...first, pending, consecutiveActions: 2 }, { ...pending, kind: 'reboot', outcome: 'executed' })
-    const out = decide(armedInput({ now: T0 + 600_000, ledger: { ...second, ladder: written.ladder } }))
+    const second = recordOutcome(
+      { ...first, pending, consecutiveActions: 2 },
+      { ...pending, kind: 'reboot', outcome: 'executed' },
+    )
+    const out = decide(
+      armedInput({ now: T0 + 600_000, ledger: { ...second, ladder: written.ladder } }),
+    )
     expect(out.state).toBe('latched')
     expect(out.action).toBe('none')
   })
@@ -908,23 +1120,36 @@ describe('closing a write-ahead entry', () => {
  * exists for.
  */
 describe('a recovery has to hold', () => {
-  const laddered = { outageKey: `wan:${T0}`, t0: T0, rung: 'observe' as const, enteredAt: T0, settleUntil: null, announcedAt: null }
+  const laddered = {
+    outageKey: `wan:${T0}`,
+    t0: T0,
+    rung: 'observe' as const,
+    enteredAt: T0,
+    settleUntil: null,
+    announcedAt: null,
+  }
   const now = T0 + 131_000
   const looksBetter = (over: Partial<Ledger> = {}) =>
     decide(
       armedInput({
         now,
         // One anchor answered; the other two did not. That is `partial`.
-        record: record({ newestSampleTs: now, wanAnchors: [
-          { target: 'cloudflare', received: 0 },
-          { target: 'google', received: 0 },
-          { target: 'quad9', received: 2 },
-        ] }),
-        self: self({ probeTs: now, wanAnchors: [
-          { target: 'cloudflare', received: 0 },
-          { target: 'google', received: 0 },
-          { target: 'quad9', received: 1 },
-        ] }),
+        record: record({
+          newestSampleTs: now,
+          wanAnchors: [
+            { target: 'cloudflare', received: 0 },
+            { target: 'google', received: 0 },
+            { target: 'quad9', received: 2 },
+          ],
+        }),
+        self: self({
+          probeTs: now,
+          wanAnchors: [
+            { target: 'cloudflare', received: 0 },
+            { target: 'google', received: 0 },
+            { target: 'quad9', received: 1 },
+          ],
+        }),
         ledger: ledger({ ladder: laddered, ...over }),
       }),
     )
@@ -965,12 +1190,14 @@ describe('a recovery has to hold', () => {
     const first = looksBetter()
     expect(first.ledger.healthySince).toBe(now)
     const downAgain = decide(armedInput({ now: now + 15_000, ledger: first.ledger }))
-    const secondAttempt = decide(armedInput({
-      now: now + 30_000,
-      record: record({ newestSampleTs: now + 30_000 }),
-      self: self({ probeTs: now + 30_000 }),
-      ledger: downAgain.ledger,
-    }))
+    const secondAttempt = decide(
+      armedInput({
+        now: now + 30_000,
+        record: record({ newestSampleTs: now + 30_000 }),
+        self: self({ probeTs: now + 30_000 }),
+        ledger: downAgain.ledger,
+      }),
+    )
     // Not resumed from the first attempt: 30 s of flapping must not add up to a
     // sustained recovery.
     expect(secondAttempt.ledger.healthySince).toBe(now + 30_000)
@@ -1002,7 +1229,17 @@ describe('preconditions that had no test', () => {
     // cannot come from `deriveOnHomeLine`, which requires Ethernet. That is the
     // point — this blocker is the second layer, for a collector whose verdict
     // and whose facts disagree.
-    const out = decide(armedInput({ self: self({ probeTs: armedNow, wanAnchors: ALL_WAN_DOWN, onHomeLine: 1, pathClass: 'wifi', v6: { target: 'v6', received: 0 } }) }))
+    const out = decide(
+      armedInput({
+        self: self({
+          probeTs: armedNow,
+          wanAnchors: ALL_WAN_DOWN,
+          onHomeLine: 1,
+          pathClass: 'wifi',
+          v6: { target: 'v6', received: 0 },
+        }),
+      }),
+    )
     expect(out.blockedBy).toContain('not_ethernet')
     expect(out.action).toBe('none')
   })
@@ -1014,7 +1251,12 @@ describe('preconditions that had no test', () => {
     // healthy home router in an empty house.
     const out = decide(
       armedInput({
-        self: self({ probeTs: armedNow, wanAnchors: ALL_WAN_DOWN, gatewayAddr: '192.168.1.254', v6: { target: 'v6', received: 0 } }),
+        self: self({
+          probeTs: armedNow,
+          wanAnchors: ALL_WAN_DOWN,
+          gatewayAddr: '192.168.1.254',
+          v6: { target: 'v6', received: 0 },
+        }),
       }),
     )
     expect(out.blockedBy).toContain('gateway_addr_mismatch')
@@ -1022,16 +1264,40 @@ describe('preconditions that had no test', () => {
   })
 
   test('the record disagreeing about the home line is its own refusal', () => {
-    const out = decide(armedInput({ record: record({ newestSampleTs: armedNow - 10_000, wanAnchors: ALL_WAN_DOWN, onHomeLine: null, ongoingWanOutage: downSince }) }))
+    const out = decide(
+      armedInput({
+        record: record({
+          newestSampleTs: armedNow - 10_000,
+          wanAnchors: ALL_WAN_DOWN,
+          onHomeLine: null,
+          ongoingWanOutage: downSince,
+        }),
+      }),
+    )
     expect(out.blockedBy).toContain('off_home_line_record')
   })
 
   test('an unreachable gateway blocks from either source', () => {
-    const bySelf = decide(armedInput({ self: self({ probeTs: armedNow, wanAnchors: ALL_WAN_DOWN, gateway: { target: 'gateway', received: 0 } }) }))
+    const bySelf = decide(
+      armedInput({
+        self: self({
+          probeTs: armedNow,
+          wanAnchors: ALL_WAN_DOWN,
+          gateway: { target: 'gateway', received: 0 },
+        }),
+      }),
+    )
     expect(bySelf.blockedBy).toContain('gateway_down')
 
     const byRecord = decide(
-      armedInput({ record: record({ newestSampleTs: armedNow - 10_000, wanAnchors: ALL_WAN_DOWN, gateway: { target: 'gateway', received: 0 }, ongoingWanOutage: downSince }) }),
+      armedInput({
+        record: record({
+          newestSampleTs: armedNow - 10_000,
+          wanAnchors: ALL_WAN_DOWN,
+          gateway: { target: 'gateway', received: 0 },
+          ongoingWanOutage: downSince,
+        }),
+      }),
     )
     expect(byRecord.blockedBy).toContain('gateway_down_record')
   })
@@ -1039,7 +1305,14 @@ describe('preconditions that had no test', () => {
   test('a recovery that failed again cannot buy a fresh action budget', () => {
     // The laundering this prevents: recover for two cycles, fail again, and the
     // new outage would otherwise be a fresh ladder with a full budget.
-    const out = decide(armedInput({ ledger: ledger({ postActionCooldownUntil: armedNow + 60_000, v6: { lastUpTs: armedNow, lastCheckedTs: armedNow } }) }))
+    const out = decide(
+      armedInput({
+        ledger: ledger({
+          postActionCooldownUntil: armedNow + 60_000,
+          v6: { lastUpTs: armedNow, lastCheckedTs: armedNow },
+        }),
+      }),
+    )
     expect(out.blockedBy).toContain('post_action_cooldown')
     expect(out.action).toBe('none')
   })
@@ -1064,8 +1337,19 @@ describe('preconditions that had no test', () => {
   test('every non-actionable class refuses by its own name', () => {
     const offLine = decide(
       armedInput({
-        self: self({ probeTs: armedNow, wanAnchors: ALL_WAN_DOWN, onHomeLine: 0, pathClass: 'wifi', v6: { target: 'v6', received: 0 } }),
-        record: record({ newestSampleTs: armedNow - 10_000, wanAnchors: ALL_WAN_DOWN, onHomeLine: false, ongoingWanOutage: downSince }),
+        self: self({
+          probeTs: armedNow,
+          wanAnchors: ALL_WAN_DOWN,
+          onHomeLine: 0,
+          pathClass: 'wifi',
+          v6: { target: 'v6', received: 0 },
+        }),
+        record: record({
+          newestSampleTs: armedNow - 10_000,
+          wanAnchors: ALL_WAN_DOWN,
+          onHomeLine: false,
+          ongoingWanOutage: downSince,
+        }),
       }),
     )
     expect(offLine.outageClass).toBe('off_home_line')
@@ -1074,7 +1358,9 @@ describe('preconditions that had no test', () => {
     // A line out of showtime cannot complete a re-dial and will not gain
     // showtime from a reboot — the one thing carrier evidence may veto.
     const carrierDown = decide(
-      armedInput({ carrier: { stale: false, lineStatus: 'Down', showtimeStartS: null, freshPollAgeS: 30 } }),
+      armedInput({
+        carrier: { stale: false, lineStatus: 'Down', showtimeStartS: null, freshPollAgeS: 30 },
+      }),
     )
     expect(carrierDown.outageClass).toBe('carrier_down')
     expect(carrierDown.blockedBy).toContain('class_carrier_down')
@@ -1096,7 +1382,16 @@ describe('preconditions that had no test', () => {
       record: null,
       self: null,
       now: T0 + 950_000,
-      ledger: ledger({ ladder: { outageKey: `wan:${T0}`, t0: T0, rung: 'reconnect', enteredAt: T0, settleUntil: null, announcedAt: null } }),
+      ledger: ledger({
+        ladder: {
+          outageKey: `wan:${T0}`,
+          t0: T0,
+          rung: 'reconnect',
+          enteredAt: T0,
+          settleUntil: null,
+          announcedAt: null,
+        },
+      }),
     })
     const out = decide(blind)
     expect(out.outageClass).toBe('no_evidence')
@@ -1118,7 +1413,14 @@ describe('the reboot budget, which nothing asserted', () => {
       self: { ...input.self!, probeTs: now },
       carrier: { stale: false, lineStatus: 'Up', showtimeStartS: 4000, freshPollAgeS: 10 },
       ledger: ledger({
-        ladder: { outageKey: `wan:${T0}`, t0: T0, rung: 'reconnect', enteredAt: T0, settleUntil: null, announcedAt: T0 + 200_000 },
+        ladder: {
+          outageKey: `wan:${T0}`,
+          t0: T0,
+          rung: 'reconnect',
+          enteredAt: T0,
+          settleUntil: null,
+          announcedAt: T0 + 200_000,
+        },
         v6: { lastUpTs: now - 60_000, lastCheckedTs: now },
       }),
       ...over,
@@ -1127,7 +1429,12 @@ describe('the reboot budget, which nothing asserted', () => {
 
   test('two reboots in a day is the cap, and the third is refused', () => {
     const input = rebootDue()
-    const actions = [1, 2].map((i) => ({ ts: input.now - i * 7 * 3_600_000, kind: 'reboot' as const, outageKey: `wan:x${i}`, outcome: 'executed' as const }))
+    const actions = [1, 2].map((i) => ({
+      ts: input.now - i * 7 * 3_600_000,
+      kind: 'reboot' as const,
+      outageKey: `wan:x${i}`,
+      outcome: 'executed' as const,
+    }))
     const out = decide({ ...input, ledger: { ...input.ledger, actions } })
     expect(out.blockedBy).toContain('reboot_rate_limit')
     expect(out.action).toBe('none')
@@ -1135,7 +1442,14 @@ describe('the reboot budget, which nothing asserted', () => {
 
   test('two reboots closer together than six hours is refused on spacing alone', () => {
     const input = rebootDue()
-    const actions = [{ ts: input.now - 3_600_000, kind: 'reboot' as const, outageKey: 'wan:earlier', outcome: 'executed' as const }]
+    const actions = [
+      {
+        ts: input.now - 3_600_000,
+        kind: 'reboot' as const,
+        outageKey: 'wan:earlier',
+        outcome: 'executed' as const,
+      },
+    ]
     const out = decide({ ...input, ledger: { ...input.ledger, actions } })
     expect(out.blockedBy).toContain('reboot_min_interval')
     // Not the daily cap — one reboot is well inside it. The two limits are
@@ -1148,7 +1462,12 @@ describe('the reboot budget, which nothing asserted', () => {
     // `recordOutcome` gives the latch increment back for these; the rate limits
     // read the actions array directly, so this asserts the other half.
     const input = rebootDue()
-    const actions = [1, 2].map((i) => ({ ts: input.now - i * 7 * 3_600_000, kind: 'reboot' as const, outageKey: `wan:x${i}`, outcome: 'not_executed' as const }))
+    const actions = [1, 2].map((i) => ({
+      ts: input.now - i * 7 * 3_600_000,
+      kind: 'reboot' as const,
+      outageKey: `wan:x${i}`,
+      outcome: 'not_executed' as const,
+    }))
     const out = decide({ ...input, ledger: { ...input.ledger, actions } })
     // Deliberately still counted: the budget is spent on *attempts*, because a
     // refusal that repeats is a router that cannot be read, and hammering it is
@@ -1171,9 +1490,23 @@ describe('the windows that hold a rung shut', () => {
     const out = decide(
       armedInput({
         now,
-        record: record({ newestSampleTs: now - 10_000, wanAnchors: ALL_WAN_DOWN, ongoingWanOutage: { startedAt: T0, cycles: 3 } }),
+        record: record({
+          newestSampleTs: now - 10_000,
+          wanAnchors: ALL_WAN_DOWN,
+          ongoingWanOutage: { startedAt: T0, cycles: 3 },
+        }),
         self: self({ probeTs: now, wanAnchors: ALL_WAN_DOWN, v6: { target: 'v6', received: 0 } }),
-        ledger: ledger({ ladder: { outageKey: `wan:${T0}`, t0: T0, rung: 'reconnect', enteredAt: T0, settleUntil: null, announcedAt: null }, v6: { lastUpTs: now - 60_000, lastCheckedTs: now } }),
+        ledger: ledger({
+          ladder: {
+            outageKey: `wan:${T0}`,
+            t0: T0,
+            rung: 'reconnect',
+            enteredAt: T0,
+            settleUntil: null,
+            announcedAt: null,
+          },
+          v6: { lastUpTs: now - 60_000, lastCheckedTs: now },
+        }),
       }),
     )
     // The gate is the branch, not a blocker: even with the ladder already
@@ -1191,10 +1524,21 @@ describe('the windows that hold a rung shut', () => {
       armedInput({
         now,
         policy: { ...DEFAULT_POLICY, armed: true, rebootEnabled: true },
-        record: record({ newestSampleTs: now - 10_000, wanAnchors: ALL_WAN_DOWN, ongoingWanOutage: { startedAt: T0, cycles: 9 } }),
+        record: record({
+          newestSampleTs: now - 10_000,
+          wanAnchors: ALL_WAN_DOWN,
+          ongoingWanOutage: { startedAt: T0, cycles: 9 },
+        }),
         self: self({ probeTs: now, wanAnchors: ALL_WAN_DOWN, v6: { target: 'v6', received: 0 } }),
         ledger: ledger({
-          ladder: { outageKey: `wan:${T0}`, t0: T0, rung: 'reboot', enteredAt: T0, settleUntil: null, announcedAt: null },
+          ladder: {
+            outageKey: `wan:${T0}`,
+            t0: T0,
+            rung: 'reboot',
+            enteredAt: T0,
+            settleUntil: null,
+            announcedAt: null,
+          },
           v6: { lastUpTs: now - 60_000, lastCheckedTs: now },
         }),
       }),
@@ -1210,7 +1554,14 @@ describe('the windows that hold a rung shut', () => {
     const out = decide({
       ...input,
       ledger: ledger({
-        actions: [{ ts: input.now - 600_000, kind: 'reconnect', outageKey: 'wan:earlier', outcome: 'executed' }],
+        actions: [
+          {
+            ts: input.now - 600_000,
+            kind: 'reconnect',
+            outageKey: 'wan:earlier',
+            outcome: 'executed',
+          },
+        ],
         v6: { lastUpTs: input.now, lastCheckedTs: input.now },
       }),
     })

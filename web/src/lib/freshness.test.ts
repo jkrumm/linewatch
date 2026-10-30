@@ -33,7 +33,11 @@ describe('latestSampleTs', () => {
   test('takes the newest across targets regardless of array order', () => {
     // One target that stopped reporting months ago must not decide the verdict for the ones still
     // running; `GET /api/status` promises no ordering on `lastSamples`.
-    const samples = [{ ts: NOW - 90 * 86_400_000 }, { ts: NOW - PROBE_CYCLE_MS }, { ts: NOW - 3600_000 }]
+    const samples = [
+      { ts: NOW - 90 * 86_400_000 },
+      { ts: NOW - PROBE_CYCLE_MS },
+      { ts: NOW - 3600_000 },
+    ]
     expect(latestSampleTs(samples)).toBe(NOW - PROBE_CYCLE_MS)
   })
 })

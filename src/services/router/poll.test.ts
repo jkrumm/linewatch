@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'bun:test'
 import { createTestDb } from '../../db/test-db.js'
-import { event, probeCycle, routerEthPort, routerHost, routerIntfSample, routerLineSample, routerWanSample } from '../../db/schema.js'
+import {
+  event,
+  probeCycle,
+  routerEthPort,
+  routerHost,
+  routerIntfSample,
+  routerLineSample,
+  routerWanSample,
+} from '../../db/schema.js'
 import {
   RouterBusyError,
   RouterOidError,
@@ -92,7 +100,12 @@ class FakeRouter implements RouterReader {
   private aged(oid: string, row: Record<string, string>): Record<string, string> {
     const elapsedS = Math.floor((this.clock() - (this.clockedAt[oid] ?? this.baselineAt)) / 1000)
     if (elapsedS <= 0) return row
-    const fields = oid === 'DEV2_DSL_LINE_STATS' ? ['showtimeStart'] : oid === 'DEV2_ADT_WAN' ? ['X_TP_Uptime', 'X_TP_UptimeV6'] : []
+    const fields =
+      oid === 'DEV2_DSL_LINE_STATS'
+        ? ['showtimeStart']
+        : oid === 'DEV2_ADT_WAN'
+          ? ['X_TP_Uptime', 'X_TP_UptimeV6']
+          : []
     if (fields.length === 0) return row
     const out = { ...row }
     for (const field of fields) {
@@ -156,7 +169,13 @@ describe('RouterPoller', () => {
     await poller.poll()
 
     expect(client.logins).toBe(2)
-    expect(db.select().from(routerLineSample).all().map((row) => row.ts)).toEqual([1_000, 601_000])
+    expect(
+      db
+        .select()
+        .from(routerLineSample)
+        .all()
+        .map((row) => row.ts),
+    ).toEqual([1_000, 601_000])
   })
 
   it('stores nothing when the login fails, leaving the gap visible', async () => {
@@ -293,7 +312,10 @@ describe('RouterPoller', () => {
     const summary = await poller.poll()
     expect(summary.outcome).toBe('partial')
     expect(summary.readsOk).toBe(2)
-    expect(summary.abandonedAt).toMatchObject({ oid: 'DEV2_ADT_WAN', reason: 'router session lost: socket closed' })
+    expect(summary.abandonedAt).toMatchObject({
+      oid: 'DEV2_ADT_WAN',
+      reason: 'router session lost: socket closed',
+    })
 
     expect(db.select().from(routerLineSample).all()).toHaveLength(1)
     // Nothing downstream of the failed read is invented.
@@ -310,7 +332,11 @@ describe('RouterPoller', () => {
     const { db, poller } = makePoller(client, () => 1_000)
     await poller.poll()
 
-    const notes = db.select().from(event).all().filter((row) => row.kind === 'note')
+    const notes = db
+      .select()
+      .from(event)
+      .all()
+      .filter((row) => row.kind === 'note')
     expect(notes).toHaveLength(1)
     expect(JSON.parse(notes[0]!.detail)).toMatchObject({
       source: 'router-poller',
@@ -325,7 +351,13 @@ describe('RouterPoller', () => {
   it('writes no outcome note for a clean poll, which evidences itself', async () => {
     const { db, poller } = makePoller(new FakeRouter(), () => 1_000)
     await poller.poll()
-    expect(db.select().from(event).all().filter((row) => row.kind === 'note')).toHaveLength(0)
+    expect(
+      db
+        .select()
+        .from(event)
+        .all()
+        .filter((row) => row.kind === 'note'),
+    ).toHaveLength(0)
   })
 
   /**
@@ -344,7 +376,11 @@ describe('RouterPoller', () => {
     const summary = await poller.poll()
     expect(summary.abandonedAt).toMatchObject({ oid: 'DEV2_HOST_ENTRY' })
     expect(summary.disagreements).toEqual([])
-    const linkChanges = db.select().from(event).all().filter((row) => row.kind === 'link_change')
+    const linkChanges = db
+      .select()
+      .from(event)
+      .all()
+      .filter((row) => row.kind === 'link_change')
     expect(linkChanges).toHaveLength(0)
   })
 
@@ -449,12 +485,20 @@ describe('readRouterSnapshot', () => {
    * figure read as current.
    */
   function wanDownRows(): Array<Record<string, string>> {
-    return ADT_WAN_ROWS.map((row) => ({ ...row, connStatusV4: 'Disconnected', connStatusV6: 'Disconnected' }))
+    return ADT_WAN_ROWS.map((row) => ({
+      ...row,
+      connStatusV4: 'Disconnected',
+      connStatusV6: 'Disconnected',
+    }))
   }
 
   it('is empty, not zero, before the first poll', () => {
     const db = createTestDb()
-    const snapshot = readRouterSnapshot(db, { collectorHostIp: COLLECTOR_IP, staleAfterMs: STALE_AFTER_MS, now: 1_000 })
+    const snapshot = readRouterSnapshot(db, {
+      collectorHostIp: COLLECTOR_IP,
+      staleAfterMs: STALE_AFTER_MS,
+      now: 1_000,
+    })
     expect(snapshot.line).toBeNull()
     expect(snapshot.wan).toBeNull()
     expect(snapshot.lan).toBeNull()
@@ -467,7 +511,11 @@ describe('readRouterSnapshot', () => {
     const { db, poller } = makePoller(new FakeRouter(), () => now)
     await poller.poll()
 
-    const snapshot = readRouterSnapshot(db, { collectorHostIp: COLLECTOR_IP, staleAfterMs: STALE_AFTER_MS, now })
+    const snapshot = readRouterSnapshot(db, {
+      collectorHostIp: COLLECTOR_IP,
+      staleAfterMs: STALE_AFTER_MS,
+      now,
+    })
     expect(snapshot.wan).toMatchObject({ observedAt: now, ageMs: 0, stale: false })
     expect(snapshot.wan?.value.name).toBe('ppp0')
     expect(snapshot.lan).toMatchObject({ ageMs: 0, stale: false })
@@ -509,7 +557,11 @@ describe('readRouterSnapshot', () => {
 
     const wanRows = db.select().from(routerWanSample).orderBy(routerWanSample.ts).all()
     expect(wanRows).toHaveLength(2)
-    expect(wanRows[0]).toMatchObject({ selectedBy: 'status', connStatusV6: 'Connected', uptimeV6S: 4761 })
+    expect(wanRows[0]).toMatchObject({
+      selectedBy: 'status',
+      connStatusV6: 'Connected',
+      uptimeV6S: 4761,
+    })
     // The row the old behaviour did not write, and the reason to write it.
     expect(wanRows[1]).toMatchObject({
       selectedBy: 'continuity',
@@ -518,7 +570,11 @@ describe('readRouterSnapshot', () => {
       connStatusV6: 'Disconnected',
     })
 
-    const snapshot = readRouterSnapshot(db, { collectorHostIp: COLLECTOR_IP, staleAfterMs: STALE_AFTER_MS, now })
+    const snapshot = readRouterSnapshot(db, {
+      collectorHostIp: COLLECTOR_IP,
+      staleAfterMs: STALE_AFTER_MS,
+      now,
+    })
     expect(snapshot.wan?.stale).toBe(false)
     expect(snapshot.wan?.observedAt).toBe(now)
   })
@@ -541,7 +597,11 @@ describe('readRouterSnapshot', () => {
       expect(summary.intfRows).toBe(1)
     }
 
-    const snapshot = readRouterSnapshot(db, { collectorHostIp: COLLECTOR_IP, staleAfterMs: STALE_AFTER_MS, now })
+    const snapshot = readRouterSnapshot(db, {
+      collectorHostIp: COLLECTOR_IP,
+      staleAfterMs: STALE_AFTER_MS,
+      now,
+    })
 
     // The WAN number is still served — "last seen 15 minutes ago" is the
     // finding — but it can no longer be mistaken for a current reading.

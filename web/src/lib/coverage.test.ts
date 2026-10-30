@@ -87,6 +87,8 @@ describe('coverageSinceFirst', () => {
   })
 
   test('null when no cadence can be derived', () => {
-    expect(coverageSinceFirst(summary({ expectedCycles: 0, coveragePct: null, firstTs: FROM + 1000 }))).toBeNull()
+    expect(
+      coverageSinceFirst(summary({ expectedCycles: 0, coveragePct: null, firstTs: FROM + 1000 })),
+    ).toBeNull()
   })
 })

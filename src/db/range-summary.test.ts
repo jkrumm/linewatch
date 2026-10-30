@@ -38,9 +38,7 @@ function cycle(ts: number, lossByTarget: Partial<Record<string, number>> = {}) {
 }
 
 function seed(db: ReturnType<typeof createTestDb>, cycles: ReturnType<typeof cycle>[]) {
-  db.insert(probeSample)
-    .values(cycles.flat())
-    .run()
+  db.insert(probeSample).values(cycles.flat()).run()
 }
 
 describe('rangeSummary — coverage', () => {
@@ -64,7 +62,11 @@ describe('rangeSummary — coverage', () => {
       Array.from({ length: cycles }, (_, i) => cycle(T0 + i * CYCLE_MS)),
     )
 
-    const summary = rangeSummary(db, { ...PARAMS, from: T0 + cycles * CYCLE_MS - day, to: T0 + cycles * CYCLE_MS })
+    const summary = rangeSummary(db, {
+      ...PARAMS,
+      from: T0 + cycles * CYCLE_MS - day,
+      to: T0 + cycles * CYCLE_MS,
+    })
     expect(summary.recordedCycles).toBe(cycles)
     expect(summary.expectedCycles).toBe(2880)
     expect(summary.coveragePct).toBeCloseTo((100 * 192) / 2880, 6)
@@ -202,7 +204,10 @@ describe('rangeSummary — degraded cycles', () => {
 
   test('loss below the threshold is not degradation', () => {
     const db = createTestDb()
-    seed(db, [cycle(T0, { cloudflare: 5, google: 5, quad9: 5 }), cycle(T0 + CYCLE_MS, { cloudflare: 15, google: 15, quad9: 15 })])
+    seed(db, [
+      cycle(T0, { cloudflare: 5, google: 5, quad9: 5 }),
+      cycle(T0 + CYCLE_MS, { cloudflare: 15, google: 15, quad9: 15 }),
+    ])
 
     expect(rangeSummary(db, { ...PARAMS, from: T0, to: T0 + HOUR_MS }).degradedCycles).toBe(0)
   })
@@ -224,7 +229,14 @@ describe('rangeSummary — degraded cycles', () => {
       cycle(T0 + CYCLE_MS, { cloudflare: 60, google: 60, quad9: 60 }),
     ])
     db.insert(outage)
-      .values({ scope: 'wan', startedAt: T0, endedAt: T0 + CYCLE_MS / 2, durationS: 15, cycles: 1, evidence: '[]' })
+      .values({
+        scope: 'wan',
+        startedAt: T0,
+        endedAt: T0 + CYCLE_MS / 2,
+        durationS: 15,
+        cycles: 1,
+        evidence: '[]',
+      })
       .run()
 
     const summary = rangeSummary(db, { ...PARAMS, from: T0, to: T0 + HOUR_MS })
@@ -244,8 +256,14 @@ describe('rangeSummary — degraded cycles', () => {
     const db = createTestDb()
     seed(db, [cycle(T0, { cloudflare: 10, google: 10, quad9: 10 })])
 
-    expect(rangeSummary(db, { ...PARAMS, from: T0, to: T0 + HOUR_MS, degradedLossPct: 5 }).degradedCycles).toBe(1)
-    expect(rangeSummary(db, { ...PARAMS, from: T0, to: T0 + HOUR_MS, degradedLossPct: 50 }).degradedCycles).toBe(0)
+    expect(
+      rangeSummary(db, { ...PARAMS, from: T0, to: T0 + HOUR_MS, degradedLossPct: 5 })
+        .degradedCycles,
+    ).toBe(1)
+    expect(
+      rangeSummary(db, { ...PARAMS, from: T0, to: T0 + HOUR_MS, degradedLossPct: 50 })
+        .degradedCycles,
+    ).toBe(0)
   })
 
   test('scope comes from the caller, not from the target name', () => {
@@ -256,7 +274,14 @@ describe('rangeSummary — degraded cycles', () => {
     // clean, without it every anchor is degraded. Nothing about the names
     // changed — only the scope the caller declared.
     expect(rangeSummary(db, { ...PARAMS, from: T0, to: T0 + HOUR_MS }).degradedCycles).toBe(0)
-    expect(rangeSummary(db, { ...PARAMS, from: T0, to: T0 + HOUR_MS, wanTargets: ['cloudflare', 'google'] }).degradedCycles).toBe(1)
+    expect(
+      rangeSummary(db, {
+        ...PARAMS,
+        from: T0,
+        to: T0 + HOUR_MS,
+        wanTargets: ['cloudflare', 'google'],
+      }).degradedCycles,
+    ).toBe(1)
   })
 
   test('without a WAN target list it falls back to the strictest rule: every target degraded', () => {
@@ -266,12 +291,19 @@ describe('rangeSummary — degraded cycles', () => {
     // Anchors only. The fallback cannot tell the gateway apart, so it under-counts.
     seed(db, [cycle(T0 + CYCLE_MS, { cloudflare: 40, google: 40, quad9: 40 })])
 
-    const noScope = rangeSummary(db, { probeCycleSeconds: CYCLE_S, degradedLossPct: 20, from: T0, to: T0 + HOUR_MS })
+    const noScope = rangeSummary(db, {
+      probeCycleSeconds: CYCLE_S,
+      degradedLossPct: 20,
+      from: T0,
+      to: T0 + HOUR_MS,
+    })
     expect(noScope.degradedCycles).toBe(1)
     // With scope, both cycles are the line degrading.
     expect(rangeSummary(db, { ...PARAMS, from: T0, to: T0 + HOUR_MS }).degradedCycles).toBe(2)
     // An empty list is the same "cannot tell" state as omitting it.
-    expect(rangeSummary(db, { ...PARAMS, from: T0, to: T0 + HOUR_MS, wanTargets: [] }).degradedCycles).toBe(1)
+    expect(
+      rangeSummary(db, { ...PARAMS, from: T0, to: T0 + HOUR_MS, wanTargets: [] }).degradedCycles,
+    ).toBe(1)
   })
 })
 
@@ -320,7 +352,9 @@ describe('rangeSummary — home line', () => {
   test('cycles recorded without a vantage are not folded into `all`', () => {
     const db = createTestDb()
     seed(db, [cycle(T0), cycle(T0 + CYCLE_MS)])
-    db.insert(probeCycle).values([{ ts: T0, pathClass: 'ethernet', onHomeLine: 1 }]).run()
+    db.insert(probeCycle)
+      .values([{ ts: T0, pathClass: 'ethernet', onHomeLine: 1 }])
+      .run()
 
     const summary = rangeSummary(db, { ...PARAMS, from: T0, to: T0 + HOUR_MS })
     expect(summary.onHomeLine).toBe('mixed')

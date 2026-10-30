@@ -237,7 +237,10 @@ function isRole(value: string | null): value is 'wan' | 'lan' | 'other' {
  * `min` alongside the average because the average is what hides a single poll's
  * drop to a lower profile, and that drop is the whole reason the column exists.
  */
-export function bucketRouterLine(db: BunSQLiteDatabase<typeof schema>, params: RouterBucketParams): RouterLineBucket[] {
+export function bucketRouterLine(
+  db: BunSQLiteDatabase<typeof schema>,
+  params: RouterBucketParams,
+): RouterLineBucket[] {
   const bucketMs = bucketMsOf(params.bucketSeconds)
 
   const rows = db.all<LineRow>(sql`

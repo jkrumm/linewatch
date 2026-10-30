@@ -16,7 +16,16 @@ describe('ThroughputChart isPending', () => {
   test('renders the shipped pending caption, not a chart, while pending — even with buckets already in hand', () => {
     const html = renderToStaticMarkup(
       <ThroughputChart
-        buckets={[{ bucket: 0, inBytes: 6_000_000, outBytes: 600_000, spanMs: 60_000, intervals: 2, skipped: 0 }]}
+        buckets={[
+          {
+            bucket: 0,
+            inBytes: 6_000_000,
+            outBytes: 600_000,
+            spanMs: 60_000,
+            intervals: 2,
+            skipped: 0,
+          },
+        ]}
         {...WINDOW}
         isPending
       />,
@@ -32,7 +41,9 @@ describe('ThroughputChart isPending', () => {
   })
 
   test('does not render the pending caption once the query has resolved', () => {
-    const html = renderToStaticMarkup(<ThroughputChart buckets={[]} {...WINDOW} isPending={false} />)
+    const html = renderToStaticMarkup(
+      <ThroughputChart buckets={[]} {...WINDOW} isPending={false} />,
+    )
     expect(html).not.toContain('Loading')
     expect(html).toContain('Not measured')
   })

@@ -1,10 +1,26 @@
 import { useState } from 'react'
-import { Badge, Box, Divider, Group, Pagination, Skeleton, Stack, Table, Text, Tooltip } from '@mantine/core'
+import {
+  Badge,
+  Box,
+  Divider,
+  Group,
+  Pagination,
+  Skeleton,
+  Stack,
+  Table,
+  Text,
+  Tooltip,
+} from '@mantine/core'
 import { IconEyeOff } from '@tabler/icons-react'
 import { EmptyState } from 'basalt-ui'
 import swap from './table-card-swap.module.css'
 import type { LinewatchEvent } from '../lib/types'
-import { EVENT_KIND_LABEL, eventSourceLabel, summariseEventDetail, timelineEmptyState } from '../lib/events'
+import {
+  EVENT_KIND_LABEL,
+  eventSourceLabel,
+  summariseEventDetail,
+  timelineEmptyState,
+} from '../lib/events'
 import { fmtDateTime } from '../lib/format'
 
 /**
@@ -153,7 +169,11 @@ export function TransitionTimeline({
                     </Text>
                   </Table.Td>
                   <Table.Td>
-                    <Badge color={KIND_COLOR[event.kind]} variant="light" style={{ whiteSpace: 'nowrap' }}>
+                    <Badge
+                      color={KIND_COLOR[event.kind]}
+                      variant="light"
+                      style={{ whiteSpace: 'nowrap' }}
+                    >
                       {EVENT_KIND_LABEL[event.kind]}
                     </Badge>
                   </Table.Td>
@@ -232,7 +252,8 @@ export function TransitionTimeline({
       <Group justify="space-between" align="center" wrap="wrap" gap="xs" pt="xs">
         <Text size="xs" c="dimmed">
           {events.length} transition{events.length === 1 ? '' : 's'} in this window
-          {pageCount > 1 && ` · showing ${(current - 1) * PAGE_SIZE + 1}\u2013${(current - 1) * PAGE_SIZE + shown.length}`}
+          {pageCount > 1 &&
+            ` · showing ${(current - 1) * PAGE_SIZE + 1}\u2013${(current - 1) * PAGE_SIZE + shown.length}`}
         </Text>
         {pageCount > 1 && (
           <Pagination

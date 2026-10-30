@@ -100,7 +100,11 @@ export function OutageTable({ outages, isPending }: { outages: Outage[]; isPendi
                   {outage.durationS !== null ? fmtDuration(outage.durationS) : 'ongoing'}
                 </Text>
               </Group>
-              <Badge color={outage.scope === 'wan' ? 'red' : 'orange'} variant="light" w="fit-content">
+              <Badge
+                color={outage.scope === 'wan' ? 'red' : 'orange'}
+                variant="light"
+                w="fit-content"
+              >
                 {outage.scope}
               </Badge>
               <Text size="xs" c="dimmed">

@@ -2,7 +2,12 @@ import { Elysia } from 'elysia'
 import { z } from 'zod'
 import { db } from '../db/client.js'
 import { readRouterSnapshot } from '../services/router/poll.js'
-import { bucketRouterLine, bucketRouterThroughput, isRangeError, resolveRange } from '../services/router/range.js'
+import {
+  bucketRouterLine,
+  bucketRouterThroughput,
+  isRangeError,
+  resolveRange,
+} from '../services/router/range.js'
 import { routerConfig } from '../services/router/config.js'
 
 /**
@@ -70,7 +75,12 @@ const WanSampleSchema = z.object({
   ifName: z.string().nullable(),
   connType: z.string().nullable(),
   accessMode: z.string().nullable(),
-  stack: z.string().nullable().describe("The connection's own stack, which is not the interface's — evidence, never the source for a write"),
+  stack: z
+    .string()
+    .nullable()
+    .describe(
+      "The connection's own stack, which is not the interface's — evidence, never the source for a write",
+    ),
   connStatusV4: z.string().nullable(),
   connStatusV6: z.string().nullable(),
   connIpv4Enabled: z.number().int().nullable(),
@@ -82,7 +92,9 @@ const WanSampleSchema = z.object({
   selectedBy: z
     .enum(['status', 'continuity'])
     .nullable()
-    .describe('`continuity` means the router reported every connection disconnected and this is the one that was live at the previous poll — it did not vouch for this row'),
+    .describe(
+      '`continuity` means the router reported every connection disconnected and this is the one that was live at the previous poll — it did not vouch for this row',
+    ),
 })
 
 const IntfSampleSchema = z.object({
@@ -129,7 +141,11 @@ const LineBucketSchema = z.object({
   samples: z.number().int(),
   firstTs: z.number().int(),
   lastTs: z.number().int(),
-  statuses: z.array(z.string()).describe('Distinct statuses in the bucket — more than one means the line changed state inside it'),
+  statuses: z
+    .array(z.string())
+    .describe(
+      'Distinct statuses in the bucket — more than one means the line changed state inside it',
+    ),
   upSamples: z.number().int(),
   carriers: z.array(z.string()),
   profiles: z.array(z.string()),
@@ -141,12 +157,18 @@ const LineBucketSchema = z.object({
   upSyncKbpsMax: z.number().int().nullable(),
   downCurrKbpsAvg: z.number().int().nullable(),
   upCurrKbpsAvg: z.number().int().nullable(),
-  downNoiseMarginDbMin: z.number().nullable().describe('Worst noise margin in the bucket — the early-warning number the average hides'),
+  downNoiseMarginDbMin: z
+    .number()
+    .nullable()
+    .describe('Worst noise margin in the bucket — the early-warning number the average hides'),
   downNoiseMarginDbAvg: z.number().nullable(),
   upNoiseMarginDbMin: z.number().nullable(),
   upNoiseMarginDbAvg: z.number().nullable(),
   downAttenuationDbAvg: z.number().nullable(),
-  resyncs: z.number().int().describe('Polls where showtime_start_s dropped below the previous poll — the line restarted'),
+  resyncs: z
+    .number()
+    .int()
+    .describe('Polls where showtime_start_s dropped below the previous poll — the line restarted'),
   erroredSecsMax: z.number().int().nullable(),
   severelyErroredSecsMax: z.number().int().nullable(),
 })
@@ -162,7 +184,10 @@ const ThroughputBucketSchema = z.object({
   rxKbpsMax: z.number().int().nullable(),
   txKbpsAvg: z.number().int().nullable(),
   txKbpsMax: z.number().int().nullable(),
-  bytesRxDelta: z.number().int().describe('Bytes moved inside the bucket, from consecutive counter deltas'),
+  bytesRxDelta: z
+    .number()
+    .int()
+    .describe('Bytes moved inside the bucket, from consecutive counter deltas'),
   bytesTxDelta: z.number().int(),
 })
 
@@ -186,7 +211,12 @@ const RangeErrorSchema = z.object({
 const RangeQuery = z.object({
   from: z.coerce.number().int().optional(),
   to: z.coerce.number().int().optional(),
-  bucket: z.coerce.number().int().min(1).default(3600).describe('Bucket width in seconds (default 3600 = hourly)'),
+  bucket: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .default(3600)
+    .describe('Bucket width in seconds (default 3600 = hourly)'),
 })
 
 /**
@@ -275,7 +305,7 @@ export const routerRoutes = new Elysia()
         tags: ['Router'],
         summary: 'Carrier line history',
         description:
-          'Sync rates, noise margin (real dB — the router reports tenths and the poller converts at the write site), attenuation, profile and line resyncs, bucketed in SQL by `floor(ts / (bucket*1000))`. Never raw rows: `router_line_sample` grows by ~53k rows a year. Defaults to the last 24 hours at hourly buckets. Sync rate and noise margin keep a `min` beside the average because the average is what hides a single poll\'s drop. A range needing more than 20000 buckets is refused with a 400 rather than truncated.',
+          "Sync rates, noise margin (real dB — the router reports tenths and the poller converts at the write site), attenuation, profile and line resyncs, bucketed in SQL by `floor(ts / (bucket*1000))`. Never raw rows: `router_line_sample` grows by ~53k rows a year. Defaults to the last 24 hours at hourly buckets. Sync rate and noise margin keep a `min` beside the average because the average is what hides a single poll's drop. A range needing more than 20000 buckets is refused with a 400 rather than truncated.",
       },
     },
   )
@@ -288,7 +318,10 @@ export const routerRoutes = new Elysia()
         from: range.from,
         to: range.to,
         bucketSeconds: range.bucketSeconds,
-        buckets: bucketRouterThroughput(db, { ...range, ...(query.role === undefined ? {} : { role: query.role }) }),
+        buckets: bucketRouterThroughput(db, {
+          ...range,
+          ...(query.role === undefined ? {} : { role: query.role }),
+        }),
       }
     },
     {

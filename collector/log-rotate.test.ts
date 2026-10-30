@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import { DEFAULT_LOG_MAX_BYTES, decideRotation, rotatedLogPath, rotationTempPath } from './log-rotate.js'
+import {
+  DEFAULT_LOG_MAX_BYTES,
+  decideRotation,
+  rotatedLogPath,
+  rotationTempPath,
+} from './log-rotate.js'
 
 /**
  * Only the pure decision is exercised here. Nothing in this file opens, writes
@@ -30,20 +35,38 @@ describe('rotatedLogPath / rotationTempPath', () => {
 
 describe('decideRotation', () => {
   test('rotates once the live log reaches the threshold', () => {
-    expect(decideRotation({ stdout: SAME, log: { ...SAME, size: DEFAULT_LOG_MAX_BYTES }, maxBytes: DEFAULT_LOG_MAX_BYTES })).toEqual({
+    expect(
+      decideRotation({
+        stdout: SAME,
+        log: { ...SAME, size: DEFAULT_LOG_MAX_BYTES },
+        maxBytes: DEFAULT_LOG_MAX_BYTES,
+      }),
+    ).toEqual({
       rotate: true,
     })
-    expect(decideRotation({ stdout: SAME, log: { ...SAME, size: DEFAULT_LOG_MAX_BYTES + 1 }, maxBytes: DEFAULT_LOG_MAX_BYTES })).toEqual(
-      { rotate: true },
-    )
+    expect(
+      decideRotation({
+        stdout: SAME,
+        log: { ...SAME, size: DEFAULT_LOG_MAX_BYTES + 1 },
+        maxBytes: DEFAULT_LOG_MAX_BYTES,
+      }),
+    ).toEqual({ rotate: true })
   })
 
   test('leaves a log below the threshold alone', () => {
-    expect(decideRotation({ stdout: SAME, log: { ...SAME, size: DEFAULT_LOG_MAX_BYTES - 1 }, maxBytes: DEFAULT_LOG_MAX_BYTES })).toEqual({
+    expect(
+      decideRotation({
+        stdout: SAME,
+        log: { ...SAME, size: DEFAULT_LOG_MAX_BYTES - 1 },
+        maxBytes: DEFAULT_LOG_MAX_BYTES,
+      }),
+    ).toEqual({
       rotate: false,
       reason: 'under-threshold',
     })
-    expect(decideRotation({ stdout: SAME, log: { ...SAME, size: 0 }, maxBytes: DEFAULT_LOG_MAX_BYTES })).toEqual({
+    expect(
+      decideRotation({ stdout: SAME, log: { ...SAME, size: 0 }, maxBytes: DEFAULT_LOG_MAX_BYTES }),
+    ).toEqual({
       rotate: false,
       reason: 'under-threshold',
     })
@@ -54,7 +77,13 @@ describe('decideRotation', () => {
     // launchd job may well be running and writing to that same path. Truncating
     // it here would delete a live collector's record to bound a file this
     // process never touches.
-    expect(decideRotation({ stdout: null, log: { ...SAME, size: 10 * DEFAULT_LOG_MAX_BYTES }, maxBytes: DEFAULT_LOG_MAX_BYTES })).toEqual({
+    expect(
+      decideRotation({
+        stdout: null,
+        log: { ...SAME, size: 10 * DEFAULT_LOG_MAX_BYTES },
+        maxBytes: DEFAULT_LOG_MAX_BYTES,
+      }),
+    ).toEqual({
       rotate: false,
       reason: 'stdout-not-a-file',
     })
@@ -63,13 +92,21 @@ describe('decideRotation', () => {
     // plist's StandardOutPath. Same rule: identity, not size, decides.
     const elsewhere = { dev: 1, ino: 43 }
     expect(
-      decideRotation({ stdout: elsewhere, log: { ...SAME, size: 10 * DEFAULT_LOG_MAX_BYTES }, maxBytes: DEFAULT_LOG_MAX_BYTES }),
+      decideRotation({
+        stdout: elsewhere,
+        log: { ...SAME, size: 10 * DEFAULT_LOG_MAX_BYTES },
+        maxBytes: DEFAULT_LOG_MAX_BYTES,
+      }),
     ).toEqual({ rotate: false, reason: 'stdout-elsewhere' })
 
     // Same inode number on a different device is a different file. Comparing
     // `ino` alone would truncate the wrong one.
     expect(
-      decideRotation({ stdout: { dev: 2, ino: 42 }, log: { ...SAME, size: 10 * DEFAULT_LOG_MAX_BYTES }, maxBytes: DEFAULT_LOG_MAX_BYTES }),
+      decideRotation({
+        stdout: { dev: 2, ino: 42 },
+        log: { ...SAME, size: 10 * DEFAULT_LOG_MAX_BYTES },
+        maxBytes: DEFAULT_LOG_MAX_BYTES,
+      }),
     ).toEqual({ rotate: false, reason: 'stdout-elsewhere' })
   })
 
@@ -86,8 +123,14 @@ describe('decideRotation', () => {
     // LINEWATCH_LOG_MAX_BYTES would rotate on every cycle and shred the log it
     // was meant to bound.
     const huge = { stdout: SAME, log: { ...SAME, size: 10 * DEFAULT_LOG_MAX_BYTES } }
-    expect(decideRotation({ ...huge, maxBytes: Number.NaN })).toEqual({ rotate: false, reason: 'disabled' })
-    expect(decideRotation({ ...huge, maxBytes: Number.POSITIVE_INFINITY })).toEqual({ rotate: false, reason: 'disabled' })
+    expect(decideRotation({ ...huge, maxBytes: Number.NaN })).toEqual({
+      rotate: false,
+      reason: 'disabled',
+    })
+    expect(decideRotation({ ...huge, maxBytes: Number.POSITIVE_INFINITY })).toEqual({
+      rotate: false,
+      reason: 'disabled',
+    })
     expect(decideRotation({ ...huge, maxBytes: 0 })).toEqual({ rotate: false, reason: 'disabled' })
     expect(decideRotation({ ...huge, maxBytes: -1 })).toEqual({ rotate: false, reason: 'disabled' })
   })

@@ -117,11 +117,7 @@ export function DashboardSection<T extends string>({
     // `dashboard.field.compact`. The anchor and its offset stay: a verdict link leaves compact in
     // the same click, but the hash resolves against whatever is mounted at the time.
     return (
-      <Box
-        component="section"
-        id={anchor}
-        style={ANCHOR_STYLE}
-      >
+      <Box component="section" id={anchor} style={ANCHOR_STYLE}>
         {body}
       </Box>
     )

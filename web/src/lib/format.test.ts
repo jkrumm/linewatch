@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'bun:test'
-import { fmtBytes, fmtClock, fmtDateTime, fmtRate, makeClockFormat, makeDateTimeFormat } from './format'
+import {
+  fmtBytes,
+  fmtClock,
+  fmtDateTime,
+  fmtRate,
+  makeClockFormat,
+  makeDateTimeFormat,
+} from './format'
 
 // 12:28 UTC on 1 Aug 2026 — which is 14:28 in Berlin, an hour the wall clock and UTC cannot agree
 // on. That gap is the whole subject of these tests: a formatter that had quietly stayed on UTC
@@ -73,7 +80,9 @@ describe('fmtClock / fmtDateTime', () => {
    * own defaults — no residual zone, no residual locale, no suffix. */
   test('are the host-default factories and nothing more', () => {
     expect(fmtClock(SUMMER_AFTERNOON)).toBe(makeClockFormat().format(new Date(SUMMER_AFTERNOON)))
-    expect(fmtDateTime(SUMMER_AFTERNOON)).toBe(makeDateTimeFormat().format(new Date(SUMMER_AFTERNOON)))
+    expect(fmtDateTime(SUMMER_AFTERNOON)).toBe(
+      makeDateTimeFormat().format(new Date(SUMMER_AFTERNOON)),
+    )
   })
 
   /** The regression that would silently undo all of this: a `timeZone: 'UTC'` creeping back in.
@@ -81,7 +90,9 @@ describe('fmtClock / fmtDateTime', () => {
   test('follow the host zone, not UTC', () => {
     const offset = new Date(SUMMER_AFTERNOON).getTimezoneOffset()
     if (offset === 0) return
-    expect(fmtClock(SUMMER_AFTERNOON)).not.toBe(makeClockFormat(undefined, 'UTC').format(SUMMER_AFTERNOON))
+    expect(fmtClock(SUMMER_AFTERNOON)).not.toBe(
+      makeClockFormat(undefined, 'UTC').format(SUMMER_AFTERNOON),
+    )
   })
 })
 

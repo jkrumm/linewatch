@@ -178,7 +178,9 @@ describe('parseAirportInfo', () => {
     // and a parser that throws would take the probe cycle down with it.
     expect(parseAirportInfo(AIRPORT_SHAPE_CHANGED)).toEqual(ALL_NULL)
     expect(parseAirportInfo('')).toEqual(ALL_NULL)
-    expect(parseAirportInfo('system_profiler: unknown datatype SPAirPortDataType\n')).toEqual(ALL_NULL)
+    expect(parseAirportInfo('system_profiler: unknown datatype SPAirPortDataType\n')).toEqual(
+      ALL_NULL,
+    )
   })
 
   test('a field that will not parse is null, never a plausible number', () => {
@@ -230,7 +232,10 @@ describe('captureWifi', () => {
         ['ping', stubs.ping, stubs.pingExit ?? 0],
       ] as const) {
         writeFileSync(join(dir, `${name}.out`), body)
-        writeFileSync(join(dir, name), `#!/bin/sh\ncat ${JSON.stringify(join(dir, `${name}.out`))}\nexit ${exit}\n`)
+        writeFileSync(
+          join(dir, name),
+          `#!/bin/sh\ncat ${JSON.stringify(join(dir, `${name}.out`))}\nexit ${exit}\n`,
+        )
         chmodSync(join(dir, name), 0o755)
       }
       const script = join(dir, 'capture.ts')
@@ -292,7 +297,11 @@ Request timeout for icmp_seq 1
   })
 
   test('100% loss is a measurement, not a failure — the exit code is never consulted', async () => {
-    const sample = await withStubbedCommands({ airport: AIRPORT_CONNECTED, ping: PING_TOTAL_LOSS, pingExit: 2 })
+    const sample = await withStubbedCommands({
+      airport: AIRPORT_CONNECTED,
+      ping: PING_TOTAL_LOSS,
+      pingExit: 2,
+    })
     expect(sample?.lossPct).toBe(100)
     // Null, not 0: no reply was timed, so there is no round trip to report.
     expect(sample?.rttMedMs).toBeNull()
@@ -304,13 +313,19 @@ Request timeout for icmp_seq 1
   test('both commands failing produces no sample at all, rather than a row of nulls', async () => {
     // A row of nulls has to keep meaning "we looked at the radio and learned
     // nothing". "Neither command ran" is a different statement and gets no row.
-    expect(await withStubbedCommands({ airport: '', airportExit: 1, ping: '', pingExit: 1 })).toBeNull()
+    expect(
+      await withStubbedCommands({ airport: '', airportExit: 1, ping: '', pingExit: 1 }),
+    ).toBeNull()
   })
 
   test('a radio block describing another interface is dropped, not merged', async () => {
     // The ping is bound to the requested interface, so pairing it with a
     // different interface's radio would describe no single thing.
-    const sample = await withStubbedCommands({ airport: AIRPORT_CONNECTED, ping: PING_OK, iface: 'en9' })
+    const sample = await withStubbedCommands({
+      airport: AIRPORT_CONNECTED,
+      ping: PING_OK,
+      iface: 'en9',
+    })
     expect(sample).toEqual({
       ...ALL_NULL,
       iface: 'en9',

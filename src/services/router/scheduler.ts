@@ -63,7 +63,9 @@ async function pollGuarded(): Promise<void> {
         reads: `${summary.readsOk}/8`,
         ...(summary.abandonedAt === null ? {} : { abandonedAt: summary.abandonedAt }),
         resync: summary.resync,
-        ...(summary.sessionRestarts.length === 0 ? {} : { sessionRestarts: summary.sessionRestarts }),
+        ...(summary.sessionRestarts.length === 0
+          ? {}
+          : { sessionRestarts: summary.sessionRestarts }),
         disagreements: summary.disagreements,
         logins: client.status().logins,
       })}`,
@@ -77,7 +79,9 @@ async function pollGuarded(): Promise<void> {
       // earlier reads bought, and reports `outcome: 'partial'`.
       console.warn(`[router] login failed, poll never started: ${error.message}`)
     } else {
-      console.error(`[router] poll failed: ${error instanceof Error ? error.message : String(error)}`)
+      console.error(
+        `[router] poll failed: ${error instanceof Error ? error.message : String(error)}`,
+      )
     }
   } finally {
     running = false

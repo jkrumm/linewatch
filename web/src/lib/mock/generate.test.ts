@@ -41,14 +41,18 @@ describe('generateProbeBuckets', () => {
 
   test('drops the same buckets for every target — a stopped collector records nothing for any', () => {
     const { from, to } = rangeToWindow('24h')
-    const cloudflare = generateProbeBuckets('cloudflare', from, to, 300).buckets.map((b) => b.bucket)
+    const cloudflare = generateProbeBuckets('cloudflare', from, to, 300).buckets.map(
+      (b) => b.bucket,
+    )
     const quad9 = generateProbeBuckets('quad9', from, to, 300).buckets.map((b) => b.bucket)
     expect(quad9).toEqual(cloudflare)
   })
 
   test('emits at least one fully-down bucket at every fine bucket width', () => {
     for (const bucketSeconds of FINE_BUCKET_SECONDS) {
-      const { from, to } = rangeToWindow(bucketSeconds === 60 ? '1h' : bucketSeconds === 3_600 ? '7d' : '24h')
+      const { from, to } = rangeToWindow(
+        bucketSeconds === 60 ? '1h' : bucketSeconds === 3_600 ? '7d' : '24h',
+      )
       const { buckets } = generateProbeBuckets('cloudflare', from, to, bucketSeconds)
       const down = buckets.filter((b) => b.medianMs === null && b.downCycles > 0)
       expect(down.length).toBeGreaterThan(0)
@@ -79,7 +83,9 @@ describe('generateProbeBuckets', () => {
     // cycle to have said so — not every reporting one.
     for (const bucket of vantage) {
       if (bucket.onHomeLine === 'all') expect(bucket.homeLineCycles).toBe(bucket.cycles)
-      expect(bucket.homeLineCycles + bucket.offHomeLineCycles + bucket.unknownHomeLineCycles).toBe(bucket.cycles)
+      expect(bucket.homeLineCycles + bucket.offHomeLineCycles + bucket.unknownHomeLineCycles).toBe(
+        bucket.cycles,
+      )
     }
   })
 
@@ -139,7 +145,13 @@ describe('generateStatus', () => {
 describe('generateRouterSnapshot', () => {
   test('ages each part independently and derives stale from that age', () => {
     const snapshot = generateRouterSnapshot()
-    const parts = [snapshot.line, snapshot.wan, snapshot.lan, snapshot.collectorHost, snapshot.ports]
+    const parts = [
+      snapshot.line,
+      snapshot.wan,
+      snapshot.lan,
+      snapshot.collectorHost,
+      snapshot.ports,
+    ]
     for (const part of parts) {
       expect(part).not.toBeNull()
       expect(part?.ageMs).toBe(snapshot.now - (part?.observedAt ?? 0))

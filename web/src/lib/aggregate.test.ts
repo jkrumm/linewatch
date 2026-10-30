@@ -1,8 +1,19 @@
 import { describe, expect, test } from 'bun:test'
-import { WAN_TARGETS, comparePointsFrom, foldInternetBuckets, median, toComparePoints } from './aggregate'
+import {
+  WAN_TARGETS,
+  comparePointsFrom,
+  foldInternetBuckets,
+  median,
+  toComparePoints,
+} from './aggregate'
 import type { ProbeBucket, TargetName } from './types'
 
-function bucket(target: string, medianMs: number | null, lossPct = 0, bucketStart = 0): ProbeBucket {
+function bucket(
+  target: string,
+  medianMs: number | null,
+  lossPct = 0,
+  bucketStart = 0,
+): ProbeBucket {
   return {
     bucket: bucketStart,
     target,
@@ -71,7 +82,14 @@ describe('median', () => {
 describe('toComparePoints', () => {
   test('splits the gateway from the median of the anchors', () => {
     const [point] = toComparePoints(
-      [slot([bucket('gateway', 1.2), bucket('cloudflare', 5), bucket('google', 7), bucket('quad9', 9)])],
+      [
+        slot([
+          bucket('gateway', 1.2),
+          bucket('cloudflare', 5),
+          bucket('google', 7),
+          bucket('quad9', 9),
+        ]),
+      ],
       300,
     )
     expect(point).toEqual({
@@ -103,18 +121,26 @@ describe('toComparePoints', () => {
   })
 
   test('a target present but with no median contributes nothing rather than a zero', () => {
-    const [point] = toComparePoints([slot([bucket('cloudflare', null), bucket('google', 7), bucket('quad9', 9)])], 300)
+    const [point] = toComparePoints(
+      [slot([bucket('cloudflare', null), bucket('google', 7), bucket('quad9', 9)])],
+      300,
+    )
     expect(point?.wanMs).toBe(8)
     expect(point?.wanAnchors).toBe(2)
   })
 
   test('worst loss spans the gateway and the anchors alike', () => {
-    const [point] = toComparePoints([slot([bucket('gateway', 1.2, 40), bucket('cloudflare', 5, 2)])], 300)
+    const [point] = toComparePoints(
+      [slot([bucket('gateway', 1.2, 40), bucket('cloudflare', 5, 2)])],
+      300,
+    )
     expect(point?.worstLossPct).toBe(40)
   })
 
   test('preserves the slot axis one-for-one', () => {
-    expect(toComparePoints([slot(null), slot([bucket('gateway', 1)]), slot(null)], 300)).toHaveLength(3)
+    expect(
+      toComparePoints([slot(null), slot([bucket('gateway', 1)]), slot(null)], 300),
+    ).toHaveLength(3)
   })
 })
 
@@ -154,7 +180,9 @@ describe('comparePointsFrom', () => {
   })
 
   test('a row off the window grid is a contract violation, not a dropped measurement', () => {
-    expect(() => comparePointsFrom(byTarget([['gateway', [bucket('gateway', 1, 0, 7)]]]), window)).toThrow()
+    expect(() =>
+      comparePointsFrom(byTarget([['gateway', [bucket('gateway', 1, 0, 7)]]]), window),
+    ).toThrow()
   })
 })
 
@@ -162,7 +190,10 @@ describe('foldInternetBuckets', () => {
   /** A full `ProbeBucket` with every folded field independently settable — the fold's whole job is
    * that different fields take different reductions, so a helper that ties them together (as
    * `bucket` above does) cannot test it. */
-  function anchor(target: string, fields: Partial<ProbeBucket> & { bucket?: number } = {}): ProbeBucket {
+  function anchor(
+    target: string,
+    fields: Partial<ProbeBucket> & { bucket?: number } = {},
+  ): ProbeBucket {
     return {
       bucket: 0,
       target,
@@ -181,7 +212,10 @@ describe('foldInternetBuckets', () => {
 
   const map = (rows: ProbeBucket[]) =>
     new Map<TargetName, readonly ProbeBucket[]>(
-      (['cloudflare', 'google', 'quad9'] as TargetName[]).map((t) => [t, rows.filter((r) => r.target === t)]),
+      (['cloudflare', 'google', 'quad9'] as TargetName[]).map((t) => [
+        t,
+        rows.filter((r) => r.target === t),
+      ]),
     )
 
   test('the gateway is not an anchor and never reaches the fold', () => {

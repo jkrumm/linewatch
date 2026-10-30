@@ -55,7 +55,10 @@ export interface LatencyComparePoint {
  * Shared by the compare chart's WAN line and the KPI row's window medians; both need exactly this
  * null-skipping behaviour and neither may have its own copy of it.
  */
-export function median(values: readonly (number | null)[]): { value: number | null; count: number } {
+export function median(values: readonly (number | null)[]): {
+  value: number | null
+  count: number
+} {
   const present = values.filter((v): v is number => v !== null).toSorted((a, b) => a - b)
   if (present.length === 0) return { value: null, count: 0 }
   const mid = Math.floor(present.length / 2)
@@ -85,7 +88,15 @@ export function toComparePoints(
     const label = bucketAxisLabel(slot.bucketStart, bucketSeconds)
     const byTarget = slot.value
     if (byTarget === null) {
-      return { key: slot.key, label, bucketStart: slot.bucketStart, gatewayMs: null, wanMs: null, wanAnchors: 0, worstLossPct: 0 }
+      return {
+        key: slot.key,
+        label,
+        bucketStart: slot.bucketStart,
+        gatewayMs: null,
+        wanMs: null,
+        wanAnchors: 0,
+        worstLossPct: 0,
+      }
     }
 
     const gateway = byTarget.get('gateway') ?? null
@@ -94,7 +105,10 @@ export function toComparePoints(
 
     // Across every target present, gateway included: the marker means "this bucket lost packets
     // somewhere", and excluding the gateway would hide LAN loss from the LAN-vs-WAN chart.
-    const worstLossPct = [gateway, ...anchors].reduce((worst, b) => (b === null ? worst : Math.max(worst, b.lossPct)), 0)
+    const worstLossPct = [gateway, ...anchors].reduce(
+      (worst, b) => (b === null ? worst : Math.max(worst, b.lossPct)),
+      0,
+    )
 
     return {
       key: slot.key,
@@ -156,7 +170,9 @@ export type InternetBucket = ProbeBucket & {
  * A bucket that no anchor reported is omitted rather than emitted empty, so `densifyBuckets`
  * downstream still renders it as unmeasured — which is what it was.
  */
-export function foldInternetBuckets(byTarget: ReadonlyMap<TargetName, readonly ProbeBucket[]>): InternetBucket[] {
+export function foldInternetBuckets(
+  byTarget: ReadonlyMap<TargetName, readonly ProbeBucket[]>,
+): InternetBucket[] {
   const byBucket = new Map<number, ProbeBucket[]>()
   for (const target of WAN_TARGETS) {
     for (const row of byTarget.get(target) ?? []) {
@@ -169,7 +185,10 @@ export function foldInternetBuckets(byTarget: ReadonlyMap<TargetName, readonly P
   return [...byBucket.entries()]
     .toSorted((a, b) => a[0] - b[0])
     .map(([bucket, rows]) => {
-      const extreme = (pick: (b: ProbeBucket) => number | null, reduce: (a: number, b: number) => number) => {
+      const extreme = (
+        pick: (b: ProbeBucket) => number | null,
+        reduce: (a: number, b: number) => number,
+      ) => {
         const present = rows.map(pick).filter((v): v is number => v !== null)
         // An arrow, not a bare `Math.min` reference: `reduce` passes the index and the array as a
         // third and fourth argument, and `Math.min(a, b, index, array)` is NaN.

@@ -64,7 +64,10 @@ export function groupVerdicts(verdicts: readonly Verdict[]): VerdictGroup[] {
     // map, and each map entry starts with one push before it can ever be looked up.
     const instances = instancesById.get(id)!
     const first = instances[0]!
-    const severity = instances.reduce((worst, v) => worstSeverity(worst, v.severity), first.severity)
+    const severity = instances.reduce(
+      (worst, v) => worstSeverity(worst, v.severity),
+      first.severity,
+    )
     const representative = instances.find((v) => v.severity === severity)!
     return {
       id,

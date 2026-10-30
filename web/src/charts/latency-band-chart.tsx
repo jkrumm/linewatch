@@ -435,7 +435,9 @@ function latencyMarks(
   // Absence and full-loss are drawn FIRST, before anything decides whether there is a line to
   // draw, so a bucket with nothing to plot still occupies pixels.
   if (showAbsent) {
-    const cells = slots.filter((p) => p.bucket === null).map((p) => ({ ...column(p), y0: 0, y1: yMax }))
+    const cells = slots
+      .filter((p) => p.bucket === null)
+      .map((p) => ({ ...column(p), y0: 0, y1: yMax }))
     if (cells.length > 0) {
       marks.push(
         decorative(
@@ -587,12 +589,12 @@ function latencyMarks(
     for (const heavy of [false, true]) {
       if (heavy ? !showLossHeavy : !showLossPartial) continue
       const dotKey = heavy ? 'loss-heavy' : 'loss-partial'
-      const dots = plot
-        .rows(chartKey)
-        .filter((r) => {
-          const b = r.datum.bucket
-          return b !== null && b.maxLossPct > 0 && r.y !== null && (b.maxLossPct >= HEAVY_LOSS_PCT) === heavy
-        })
+      const dots = plot.rows(chartKey).filter((r) => {
+        const b = r.datum.bucket
+        return (
+          b !== null && b.maxLossPct > 0 && r.y !== null && b.maxLossPct >= HEAVY_LOSS_PCT === heavy
+        )
+      })
       if (dots.length === 0) continue
       marks.push(
         decorative(
@@ -620,7 +622,9 @@ function latencyMarks(
         (p) =>
           p.vantage !== null &&
           p.vantage.onHomeLine !== 'all' &&
-          (verdict === 'unknown' ? p.vantage.onHomeLine === 'unknown' : p.vantage.onHomeLine !== 'unknown'),
+          (verdict === 'unknown'
+            ? p.vantage.onHomeLine === 'unknown'
+            : p.vantage.onHomeLine !== 'unknown'),
       )
       .map((p) => ({ ...column(p), y0: 0, y1: RAIL_H * perPx }))
     if (cells.length === 0) continue
@@ -693,7 +697,11 @@ function bucketRows(p: Point, expectedCycles: number, primaryColor: string): Cha
   const bucket = p.bucket
   if (bucket === null) {
     return [
-      { label: 'Not measured', value: `0 of ${expectedCycles} expected cycles`, color: ABSENT_COLOR },
+      {
+        label: 'Not measured',
+        value: `0 of ${expectedCycles} expected cycles`,
+        color: ABSENT_COLOR,
+      },
     ]
   }
   // No "Median" row: `CartesianChart` derives one from the primary series, labelled with the

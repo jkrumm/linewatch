@@ -254,7 +254,9 @@ function OtherOccurrences({ group }: { group: VerdictGroup }) {
 
   // The representative is whichever instance supplied `group.conclusion`/etc — the first one at
   // the group's (worst) severity. Everything else in `instances` is an "other occurrence".
-  const representativeIndex = group.instances.findIndex((instance) => instance.severity === group.severity)
+  const representativeIndex = group.instances.findIndex(
+    (instance) => instance.severity === group.severity,
+  )
   const others = group.instances.filter((_, index) => index !== representativeIndex)
 
   return (

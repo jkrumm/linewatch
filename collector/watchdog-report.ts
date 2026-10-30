@@ -94,12 +94,18 @@ export interface NotificationSubject {
  * and stays up; so does every shadow-mode evaluation, or two weeks of shadow
  * running would page continuously.
  */
-export function notificationStatus(subject: Pick<NotificationSubject, 'state' | 'action'>): 'up' | 'down' {
+export function notificationStatus(
+  subject: Pick<NotificationSubject, 'state' | 'action'>,
+): 'up' | 'down' {
   return subject.state === 'latched' || subject.action === 'escalate' ? 'down' : 'up'
 }
 
 /** Kuma truncates long messages, so the state and the class lead and the prose follows. */
 export function notificationMessage(subject: NotificationSubject): string {
-  const uncleared = subject.consecutiveActions > 0 ? ` · ${subject.consecutiveActions} action(s) uncleared` : ''
-  return `${subject.state} · ${subject.outageClass} · ${subject.armed ? 'armed' : 'shadow'}${uncleared} · ${subject.note}`.slice(0, 240)
+  const uncleared =
+    subject.consecutiveActions > 0 ? ` · ${subject.consecutiveActions} action(s) uncleared` : ''
+  return `${subject.state} · ${subject.outageClass} · ${subject.armed ? 'armed' : 'shadow'}${uncleared} · ${subject.note}`.slice(
+    0,
+    240,
+  )
 }

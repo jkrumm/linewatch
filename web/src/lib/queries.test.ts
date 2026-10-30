@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import { quantiseWindow, sameWindowedQuery, WINDOW_KEY_MAX_STEP_MS, windowKeyStepMs } from './queries'
+import {
+  quantiseWindow,
+  sameWindowedQuery,
+  WINDOW_KEY_MAX_STEP_MS,
+  windowKeyStepMs,
+} from './queries'
 import { PROBE_CYCLE_MS, RANGE_OPTIONS, rangeToBucket, rangeToWindow } from './range'
 
 const NOW = Date.UTC(2026, 6, 30, 12, 0, 0)
@@ -23,11 +28,14 @@ describe('windowKeyStepMs', () => {
     expect(windowKeyStepMs(86_400)).toBe(WINDOW_KEY_MAX_STEP_MS)
   })
 
-  test.each(RANGE_OPTIONS)('the real RANGE_BUCKET for %s resolves inside [PROBE_CYCLE_MS, WINDOW_KEY_MAX_STEP_MS]', (range) => {
-    const step = windowKeyStepMs(rangeToBucket(range))
-    expect(step).toBeGreaterThanOrEqual(PROBE_CYCLE_MS)
-    expect(step).toBeLessThanOrEqual(WINDOW_KEY_MAX_STEP_MS)
-  })
+  test.each(RANGE_OPTIONS)(
+    'the real RANGE_BUCKET for %s resolves inside [PROBE_CYCLE_MS, WINDOW_KEY_MAX_STEP_MS]',
+    (range) => {
+      const step = windowKeyStepMs(rangeToBucket(range))
+      expect(step).toBeGreaterThanOrEqual(PROBE_CYCLE_MS)
+      expect(step).toBeLessThanOrEqual(WINDOW_KEY_MAX_STEP_MS)
+    },
+  )
 })
 
 describe('quantiseWindow', () => {
@@ -83,7 +91,9 @@ describe('sameWindowedQuery', () => {
   })
 
   test('a key of different length never matches', () => {
-    expect(sameWindowedQuery(['probes', 'gateway', 0, 1], ['probes', 'gateway', 60, 0, 1])).toBe(false)
+    expect(sameWindowedQuery(['probes', 'gateway', 0, 1], ['probes', 'gateway', 60, 0, 1])).toBe(
+      false,
+    )
   })
 
   test('a key shorter than 2 positions never matches, even against itself', () => {

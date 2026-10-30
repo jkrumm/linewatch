@@ -193,7 +193,9 @@ export function parseAirportInfo(output: string): Partial<WifiSampleInput> {
   // status at all, so `Not Connected` is recorded as the finding it is. awdl0
   // prints a `Current Network Information` block of its own and no `Status`
   // line, so it can never be chosen and its fields can never be returned.
-  const chosen = blocks.find((block) => block.status === 'Connected') ?? blocks.find((block) => block.status !== null)
+  const chosen =
+    blocks.find((block) => block.status === 'Connected') ??
+    blocks.find((block) => block.status !== null)
   if (chosen === undefined) return { ...NO_RADIO }
   return { ...chosen.radio, iface: chosen.iface, status: chosen.status }
 }
@@ -289,7 +291,11 @@ export async function captureWifi(options: CaptureWifiOptions): Promise<WifiSamp
     // `-b <iface>` binds the probe to the radio; `-c 5 -i 0.2` is one second of
     // sampling, a twentieth of what a probe target gets — this is a spot check
     // on an alternate path, not a second uptime record.
-    runCommand(['ping', '-c', '5', '-i', '0.2', '-b', options.iface, options.pingTarget], timeoutMs, report),
+    runCommand(
+      ['ping', '-c', '5', '-i', '0.2', '-b', options.iface, options.pingTarget],
+      timeoutMs,
+      report,
+    ),
   ])
 
   const reach = measureReachability(pingOut)
@@ -331,10 +337,15 @@ export async function captureWifi(options: CaptureWifiOptions): Promise<WifiSamp
  * 100 % loss exits non-zero and prints no round-trip line, and that is a valid
  * measurement — `rttMedMs: null, lossPct: 100` — not an error.
  */
-function measureReachability(output: string): { rttMedMs: number | null; lossPct: number | null } | null {
+function measureReachability(
+  output: string,
+): { rttMedMs: number | null; lossPct: number | null } | null {
   try {
     const parsed = parsePingOutput(output)
-    return { rttMedMs: parsed.rtts.length > 0 ? median(parsed.rtts) : null, lossPct: parsed.lossPct }
+    return {
+      rttMedMs: parsed.rtts.length > 0 ? median(parsed.rtts) : null,
+      lossPct: parsed.lossPct,
+    }
   } catch {
     return null
   }
@@ -367,7 +378,10 @@ async function runCommand(
     await proc.exited
     return stdout
   } catch (err) {
-    report('wifi.command_error', { command: args[0], error: err instanceof Error ? err.message : String(err) })
+    report('wifi.command_error', {
+      command: args[0],
+      error: err instanceof Error ? err.message : String(err),
+    })
     return ''
   } finally {
     if (timer !== undefined) clearTimeout(timer)

@@ -108,7 +108,11 @@ function linkStateOver(db: BunSQLiteDatabase<typeof schema>, from: number, to: n
  * `bytes_down`/`duration_s` null, or a non-positive duration, drops the row in
  * SQL — a rate needs both terms and neither may be substituted.
  */
-function throughputCandidates(db: BunSQLiteDatabase<typeof schema>, from: number, to: number): ThroughputCandidate[] {
+function throughputCandidates(
+  db: BunSQLiteDatabase<typeof schema>,
+  from: number,
+  to: number,
+): ThroughputCandidate[] {
   const rows = db.all<{
     id: number
     ts: number
@@ -214,7 +218,11 @@ function linkVsSync(db: BunSQLiteDatabase<typeof schema>, from: number, to: numb
  * first one. `showtime_start_s IS NOT NULL` is enforced in SQL — a coalesce to 0
  * would date every resync to the poll instant itself.
  */
-function resyncClusters(db: BunSQLiteDatabase<typeof schema>, from: number, to: number): ResyncCluster[] {
+function resyncClusters(
+  db: BunSQLiteDatabase<typeof schema>,
+  from: number,
+  to: number,
+): ResyncCluster[] {
   const rows = db.all<{ up_at: number }>(sql`
     SELECT (ts - showtime_start_s * 1000) AS up_at
     FROM router_line_sample
@@ -226,7 +234,11 @@ function resyncClusters(db: BunSQLiteDatabase<typeof schema>, from: number, to: 
   for (const row of rows) {
     const current = groups[groups.length - 1]
     const previous = current?.[current.length - 1]
-    if (current === undefined || previous === undefined || row.up_at - previous > VERDICT_THRESHOLDS.resyncClusterToleranceMs) {
+    if (
+      current === undefined ||
+      previous === undefined ||
+      row.up_at - previous > VERDICT_THRESHOLDS.resyncClusterToleranceMs
+    ) {
       groups.push([row.up_at])
       continue
     }
@@ -248,7 +260,10 @@ function resyncClusters(db: BunSQLiteDatabase<typeof schema>, from: number, to: 
         ORDER BY started_at DESC LIMIT 1
       `),
     )
-    const matched: ResyncOutage | null = outage === null ? null : { id: outage.id, endedAt: outage.ended_at, durationS: outage.duration_s }
+    const matched: ResyncOutage | null =
+      outage === null
+        ? null
+        : { id: outage.id, endedAt: outage.ended_at, durationS: outage.duration_s }
     return {
       upAt,
       samples: instants.length,
@@ -269,7 +284,12 @@ function resyncClusters(db: BunSQLiteDatabase<typeof schema>, from: number, to: 
  * rather than letting SQL's NULL comparison drop it silently. `med_ms > 0` in
  * the ratio avoids a divide by zero instead of defaulting it.
  */
-function pathStalls(db: BunSQLiteDatabase<typeof schema>, from: number, to: number, expectedTargetCount: number): PathStall[] {
+function pathStalls(
+  db: BunSQLiteDatabase<typeof schema>,
+  from: number,
+  to: number,
+  expectedTargetCount: number,
+): PathStall[] {
   const rows = db.all<{ ts: number; min_ratio: number; max_loss: number }>(sql`
     WITH c AS (
       SELECT ts,
@@ -306,7 +326,9 @@ function pathStalls(db: BunSQLiteDatabase<typeof schema>, from: number, to: numb
   const watchByTs = new Map(watch.map((row) => [row.ts, row.link_watch_s]))
 
   return rows.map((row) => {
-    const perTarget = detail.filter((d) => d.ts === row.ts).map((d) => ({ target: d.target, medMs: d.med_ms, maxMs: d.max_ms }))
+    const perTarget = detail
+      .filter((d) => d.ts === row.ts)
+      .map((d) => ({ target: d.target, medMs: d.med_ms, maxMs: d.max_ms }))
     return {
       ts: row.ts,
       targetCount: perTarget.length,
@@ -365,7 +387,12 @@ function gatewayOutages(
         WHERE ts = ${row.started_at} AND target IN (${inTargets(wanTargets)})
         ORDER BY target
       `)
-      .map((a): AnchorReply => ({ target: a.target, received: a.received, sent: a.sent, medMs: a.med_ms }))
+      .map((a): AnchorReply => ({
+        target: a.target,
+        received: a.received,
+        sent: a.sent,
+        medMs: a.med_ms,
+      }))
 
     const cycle = one(
       db.all<{ on_home_line: number | null; gateway_addr: string | null }>(sql`
@@ -435,18 +462,33 @@ function symmetricLoss(
       AND gw < 100
   `
   const summary = one(
-    db.all<{ cycles: number; first_ts: number | null; last_ts: number | null; worst_med_ms: number | null }>(sql`
+    db.all<{
+      cycles: number
+      first_ts: number | null
+      last_ts: number | null
+      worst_med_ms: number | null
+    }>(sql`
       SELECT COUNT(*) AS cycles, MIN(ts) AS first_ts, MAX(ts) AS last_ts, MAX(worst_med) AS worst_med_ms
       FROM (${qualifying})
     `),
   )
-  if (summary === null || summary.cycles === 0 || summary.first_ts === null || summary.last_ts === null) return null
+  if (
+    summary === null ||
+    summary.cycles === 0 ||
+    summary.first_ts === null ||
+    summary.last_ts === null
+  )
+    return null
 
   const exampleTargets = db
     .all<{ target: string; loss_pct: number; med_ms: number | null }>(sql`
       SELECT target, loss_pct, med_ms FROM probe_sample WHERE ts = ${summary.first_ts} ORDER BY target
     `)
-    .map((row): SymmetricLossExampleTarget => ({ target: row.target, lossPct: row.loss_pct, medMs: row.med_ms }))
+    .map((row): SymmetricLossExampleTarget => ({
+      target: row.target,
+      lossPct: row.loss_pct,
+      medMs: row.med_ms,
+    }))
 
   // Cumulative counters, so the movement across the window is last − first. Both
   // ends come from a row that reported them; `if_ierrs` gates the selection
@@ -490,7 +532,12 @@ function counterDelta(first: number | null, last: number | null): number | null 
 }
 
 /** Carrier-side poll coverage of the window, including the worst gap between polls. */
-function routerCoverage(db: BunSQLiteDatabase<typeof schema>, from: number, to: number, pollIntervalMs: number) {
+function routerCoverage(
+  db: BunSQLiteDatabase<typeof schema>,
+  from: number,
+  to: number,
+  pollIntervalMs: number,
+) {
   const row = one(
     db.all<{ polls: number; last_ts: number | null; worst_gap_ms: number | null }>(sql`
       SELECT COUNT(*) AS polls, MAX(ts) AS last_ts,
@@ -511,12 +558,28 @@ function routerCoverage(db: BunSQLiteDatabase<typeof schema>, from: number, to: 
 }
 
 /** Everything the nine rules read, over one window. */
-export function collectVerdictInput(db: BunSQLiteDatabase<typeof schema>, params: CollectVerdictInputParams): VerdictInput {
-  const { from, to, now, probeCycleSeconds, degradedLossPct, wanTargets, gatewayTarget, expectedTargetCount } = params
+export function collectVerdictInput(
+  db: BunSQLiteDatabase<typeof schema>,
+  params: CollectVerdictInputParams,
+): VerdictInput {
+  const {
+    from,
+    to,
+    now,
+    probeCycleSeconds,
+    degradedLossPct,
+    wanTargets,
+    gatewayTarget,
+    expectedTargetCount,
+  } = params
 
-  const lastProbe = one(db.all<{ last_ts: number | null }>(sql`SELECT MAX(ts) AS last_ts FROM probe_sample`))
+  const lastProbe = one(
+    db.all<{ last_ts: number | null }>(sql`SELECT MAX(ts) AS last_ts FROM probe_sample`),
+  )
   const linkChanges = one(
-    db.all<CountRow>(sql`SELECT COUNT(*) AS n FROM event WHERE kind = 'link_change' AND ts >= ${from} AND ts <= ${to}`),
+    db.all<CountRow>(
+      sql`SELECT COUNT(*) AS n FROM event WHERE kind = 'link_change' AND ts >= ${from} AND ts <= ${to}`,
+    ),
   )
   const coverage = rangeSummary(db, { from, to, probeCycleSeconds, degradedLossPct, wanTargets })
   const router = routerCoverage(db, from, to, params.router.pollIntervalMs)
@@ -544,8 +607,12 @@ export function collectVerdictInput(db: BunSQLiteDatabase<typeof schema>, params
     pathStalls: pathStalls(db, from, to, expectedTargetCount),
     // Both of these separate the gateway from the anchors, so neither is
     // computable without a configured gateway-scoped target.
-    gatewayOutages: gatewayTarget === null ? [] : gatewayOutages(db, from, to, gatewayTarget, wanTargets),
-    symmetricLoss: gatewayTarget === null ? null : symmetricLoss(db, from, to, gatewayTarget, wanTargets, expectedTargetCount),
+    gatewayOutages:
+      gatewayTarget === null ? [] : gatewayOutages(db, from, to, gatewayTarget, wanTargets),
+    symmetricLoss:
+      gatewayTarget === null
+        ? null
+        : symmetricLoss(db, from, to, gatewayTarget, wanTargets, expectedTargetCount),
     linkChangeEvents: linkChanges?.n ?? 0,
   }
 }

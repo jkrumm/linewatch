@@ -237,7 +237,9 @@ export function createLinkSampler(options: LinkSamplerOptions): LinkSampler {
       // Rounded because probe_cycle.link_watch_s is an integer column and the
       // ingest schema types it `int`: a fractional value would 422 the whole
       // batch and lose four real probe samples over a coverage counter.
-      const watchedS = Math.round(maxWatchS === undefined ? sampledS : Math.min(sampledS, maxWatchS))
+      const watchedS = Math.round(
+        maxWatchS === undefined ? sampledS : Math.min(sampledS, maxWatchS),
+      )
       const drained = transitions
       transitions = []
       watchedTicks = 0

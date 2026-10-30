@@ -222,14 +222,18 @@ describe('the windows the dashboard actually densifies', () => {
   test('the Latency view densifies every range without tripping the cap', () => {
     for (const range of RANGE_OPTIONS) {
       const { from, to } = rangeToWindow(range, NOW)
-      expect(() => densifyBuckets([], { from, to, bucketSeconds: rangeToBucket(range) })).not.toThrow()
+      expect(() =>
+        densifyBuckets([], { from, to, bucketSeconds: rangeToBucket(range) }),
+      ).not.toThrow()
     }
   })
 
   test('a 30-day hourly grid fits, a 365-day one does not', () => {
     const { to } = rangeToWindow('30d', NOW)
     const DAY_MS = 86_400_000
-    expect(densifyBuckets([], { from: to - 30 * DAY_MS, to, bucketSeconds: 3_600 }).length).toBe(721)
+    expect(densifyBuckets([], { from: to - 30 * DAY_MS, to, bucketSeconds: 3_600 }).length).toBe(
+      721,
+    )
     expect(() => densifyBuckets([], { from: to - 365 * DAY_MS, to, bucketSeconds: 3_600 })).toThrow(
       /over the 5000 cap/,
     )

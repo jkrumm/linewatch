@@ -47,7 +47,8 @@ class FakeClient {
 // The executor takes a RouterClient; the fake implements the three members it
 // actually calls. Structural typing would reject the missing ones, and widening
 // the constructor's type to accept less would weaken the real call site.
-const asClient = (fake: FakeClient) => fake as unknown as ConstructorParameters<typeof LiveExecutor>[0]
+const asClient = (fake: FakeClient) =>
+  fake as unknown as ConstructorParameters<typeof LiveExecutor>[0]
 const executor = (fake: FakeClient) => new LiveExecutor(asClient(fake), () => Promise.resolve())
 
 describe('the write whitelist', () => {
@@ -88,7 +89,12 @@ describe('the write whitelist', () => {
     // Wire values, not the firmware's identifier names for them: the device's
     // own gdprProxy.js declares `var ACT_OP_PPP_CONN = "ACT_PPP_CONN"`, and
     // sending the identifier gets HTTP 200 with errorcode 1.
-    expect([...found].sort()).toEqual(['ACT_DHCP_RENEW', 'ACT_PPP_CONN', 'ACT_PPP_DISCONN', 'ACT_REBOOT'])
+    expect([...found].sort()).toEqual([
+      'ACT_DHCP_RENEW',
+      'ACT_PPP_CONN',
+      'ACT_PPP_DISCONN',
+      'ACT_REBOOT',
+    ])
   })
 
   it('exposes no way to name an operation from outside client.ts', () => {
@@ -104,7 +110,12 @@ describe('the write whitelist', () => {
 describe('NullExecutor', () => {
   it('exercises the whole path and sends nothing', async () => {
     const result = await new NullExecutor().reconnect()
-    expect(result).toMatchObject({ ok: true, capability: 'null', outcome: 'not_executed', steps: [] })
+    expect(result).toMatchObject({
+      ok: true,
+      capability: 'null',
+      outcome: 'not_executed',
+      steps: [],
+    })
   })
 })
 
@@ -228,7 +239,12 @@ describe('LiveExecutor.reboot', () => {
   it('reads a rejected operation as a failure, because nothing rebooted', async () => {
     // The wrong-name signature, and the reason this is shippable: the device
     // validates the operation before acting on it.
-    const fake = new FakeClient(ADT_WAN_ROWS, () => ({ ok: false, errorcode: '1', httpStatus: 200, oid: 'X' }))
+    const fake = new FakeClient(ADT_WAN_ROWS, () => ({
+      ok: false,
+      errorcode: '1',
+      httpStatus: 200,
+      oid: 'X',
+    }))
     const result = await executor(fake).reboot()
     expect(result.outcome).toBe('failed')
     expect(result.ok).toBe(false)

@@ -48,7 +48,13 @@ import {
 } from '../lib/aggregate'
 import { throughputPoints, throughputTotals } from '../lib/throughput'
 import { windowDowntime } from '../lib/downtime'
-import { downtimeTint, measuredFraction, type ThresholdTint, worstBucketLoss, worstLossTint } from '../lib/kpi'
+import {
+  downtimeTint,
+  measuredFraction,
+  type ThresholdTint,
+  worstBucketLoss,
+  worstLossTint,
+} from '../lib/kpi'
 import { coverageKind, fmtCoveragePct } from '../lib/coverage'
 import { speedWindowStats } from '../lib/speed-stats'
 import { unmappedVerdictIds } from '../lib/verdict-section'
@@ -146,7 +152,9 @@ export const Route = createFileRoute('/')({
     return Promise.all([
       context.queryClient.ensureQueryData(statusQuery()),
       context.queryClient.ensureQueryData(verdictsQuery({ from, to })),
-      context.queryClient.ensureQueryData(outagesQuery({ from, to, minDuration: deps.minDuration })),
+      context.queryClient.ensureQueryData(
+        outagesQuery({ from, to, minDuration: deps.minDuration }),
+      ),
       context.queryClient.ensureQueryData(speedTestsQuery({ from, to })),
       ...TARGETS.map((target) =>
         context.queryClient.ensureQueryData(probeBucketsQuery({ from, to, target, bucket })),
@@ -227,7 +235,9 @@ function DashboardPage() {
     queries: TARGETS.map((target) => probeBucketsQuery({ from, to, target, bucket })),
   })
   const prevTargetResults = useQueries({
-    queries: TARGETS.map((target) => probeBucketsQuery({ from: prevFrom, to: from, target, bucket })),
+    queries: TARGETS.map((target) =>
+      probeBucketsQuery({ from: prevFrom, to: from, target, bucket }),
+    ),
   })
 
   const bucketsByTarget = new Map<TargetName, readonly ProbeBucket[]>(
@@ -273,7 +283,8 @@ function DashboardPage() {
   // decide whether a defined zero earns `'good'` or is just an unwatched window. Computed once here
   // so the KPI card and the Uptime section's own Downtime stat can never disagree about it.
   const coverage = measuredFraction(points)
-  const downtimeTone = allOutageData === undefined ? undefined : downtimeTint(downtime, windowSeconds, coverage)
+  const downtimeTone =
+    allOutageData === undefined ? undefined : downtimeTint(downtime, windowSeconds, coverage)
 
   /**
    * The preceding window, or `null` until every part of it has arrived.
@@ -283,7 +294,9 @@ function DashboardPage() {
    * windows are not comparable (see `compareWindows`). Loading must not be able to counterfeit that.
    */
   const previous: KpiWindow | null =
-    prevOutageData !== undefined && prevTests !== undefined && prevTargetResults.every((r) => r.data !== undefined)
+    prevOutageData !== undefined &&
+    prevTests !== undefined &&
+    prevTargetResults.every((r) => r.data !== undefined)
       ? {
           downtime: windowDowntime(prevOutageData.outages, { from: prevFrom, to: from }, nowTick),
           points: comparePointsFrom(
@@ -385,11 +398,11 @@ function DashboardPage() {
           this Callout on and off. */}
       {verdicts !== undefined && unmapped.length > 0 && (
         <Callout kind="warn" title="A verdict fired that no section claims">
-          {unmapped.join(', ')} — the conclusion is above, but nothing below is marked as holding its
-          evidence. Add it to <code>VERDICT_SECTION</code> in <code>web/src/lib/verdict-section.ts</code>.
+          {unmapped.join(', ')} — the conclusion is above, but nothing below is marked as holding
+          its evidence. Add it to <code>VERDICT_SECTION</code> in{' '}
+          <code>web/src/lib/verdict-section.ts</code>.
         </Callout>
       )}
-
 
       {/* No provider and no scope: every chart shares basalt's default `chartCursor()` group, and
           `cursorGroup` would opt one OUT. Nothing here wants out — the Speed views joined when
@@ -427,7 +440,10 @@ function DashboardPage() {
                 },
                 {
                   label: 'Coverage',
-                  value: outageData === undefined ? null : fmtCoveragePct(outageData.summary?.coveragePct ?? null),
+                  value:
+                    outageData === undefined
+                      ? null
+                      : fmtCoveragePct(outageData.summary?.coveragePct ?? null),
                   // `bad` is the coverage envelope's own third state; the strip has only two
                   // tints, and its `warn` is the one a reader must not read past.
                   tone:
@@ -467,7 +483,9 @@ function DashboardPage() {
                       isPending={seriesPending}
                     />
                   </GuidedChart>
-                  <CoverageCallout summary={outageData === undefined ? 'pending' : (outageData.summary ?? null)} />
+                  <CoverageCallout
+                    summary={outageData === undefined ? 'pending' : (outageData.summary ?? null)}
+                  />
                 </Stack>
               ),
             },
@@ -500,8 +518,8 @@ function DashboardPage() {
                 // no shared key here to protect, and the wrapper was a no-op.
                 <Stack gap={4}>
                   <Text size="xs" c="dimmed">
-                    Always the last 30 days, by hour of your own day. The range selector doesn’t scope this
-                    block — its shape is a fixed hour × day grid.
+                    Always the last 30 days, by hour of your own day. The range selector doesn’t
+                    scope this block — its shape is a fixed hour × day grid.
                   </Text>
                   <AvailabilityHeatmap
                     buckets={heatmapData?.buckets ?? []}
@@ -532,7 +550,9 @@ function DashboardPage() {
                 {
                   label: 'Worst loss',
                   value: seriesPending ? null : fmtPct(worstBucketLoss(points)),
-                  tone: seriesPending ? undefined : stripTone(worstLossTint(worstBucketLoss(points))),
+                  tone: seriesPending
+                    ? undefined
+                    : stripTone(worstLossTint(worstBucketLoss(points))),
                   hint: seriesPending
                     ? undefined
                     : 'The worst single bucket in the window, across the gateway and all three anchors — not the average, which a short outage barely moves.',
@@ -700,7 +720,11 @@ function DashboardPage() {
                   value: throughputPending
                     ? null
                     : `${volume.measuredBuckets} / ${volume.measuredBuckets + volume.unmeasuredBuckets}`,
-                  tone: throughputPending ? undefined : volume.unmeasuredBuckets > 0 ? 'warn' : undefined,
+                  tone: throughputPending
+                    ? undefined
+                    : volume.unmeasuredBuckets > 0
+                      ? 'warn'
+                      : undefined,
                   hint: throughputPending
                     ? undefined
                     : 'Intervals whose bytes the server could place in time, out of the window’s buckets. Unmeasured traffic moved but wasn’t counted.',
@@ -731,68 +755,68 @@ function DashboardPage() {
             reading, which is also why it is the only `collapsible` one. A verdict that points
             here leaves compact first, so the anchor still lands (see `EvidenceLink`). */}
         {compact ? null : (
-        <DashboardSection
-          id="path"
-          field={pathViews.field.view}
-          meta={<StatStrip stats={pathStats(status?.vantage, nowTick)} />}
-          // The one folded section on the page, and the only one whose evidence is mostly
-          // reference: an interface name, a media type and a gateway that have not changed since
-          // the machine was plugged in, under three view tabs. Its headline figures stay drawn
-          // above the fold, and a verdict linking here opens it — see `Section`'s hash listener.
-          collapsible
-          defaultOpen={false}
-          views={[
-            {
-              key: 'vantage',
-              label: 'This machine',
-              render: () => (
-                <Stack gap="md">
-                  <VantageCard vantage={status?.vantage} now={nowTick} />
-                  <LinkComparison
-                    router={router}
-                    vantage={status?.vantage}
-                    speedTest={status?.lastSpeedTest}
-                    now={nowTick}
-                  />
-                </Stack>
-              ),
-            },
-            {
-              key: 'link',
-              label: 'Link speed over time',
-              render: () => (
-                // No range suffix — the sticky header's range control is the single statement of
-                // the window (see `PageHeader`'s tooltip). This was the last chart title that
-                // still interpolated it in, reading "Link speed over time · 24h" directly under a
-                // view tab that already says "Link speed over time".
-                <GuidedChart title="Link speed over time" copy={LINK_SPEED_COPY}>
-                  <LinkSpeedStrip
-                    vantage={vantageSeries}
-                    from={from}
-                    to={to}
-                    bucketSeconds={bucket}
-                    isPending={seriesPending}
-                  />
-                </GuidedChart>
-              ),
-            },
-            {
-              key: 'transitions',
-              label: 'Transitions',
-              render: () => (
-                <Card>
-                  {/* `linkSamplingSince` decides which empty state is true, and the two say
+          <DashboardSection
+            id="path"
+            field={pathViews.field.view}
+            meta={<StatStrip stats={pathStats(status?.vantage, nowTick)} />}
+            // The one folded section on the page, and the only one whose evidence is mostly
+            // reference: an interface name, a media type and a gateway that have not changed since
+            // the machine was plugged in, under three view tabs. Its headline figures stay drawn
+            // above the fold, and a verdict linking here opens it — see `Section`'s hash listener.
+            collapsible
+            defaultOpen={false}
+            views={[
+              {
+                key: 'vantage',
+                label: 'This machine',
+                render: () => (
+                  <Stack gap="md">
+                    <VantageCard vantage={status?.vantage} now={nowTick} />
+                    <LinkComparison
+                      router={router}
+                      vantage={status?.vantage}
+                      speedTest={status?.lastSpeedTest}
+                      now={nowTick}
+                    />
+                  </Stack>
+                ),
+              },
+              {
+                key: 'link',
+                label: 'Link speed over time',
+                render: () => (
+                  // No range suffix — the sticky header's range control is the single statement of
+                  // the window (see `PageHeader`'s tooltip). This was the last chart title that
+                  // still interpolated it in, reading "Link speed over time · 24h" directly under a
+                  // view tab that already says "Link speed over time".
+                  <GuidedChart title="Link speed over time" copy={LINK_SPEED_COPY}>
+                    <LinkSpeedStrip
+                      vantage={vantageSeries}
+                      from={from}
+                      to={to}
+                      bucketSeconds={bucket}
+                      isPending={seriesPending}
+                    />
+                  </GuidedChart>
+                ),
+              },
+              {
+                key: 'transitions',
+                label: 'Transitions',
+                render: () => (
+                  <Card>
+                    {/* `linkSamplingSince` decides which empty state is true, and the two say
                       opposite things — so it is passed through even while events exist. */}
-                  <TransitionTimeline
-                    events={events?.events ?? []}
-                    linkSamplingSince={events?.linkSamplingSince ?? null}
-                    isPending={eventsPending}
-                  />
-                </Card>
-              ),
-            },
-          ]}
-        />
+                    <TransitionTimeline
+                      events={events?.events ?? []}
+                      linkSamplingSince={events?.linkSamplingSince ?? null}
+                      isPending={eventsPending}
+                    />
+                  </Card>
+                ),
+              },
+            ]}
+          />
         )}
       </Stack>
     </Stack>
@@ -852,7 +876,13 @@ function internetFoldRows(fold: InternetBucket): ChartTooltipRow[] {
     // Only when it disagrees with the internet-wide figure above it. Equal values would draw the
     // same number twice under two labels, which reads as a distinction that isn't there.
     ...(fold.worstAnchorLossPct > fold.lossPct
-      ? [{ label: 'Worst single anchor', value: fmtPct(fold.worstAnchorLossPct), color: VX.status.warn }]
+      ? [
+          {
+            label: 'Worst single anchor',
+            value: fmtPct(fold.worstAnchorLossPct),
+            color: VX.status.warn,
+          },
+        ]
       : []),
   ]
 }
@@ -915,13 +945,21 @@ function pathStats(vantage: Vantage | null | undefined, now: number): Stat[] {
       value: negotiated,
       // Only when the NIC negotiated below what it supports. Equal values are the ordinary case and
       // saying so on every load is noise; a gap is the whole reason the ceiling is stored.
-      tone: ceiling !== null && vantage.linkMbit !== null && vantage.linkMbit < ceiling ? 'warn' : undefined,
+      tone:
+        ceiling !== null && vantage.linkMbit !== null && vantage.linkMbit < ceiling
+          ? 'warn'
+          : undefined,
       hint:
         ceiling === null
           ? 'The negotiated Ethernet rate. The NIC’s supported ceiling was not reported, so there is nothing to read this against.'
           : `The negotiated Ethernet rate, against a NIC that supports ${ceiling} Mbit. Below that ceiling means a cable or a switch port, not an adapter that never went faster.`,
     },
-    { label: 'Path', value: chip.label, tone: chip.state === 'other-path' ? 'warn' : undefined, hint: chip.description },
+    {
+      label: 'Path',
+      value: chip.label,
+      tone: chip.state === 'other-path' ? 'warn' : undefined,
+      hint: chip.description,
+    },
   ]
 }
 
@@ -976,10 +1014,10 @@ function speedStats(
  * qualification that lives somewhere other than the number it qualifies is a qualification that
  * travels separately from it.
  */
-function volumeCaveat(volume: {
-  unmeasuredBuckets: number
-  skippedBuckets: number
-}): { tone?: 'warn'; hint?: string } {
+function volumeCaveat(volume: { unmeasuredBuckets: number; skippedBuckets: number }): {
+  tone?: 'warn'
+  hint?: string
+} {
   if (volume.unmeasuredBuckets === 0 && volume.skippedBuckets === 0) return {}
 
   const reasons: string[] = []

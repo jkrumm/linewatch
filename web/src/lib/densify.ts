@@ -84,7 +84,9 @@ export function densifyBuckets<T extends { bucket: number }>(
   const seen = new Set<number>()
   for (const row of rows) {
     if (seen.has(row.bucket)) {
-      throw new RangeError('densifyBuckets: two rows share one bucket start — expected one row per bucket')
+      throw new RangeError(
+        'densifyBuckets: two rows share one bucket start — expected one row per bucket',
+      )
     }
     seen.add(row.bucket)
   }
@@ -111,7 +113,11 @@ export function densifyBuckets<T extends { bucket: number }>(
 
   const slots: Slot<T>[] = []
   for (let bucketStart = first; bucketStart <= opts.to; bucketStart += bucketMs) {
-    slots.push({ key: new Date(bucketStart).toISOString(), bucketStart, value: byBucket.get(bucketStart) ?? null })
+    slots.push({
+      key: new Date(bucketStart).toISOString(),
+      bucketStart,
+      value: byBucket.get(bucketStart) ?? null,
+    })
   }
 
   return slots

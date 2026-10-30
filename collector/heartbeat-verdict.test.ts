@@ -111,7 +111,9 @@ describe('decideHeartbeat', () => {
 
   test('measuring some other uplink is down, not up', () => {
     const verdict = decide({
-      status: snapshot({ vantage: { onHomeLine: false, pathIf: 'en1', pathClass: 'wifi', linkMedia: 'autoselect' } }),
+      status: snapshot({
+        vantage: { onHomeLine: false, pathIf: 'en1', pathClass: 'wifi', linkMedia: 'autoselect' },
+      }),
     })
     expect(verdict.status).toBe('down')
     expect(verdict.reason).toBe('off_home_line')
@@ -121,7 +123,9 @@ describe('decideHeartbeat', () => {
   /** null is unknown. Never coalesced to true — docs/DESIGN.md, and the two recorded nulls sit inside a router reboot. */
   test('an unknown home-line verdict is not treated as a yes', () => {
     const verdict = decide({
-      status: snapshot({ vantage: { onHomeLine: null, pathIf: null, pathClass: null, linkMedia: null } }),
+      status: snapshot({
+        vantage: { onHomeLine: null, pathIf: null, pathClass: null, linkMedia: null },
+      }),
     })
     expect(verdict.status).toBe('down')
     expect(verdict.reason).toBe('off_home_line')
@@ -137,9 +141,19 @@ describe('decideHeartbeat', () => {
     const verdict = decide({
       status: snapshot({
         ongoingOutages: [
-          { scope: 'wan', startedAt: NOW - 450_000, cycles: 15, evidence: ['cloudflare', 'google', 'quad9'] },
+          {
+            scope: 'wan',
+            startedAt: NOW - 450_000,
+            cycles: 15,
+            evidence: ['cloudflare', 'google', 'quad9'],
+          },
         ],
-        lastSamples: samples(NOW - 10_000, [{}, { received: 0, lossPct: 100, medMs: null }, { received: 0, lossPct: 100, medMs: null }, { received: 0, lossPct: 100, medMs: null }]),
+        lastSamples: samples(NOW - 10_000, [
+          {},
+          { received: 0, lossPct: 100, medMs: null },
+          { received: 0, lossPct: 100, medMs: null },
+          { received: 0, lossPct: 100, medMs: null },
+        ]),
       }),
     })
     expect(verdict.status).toBe('down')
@@ -154,7 +168,12 @@ describe('decideHeartbeat', () => {
     const verdict = decide({
       status: snapshot({
         ongoingOutages: [
-          { scope: 'wan', startedAt: NOW - 450_000, cycles: 15, evidence: ['cloudflare', 'google', 'quad9'] },
+          {
+            scope: 'wan',
+            startedAt: NOW - 450_000,
+            cycles: 15,
+            evidence: ['cloudflare', 'google', 'quad9'],
+          },
           { scope: 'gateway', startedAt: NOW - 90_000, cycles: 3, evidence: ['gateway'] },
         ],
       }),
@@ -185,7 +204,9 @@ describe('decideHeartbeat', () => {
 
   test('a failed speed test is named rather than dropped from the message', () => {
     const verdict = decide({
-      status: snapshot({ lastSpeedTest: { ts: NOW - 60_000, ok: false, downloadMbps: null, uploadMbps: null } }),
+      status: snapshot({
+        lastSpeedTest: { ts: NOW - 60_000, ok: false, downloadMbps: null, uploadMbps: null },
+      }),
     })
     expect(verdict.status).toBe('up')
     expect(verdict.msg).toContain('last speed test failed')

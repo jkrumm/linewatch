@@ -48,7 +48,9 @@ import { decideHeartbeat, type StatusSnapshot } from './heartbeat-verdict.js'
 const config = {
   apiUrl: process.env['LINEWATCH_API_URL'] ?? 'http://localhost:7731',
   pushUrl: process.env['LINEWATCH_KUMA_PUSH_URL'] ?? null,
-  pushUrlFile: process.env['LINEWATCH_KUMA_PUSH_URL_FILE'] ?? join(homedir(), '.config', 'uptime-kuma', 'linewatch-push-url'),
+  pushUrlFile:
+    process.env['LINEWATCH_KUMA_PUSH_URL_FILE'] ??
+    join(homedir(), '.config', 'uptime-kuma', 'linewatch-push-url'),
   /** Three probe cycles. Two missed cycles are a hiccup; three are a collector that is not running. */
   staleSampleMs: Number(process.env['LINEWATCH_HEARTBEAT_STALE_MS'] ?? 90_000),
   degradedLossPct: Number(process.env['LINEWATCH_DEGRADED_LOSS_PCT'] ?? 20),
@@ -61,7 +63,9 @@ const config = {
    */
   pushTimeoutMs: Number(process.env['LINEWATCH_HEARTBEAT_PUSH_TIMEOUT_MS'] ?? 15_000),
   /** Must equal the plist's StandardOutPath — launchd opens it once, O_APPEND, and never reopens it. */
-  logPath: process.env['LINEWATCH_HEARTBEAT_LOG_PATH'] ?? join(homedir(), 'Library', 'Logs', 'linewatch-heartbeat.log'),
+  logPath:
+    process.env['LINEWATCH_HEARTBEAT_LOG_PATH'] ??
+    join(homedir(), 'Library', 'Logs', 'linewatch-heartbeat.log'),
   logMaxBytes: Number(process.env['LINEWATCH_HEARTBEAT_LOG_MAX_BYTES'] ?? DEFAULT_LOG_MAX_BYTES),
   /**
    * `make heartbeat-status`: compute the verdict, print it, push nothing. So the
@@ -86,7 +90,9 @@ function resolvePushUrl(): string | null {
 
 async function fetchStatus(): Promise<{ status: StatusSnapshot | null; error: string | null }> {
   try {
-    const response = await fetch(`${config.apiUrl}/api/status`, { signal: AbortSignal.timeout(config.apiTimeoutMs) })
+    const response = await fetch(`${config.apiUrl}/api/status`, {
+      signal: AbortSignal.timeout(config.apiTimeoutMs),
+    })
     if (!response.ok) return { status: null, error: `GET /api/status returned ${response.status}` }
     return { status: (await response.json()) as StatusSnapshot, error: null }
   } catch (err) {
@@ -118,7 +124,8 @@ async function push(baseUrl: string, status: 'up' | 'down', msg: string): Promis
 }
 
 async function main(): Promise<void> {
-  if (!config.dryRun) rotateLogIfNeeded({ logPath: config.logPath, maxBytes: config.logMaxBytes, report: log })
+  if (!config.dryRun)
+    rotateLogIfNeeded({ logPath: config.logPath, maxBytes: config.logMaxBytes, report: log })
 
   const pushUrl = resolvePushUrl()
   if (config.dryRun) {

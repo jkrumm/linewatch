@@ -171,7 +171,10 @@ describe('createLinkSampler', () => {
     const h = harness()
     await h.sample('active')
     await h.sample('inactive')
-    expect(h.sampler.drain()).toEqual({ transitions: [{ ts: 1_700_000_002_000, state: 'down' }], watchedS: 2 })
+    expect(h.sampler.drain()).toEqual({
+      transitions: [{ ts: 1_700_000_002_000, state: 'down' }],
+      watchedS: 2,
+    })
 
     // Second drain with no ticks in between: the cycle watched nothing, and
     // says so, rather than repeating the previous cycle's coverage.

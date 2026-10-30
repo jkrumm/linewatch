@@ -28,7 +28,14 @@ describe('the ledger on disk', () => {
     const ledger = {
       ...emptyLedger(),
       consecutiveActions: 2,
-      actions: [{ ts: 1_700_000_000_000, kind: 'reboot' as const, outageKey: 'wan:1', outcome: 'executed' as const }],
+      actions: [
+        {
+          ts: 1_700_000_000_000,
+          kind: 'reboot' as const,
+          outageKey: 'wan:1',
+          outcome: 'executed' as const,
+        },
+      ],
       pending: { ts: 1_700_000_001_000, kind: 'reconnect' as const, outageKey: 'wan:2' },
     }
     writeLedger(ledger, path)
@@ -70,7 +77,10 @@ describe('the ledger on disk', () => {
 
   test('a ledger from a schema this binary does not know is untrusted', () => {
     const path = join(scratch(), 'state.json')
-    writeFileSync(path, JSON.stringify({ version: 2, ladder: {}, actions: [], consecutiveActions: 0, v6: {} }))
+    writeFileSync(
+      path,
+      JSON.stringify({ version: 2, ladder: {}, actions: [], consecutiveActions: 0, v6: {} }),
+    )
     expect(readLedger(path).trusted).toBe(false)
   })
 

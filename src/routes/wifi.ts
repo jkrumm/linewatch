@@ -36,26 +36,47 @@ const WifiBucketSchema = z.object({
   connectedSamples: z
     .number()
     .int()
-    .describe('…of which this many reported `status: Connected`. Fewer than `samples` means the radio was associated for only part of the bucket.'),
+    .describe(
+      '…of which this many reported `status: Connected`. Fewer than `samples` means the radio was associated for only part of the bucket.',
+    ),
   ifaces: z.array(z.string()),
-  statuses: z.array(z.string()).describe('Distinct statuses seen, verbatim — more than one means the radio changed state inside the bucket'),
+  statuses: z
+    .array(z.string())
+    .describe(
+      'Distinct statuses seen, verbatim — more than one means the radio changed state inside the bucket',
+    ),
   phyModes: z
     .array(z.string())
-    .describe('Distinct PHY modes seen. More than one is reported as both rather than averaged into a mode that never existed.'),
-  bands: z.array(z.string()).describe('Distinct bands seen — more than one means the radio changed band inside the bucket'),
-  channelMax: z.number().int().nullable().describe('Highest channel number seen; channels are labels, so they are never averaged'),
+    .describe(
+      'Distinct PHY modes seen. More than one is reported as both rather than averaged into a mode that never existed.',
+    ),
+  bands: z
+    .array(z.string())
+    .describe('Distinct bands seen — more than one means the radio changed band inside the bucket'),
+  channelMax: z
+    .number()
+    .int()
+    .nullable()
+    .describe('Highest channel number seen; channels are labels, so they are never averaged'),
   widthMhzMax: z.number().int().nullable(),
   rssiDbmAvg: z.number().nullable(),
   noiseDbmAvg: z.number().nullable(),
   snrDbAvg: z
     .number()
     .nullable()
-    .describe('Average of `rssi - noise`, computed on read over the samples that measured both. Never stored, and null when no sample did.'),
+    .describe(
+      'Average of `rssi - noise`, computed on read over the samples that measured both. Never stored, and null when no sample did.',
+    ),
   txRateMbpsAvg: z
     .number()
     .nullable()
-    .describe('Average negotiated PHY/MCS rate — **not** throughput and not comparable with a speed test'),
-  rttMedMsAvg: z.number().nullable().describe('Average of the per-sample median RTT from a ping bound to the interface'),
+    .describe(
+      'Average negotiated PHY/MCS rate — **not** throughput and not comparable with a speed test',
+    ),
+  rttMedMsAvg: z
+    .number()
+    .nullable()
+    .describe('Average of the per-sample median RTT from a ping bound to the interface'),
   lossPctAvg: z.number().nullable(),
 })
 
@@ -161,7 +182,12 @@ export const wifiRoutes = new Elysia().get(
     query: z.object({
       from: z.coerce.number().int(),
       to: z.coerce.number().int(),
-      bucket: z.coerce.number().int().min(1).default(300).describe('Bucket width in seconds (default 300 = the sampling cadence)'),
+      bucket: z.coerce
+        .number()
+        .int()
+        .min(1)
+        .default(300)
+        .describe('Bucket width in seconds (default 300 = the sampling cadence)'),
     }),
     response: z.object({
       from: z.number().int(),
@@ -173,7 +199,7 @@ export const wifiRoutes = new Elysia().get(
       tags: ['Status'],
       summary: 'Wi-Fi radio history',
       description:
-        'Signal, noise, negotiated PHY rate and interface-bound round trips for an alternate radio path currently attached, bucketed in SQL by `floor(ts / (bucket*1000))` — never raw rows. Sampled every 10th probe cycle (5 min) because `system_profiler SPAirPortDataType` costs ~4.8 s, so a 30-day range at the default 300 s bucket returns at most one row per sample taken. Signal strength averages; band, PHY mode and status do not — those come back as the distinct values seen, so a bucket spanning a band change says so instead of hiding it. `snrDb` is derived on read from `rssi - noise` over the samples that measured both, and is stored nowhere. **`txRateMbps` is the negotiated PHY/MCS rate, not throughput**: measured, the radio negotiated 229 Mbit while its round trip was 9.99 ms against Ethernet\'s 5.24 ms, so nothing here supports calling the radio path faster. The response deliberately carries no network name and no hardware address — those columns do not exist.',
+        "Signal, noise, negotiated PHY rate and interface-bound round trips for an alternate radio path currently attached, bucketed in SQL by `floor(ts / (bucket*1000))` — never raw rows. Sampled every 10th probe cycle (5 min) because `system_profiler SPAirPortDataType` costs ~4.8 s, so a 30-day range at the default 300 s bucket returns at most one row per sample taken. Signal strength averages; band, PHY mode and status do not — those come back as the distinct values seen, so a bucket spanning a band change says so instead of hiding it. `snrDb` is derived on read from `rssi - noise` over the samples that measured both, and is stored nowhere. **`txRateMbps` is the negotiated PHY/MCS rate, not throughput**: measured, the radio negotiated 229 Mbit while its round trip was 9.99 ms against Ethernet's 5.24 ms, so nothing here supports calling the radio path faster. The response deliberately carries no network name and no hardware address — those columns do not exist.",
     },
   },
 )

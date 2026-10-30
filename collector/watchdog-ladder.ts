@@ -372,7 +372,9 @@ function anchorsAnyDown(anchors: readonly AnchorState[]): boolean {
 export function v6Health(input: Pick<LadderInput, 'now' | 'policy' | 'self' | 'ledger'>): V6Health {
   if (input.self?.v6 == null) return 'unconfigured'
   if (input.ledger.v6.lastUpTs === null) return 'unusable'
-  return input.now - input.ledger.v6.lastUpTs > input.policy.v6BaselineMaxAgeS * 1000 ? 'unusable' : 'usable'
+  return input.now - input.ledger.v6.lastUpTs > input.policy.v6BaselineMaxAgeS * 1000
+    ? 'unusable'
+    : 'usable'
 }
 
 /**
@@ -398,7 +400,11 @@ export function classify(input: LadderInput): OutageClass {
   if (usableRecord !== null && usableRecord.onHomeLine !== true) return 'off_home_line'
 
   if (self !== null && self.gateway.received === 0) return 'local_link_down'
-  if (usableRecord !== null && usableRecord.gateway !== null && usableRecord.gateway.received === 0) {
+  if (
+    usableRecord !== null &&
+    usableRecord.gateway !== null &&
+    usableRecord.gateway.received === 0
+  ) {
     return 'local_link_down'
   }
 
@@ -413,7 +419,12 @@ export function classify(input: LadderInput): OutageClass {
     // in showtime cannot complete a re-dial and will not gain showtime from a
     // reboot. Note the asymmetry: a stale or missing reading does NOT produce
     // this class, because absence of carrier evidence is not evidence.
-    if (input.carrier !== null && !input.carrier.stale && input.carrier.lineStatus !== null && input.carrier.lineStatus !== 'Up') {
+    if (
+      input.carrier !== null &&
+      !input.carrier.stale &&
+      input.carrier.lineStatus !== null &&
+      input.carrier.lineStatus !== 'Up'
+    ) {
       return 'carrier_down'
     }
     const health = v6Health(input)
@@ -478,8 +489,14 @@ function recordedOutageStart(record: RecordEvidence | null): number | null {
   return starts.length === 0 ? null : Math.min(...starts)
 }
 
-function actionsWithin(ledger: Ledger, now: number, windowMs: number, kind: 'reconnect' | 'reboot'): number {
-  return ledger.actions.filter((action) => action.kind === kind && now - action.ts <= windowMs).length
+function actionsWithin(
+  ledger: Ledger,
+  now: number,
+  windowMs: number,
+  kind: 'reconnect' | 'reboot',
+): number {
+  return ledger.actions.filter((action) => action.kind === kind && now - action.ts <= windowMs)
+    .length
 }
 
 function lastActionTs(ledger: Ledger, kind: 'reconnect' | 'reboot'): number | null {
@@ -509,7 +526,8 @@ function sharedBlockers(input: LadderInput, outageClass: OutageClass): string[] 
   if (self === null || self.onHomeLine !== 1) blocked.push('off_home_line')
   if (record !== null && record.onHomeLine !== true) blocked.push('off_home_line_record')
   if (self !== null && self.gateway.received === 0) blocked.push('gateway_down')
-  if (record !== null && record.gateway !== null && record.gateway.received === 0) blocked.push('gateway_down_record')
+  if (record !== null && record.gateway !== null && record.gateway.received === 0)
+    blocked.push('gateway_down_record')
 
   // The failover case this exists for: a mini that fell back to a travel router
   // on the same 192.168.1.0/24 answers its gateway happily while every anchor
@@ -522,7 +540,8 @@ function sharedBlockers(input: LadderInput, outageClass: OutageClass): string[] 
   // diagnostic; redundant on the record side would be noise, which is why
   // `RecordEvidence` carries no `pathClass`.
   if (self !== null && self.pathClass !== 'ethernet') blocked.push('not_ethernet')
-  if (self !== null && record !== null && self.gatewayAddr !== record.gatewayAddr) blocked.push('gateway_addr_mismatch')
+  if (self !== null && record !== null && self.gatewayAddr !== record.gatewayAddr)
+    blocked.push('gateway_addr_mismatch')
 
   const recordFresh = record !== null && now - record.newestSampleTs <= policy.staleSampleS * 1000
   if (!recordFresh && self === null) blocked.push('no_evidence')
@@ -530,30 +549,39 @@ function sharedBlockers(input: LadderInput, outageClass: OutageClass): string[] 
   // "No recorded transition" means none above the 1 Hz sampling resolution was
   // observed — never that the link was stable. So demand positive coverage
   // rather than treating absence as evidence.
-  if (record !== null && record.linkWatchS !== null && record.linkWatchS < 29) blocked.push('link_coverage_incomplete')
+  if (record !== null && record.linkWatchS !== null && record.linkWatchS < 29)
+    blocked.push('link_coverage_incomplete')
 
   if (!ACTIONABLE.has(outageClass)) blocked.push(`class_${outageClass}`)
 
   // Carrier evidence may veto or delay. It may never permit.
   if (input.carrier !== null && !input.carrier.stale) {
-    if (input.carrier.lineStatus !== null && input.carrier.lineStatus !== 'Up') blocked.push('carrier_down')
+    if (input.carrier.lineStatus !== null && input.carrier.lineStatus !== 'Up')
+      blocked.push('carrier_down')
     // A delay, re-evaluated, not a terminal stand-down: IPv4 returned 14–16 s
     // after showtime on 07-30 and within 5 s on 08-01, so a line that just
     // resynced deserves a moment before anything touches it.
-    if (input.carrier.showtimeStartS !== null && input.carrier.showtimeStartS < policy.resyncGraceS) {
+    if (
+      input.carrier.showtimeStartS !== null &&
+      input.carrier.showtimeStartS < policy.resyncGraceS
+    ) {
       blocked.push('resync_grace')
     }
   }
 
   if (ledger.pending !== null) blocked.push('action_pending')
-  if (ledger.postActionCooldownUntil !== null && now < ledger.postActionCooldownUntil) blocked.push('post_action_cooldown')
+  if (ledger.postActionCooldownUntil !== null && now < ledger.postActionCooldownUntil)
+    blocked.push('post_action_cooldown')
 
   // The human already told us they are working on it, via `make intervention`.
   // There is no way to detect a person in the router UI — the poller's 2-on/2-off
   // failure pattern runs unbroken all night with nobody present, so poll failures
   // are not a presence signal — so an explicit quiet period is the only honest
   // mechanism available.
-  if (input.lastHumanInterventionTs !== null && now - input.lastHumanInterventionTs < policy.humanQuietS * 1000) {
+  if (
+    input.lastHumanInterventionTs !== null &&
+    now - input.lastHumanInterventionTs < policy.humanQuietS * 1000
+  ) {
     blocked.push('human_quiet_period')
   }
 
@@ -595,8 +623,10 @@ function reconnectBlockers(input: LadderInput, _t0: number): string[] {
   if (cycles < 8 && input.heldTicks < 8) blocked.push('insufficient_cycles')
 
   const last = lastActionTs(ledger, 'reconnect')
-  if (last !== null && now - last < policy.reconnectMinIntervalS * 1000) blocked.push('reconnect_min_interval')
-  if (actionsWithin(ledger, now, DAY_MS, 'reconnect') >= policy.reconnectMaxPer24h) blocked.push('reconnect_rate_limit')
+  if (last !== null && now - last < policy.reconnectMinIntervalS * 1000)
+    blocked.push('reconnect_min_interval')
+  if (actionsWithin(ledger, now, DAY_MS, 'reconnect') >= policy.reconnectMaxPer24h)
+    blocked.push('reconnect_rate_limit')
 
   return blocked
 }
@@ -606,7 +636,8 @@ function rebootBlockers(input: LadderInput, t0: number, outageClass: OutageClass
   const blocked: string[] = []
 
   if (!policy.rebootEnabled) blocked.push('reboot_disabled')
-  if (outageClass === 'v4_only_down' && !policy.rebootOnV4Only) blocked.push('reboot_on_v4_only_disabled')
+  if (outageClass === 'v4_only_down' && !policy.rebootOnV4Only)
+    blocked.push('reboot_on_v4_only_disabled')
 
   // Likewise no `reboot_window`: `rebootIsDue` already requires
   // `downForS >= rebootDueAt` off the same `t0`, so the check could not fire.
@@ -618,17 +649,24 @@ function rebootBlockers(input: LadderInput, t0: number, outageClass: OutageClass
   if (ledger.ladder.rung === 'observe') blocked.push('ladder_not_advanced')
 
   const last = lastActionTs(ledger, 'reboot')
-  if (last !== null && now - last < policy.rebootMinIntervalS * 1000) blocked.push('reboot_min_interval')
-  if (actionsWithin(ledger, now, DAY_MS, 'reboot') >= policy.rebootMaxPer24h) blocked.push('reboot_rate_limit')
+  if (last !== null && now - last < policy.rebootMinIntervalS * 1000)
+    blocked.push('reboot_min_interval')
+  if (actionsWithin(ledger, now, DAY_MS, 'reboot') >= policy.rebootMaxPer24h)
+    blocked.push('reboot_rate_limit')
 
   // Proof that the control path is currently ours. A reboot that cannot be
   // preceded by a successful poll is a write to a device we cannot read.
-  if (input.carrier === null || input.carrier.freshPollAgeS === null || input.carrier.freshPollAgeS > 60) {
+  if (
+    input.carrier === null ||
+    input.carrier.freshPollAgeS === null ||
+    input.carrier.freshPollAgeS > 60
+  ) {
     blocked.push('no_fresh_poll')
   }
 
   if (ledger.ladder.announcedAt === null) blocked.push('not_announced')
-  else if (now - ledger.ladder.announcedAt < policy.announceLeadS * 1000) blocked.push('announce_pending')
+  else if (now - ledger.ladder.announcedAt < policy.announceLeadS * 1000)
+    blocked.push('announce_pending')
 
   return blocked
 }
@@ -669,7 +707,15 @@ function evaluate(input: LadderInput, outageClass: OutageClass): LadderDecision 
   if (healthy) {
     const inLadder = ledger.ladder.t0 !== null
     if (!inLadder) {
-      return { ...base, state: 'normal', action: 'none', shadow: false, blockedBy: [], nextEvaluationAt: tick, note: 'healthy' }
+      return {
+        ...base,
+        state: 'normal',
+        action: 'none',
+        shadow: false,
+        blockedBy: [],
+        nextEvaluationAt: tick,
+        note: 'healthy',
+      }
     }
 
     // A recovery has to hold as long as an outage takes to confirm. One stray
@@ -755,7 +801,8 @@ function evaluate(input: LadderInput, outageClass: OutageClass): LadderDecision 
 
   if (downForS >= policy.exhaustAtS) {
     const quiet =
-      ledger.lastEscalationTs !== null && now - ledger.lastEscalationTs < policy.escalationQuietS * 1000
+      ledger.lastEscalationTs !== null &&
+      now - ledger.lastEscalationTs < policy.escalationQuietS * 1000
     // An escalation is a notification, not a write to the line, so it is not
     // gated on `armed` — a shadow run that cannot tell you it gave up is the
     // same inert shadow mode the capability precondition already produced once.
@@ -857,7 +904,14 @@ function evaluate(input: LadderInput, outageClass: OutageClass): LadderDecision 
 export function emptyLedger(): Ledger {
   return {
     version: 1,
-    ladder: { outageKey: null, t0: null, rung: 'observe', enteredAt: 0, settleUntil: null, announcedAt: null },
+    ladder: {
+      outageKey: null,
+      t0: null,
+      rung: 'observe',
+      enteredAt: 0,
+      settleUntil: null,
+      announcedAt: null,
+    },
     actions: [],
     pending: null,
     v6: { lastUpTs: null, lastCheckedTs: null },
@@ -874,7 +928,12 @@ export function emptyLedger(): Ledger {
  * either taken or reported before the destructive one becomes available — so a
  * rung that could slip back would hand out a second reboot window per outage.
  */
-const RUNG_RANK: Readonly<Record<Rung, number>> = Object.freeze({ observe: 0, reconnect: 1, reboot: 2, exhausted: 3 })
+const RUNG_RANK: Readonly<Record<Rung, number>> = Object.freeze({
+  observe: 0,
+  reconnect: 1,
+  reboot: 2,
+  exhausted: 3,
+})
 
 /**
  * Long enough to cover every lookback the blockers perform — 24 h for the daily
@@ -944,7 +1003,14 @@ function advance(input: LadderInput, decision: LadderDecision): Ledger {
       // reconnect at 240 s would veto the reboot at 330 s.
       const acted = ledger.actions.some((action) => action.outageKey === ledger.ladder.outageKey)
       if (acted) next.postActionCooldownUntil = now + policy.postActionCooldownS * 1000
-      next.ladder = { outageKey: null, t0: null, rung: 'observe', enteredAt: now, settleUntil: null, announcedAt: null }
+      next.ladder = {
+        outageKey: null,
+        t0: null,
+        rung: 'observe',
+        enteredAt: now,
+        settleUntil: null,
+        announcedAt: null,
+      }
     }
     return next
   }
@@ -1017,7 +1083,9 @@ export function recordOutcome(ledger: Ledger, action: LedgerAction): Ledger {
     ...ledger,
     pending: null,
     actions: [...ledger.actions, action],
-    consecutiveActions: reachedTheLine ? ledger.consecutiveActions : Math.max(0, ledger.consecutiveActions - 1),
+    consecutiveActions: reachedTheLine
+      ? ledger.consecutiveActions
+      : Math.max(0, ledger.consecutiveActions - 1),
     // A refusal bought no settle window either — there is nothing settling.
     ladder: reachedTheLine ? ledger.ladder : { ...ledger.ladder, settleUntil: null },
   }

@@ -10,7 +10,10 @@ const RangeSummarySchema = z.object({
   from: z.number().int(),
   to: z.number().int(),
   recordedCycles: z.number().int().describe('Distinct probe cycles actually recorded in the range'),
-  expectedCycles: z.number().int().describe('How many the probe cadence should have produced across the whole range'),
+  expectedCycles: z
+    .number()
+    .int()
+    .describe('How many the probe cadence should have produced across the whole range'),
   coveragePct: z
     .number()
     .nullable()
@@ -25,10 +28,14 @@ const RangeSummarySchema = z.object({
     .describe(
       'Cycles in which EVERY WAN anchor lost ≥ degradedLossPct while no outage row covered them — degradation the outage table structurally cannot show. All anchors, not the worst one: three anchors sit on three networks so that one provider deprioritising ICMP is not a line problem. The gateway is excluded — gateway loss is a LOCAL problem, not a home-line degradation.',
     ),
-  degradedLossPct: z.number().describe('The threshold used (LINEWATCH_DEGRADED_LOSS_PCT / src/config.ts)'),
+  degradedLossPct: z
+    .number()
+    .describe('The threshold used (LINEWATCH_DEGRADED_LOSS_PCT / src/config.ts)'),
   onHomeLine: z
     .enum(['all', 'none', 'mixed', 'unknown'])
-    .describe('Vantage verdict over the range. Only `all` means every recorded cycle measured the home line; `unknown` is not `all`.'),
+    .describe(
+      'Vantage verdict over the range. Only `all` means every recorded cycle measured the home line; `unknown` is not `all`.',
+    ),
   homeLineCycles: z.number().int(),
   offHomeLineCycles: z.number().int(),
   unknownHomeLineCycles: z.number().int(),
@@ -54,7 +61,8 @@ export const outagesRoutes = new Elysia().get(
     // the single worst row to lose. An outage overlaps the window when it began
     // at or before `to` and had not yet ended at `from` (still ongoing counts).
     if (query.to !== undefined) conditions.push(lte(outage.startedAt, query.to))
-    if (query.from !== undefined) conditions.push(or(isNull(outage.endedAt), gte(outage.endedAt, query.from)) as SQL)
+    if (query.from !== undefined)
+      conditions.push(or(isNull(outage.endedAt), gte(outage.endedAt, query.from)) as SQL)
     if (query.minDuration !== undefined) {
       // An ongoing outage (durationS still null) always passes — its final
       // duration isn't known yet, and it's the most operationally relevant row.
@@ -78,7 +86,9 @@ export const outagesRoutes = new Elysia().get(
             // (src/config.ts), and a degradation of the *line* has to be
             // visible on all of them. Renaming a target must not silently
             // change what "degraded" counts.
-            wanTargets: config.targets.filter((target) => target.scope === 'wan').map((target) => target.name),
+            wanTargets: config.targets
+              .filter((target) => target.scope === 'wan')
+              .map((target) => target.name),
           })
         : null
 
@@ -99,11 +109,17 @@ export const outagesRoutes = new Elysia().get(
     query: z.object({
       from: z.coerce.number().int().optional(),
       to: z.coerce.number().int().optional(),
-      minDuration: z.coerce.number().int().optional().describe('Seconds — filters closed outages; ongoing outages always show'),
+      minDuration: z.coerce
+        .number()
+        .int()
+        .optional()
+        .describe('Seconds — filters closed outages; ongoing outages always show'),
     }),
     response: z.object({
       outages: z.array(OutageSchema),
-      summary: RangeSummarySchema.nullable().describe('Coverage, degradation and vantage over the requested range; null when `from`/`to` were not both given'),
+      summary: RangeSummarySchema.nullable().describe(
+        'Coverage, degradation and vantage over the requested range; null when `from`/`to` were not both given',
+      ),
     }),
     detail: {
       tags: ['Outages'],

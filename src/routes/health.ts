@@ -6,6 +6,7 @@ export const healthRoute = new Elysia().get('/health', () => ({ status: 'ok' as 
   detail: {
     tags: ['System'],
     summary: 'Liveness probe',
-    description: 'Returns `{ status: "ok" }` if the process is up. No auth required. Used by the Docker healthcheck.',
+    description:
+      'Returns `{ status: "ok" }` if the process is up. No auth required. Used by the Docker healthcheck.',
   },
 })

@@ -175,9 +175,11 @@ export function parseLiveWan(
   options: { previousName?: string | null } = {},
 ): LiveWan | null {
   const candidates = rows.filter(
-    (row) => str(row, 'connStatusV4') !== 'Disconnected' || str(row, 'connStatusV6') === 'Connected',
+    (row) =>
+      str(row, 'connStatusV4') !== 'Disconnected' || str(row, 'connStatusV6') === 'Connected',
   )
-  const byStatus = candidates.find((row) => str(row, 'connStatusV4') === 'Connected') ?? candidates[0] ?? null
+  const byStatus =
+    candidates.find((row) => str(row, 'connStatusV4') === 'Connected') ?? candidates[0] ?? null
   const previousName = options.previousName ?? null
   const byContinuity =
     previousName === null ? null : (rows.find((row) => str(row, 'name') === previousName) ?? null)
@@ -374,7 +376,8 @@ export function checkListLength(input: {
 }): string | null {
   if (input.expected === null) return null
   if (input.rows.length === input.expected) return null
-  const truncation = input.rows.length === 1 && input.expected > 1 ? ' (the "go" truncation shape)' : ''
+  const truncation =
+    input.rows.length === 1 && input.expected > 1 ? ' (the "go" truncation shape)' : ''
   return `${input.oid} returned ${input.rows.length} instances, firmware reports ${input.expected}${truncation}`
 }
 

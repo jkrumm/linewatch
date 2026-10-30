@@ -45,7 +45,10 @@ const RANGE_BUCKET: Record<RangeOption, ProbeBucketSeconds> = {
  */
 export const PROBE_CYCLE_MS = 30_000
 
-export function rangeToWindow(range: RangeOption, now: number = Date.now()): { from: number; to: number } {
+export function rangeToWindow(
+  range: RangeOption,
+  now: number = Date.now(),
+): { from: number; to: number } {
   // Floor `to` (never round) so the window never reaches past `now` into data that cannot exist yet,
   // and derive `from` from the floored `to` so both ends are stable and the span stays exact.
   const to = Math.floor(now / PROBE_CYCLE_MS) * PROBE_CYCLE_MS

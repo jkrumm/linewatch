@@ -72,7 +72,12 @@ export interface StatusVantage {
 export interface StatusSnapshot {
   ongoingOutages: StatusOutage[]
   lastSamples: StatusSample[]
-  lastSpeedTest: { ts: number; ok: boolean; downloadMbps: number | null; uploadMbps: number | null } | null
+  lastSpeedTest: {
+    ts: number
+    ok: boolean
+    downloadMbps: number | null
+    uploadMbps: number | null
+  } | null
   vantage: StatusVantage | null
 }
 
@@ -146,7 +151,11 @@ export function decideHeartbeat(input: HeartbeatInput): HeartbeatVerdict {
   // 2. An empty record is not a healthy one. Distinguished from staleness
   //    because the fixes differ: this is a collector that has never delivered.
   if (newest === null) {
-    return { status: 'down', reason: 'no_samples', msg: 'no probe samples on record — the collector has never delivered' }
+    return {
+      status: 'down',
+      reason: 'no_samples',
+      msg: 'no probe samples on record — the collector has never delivered',
+    }
   }
 
   // 3. The check `status.up` cannot make. No ingest means no outage row can
@@ -218,7 +227,9 @@ function upMessage(input: HeartbeatInput, status: StatusSnapshot, sampleAge: num
   const parts: string[] = []
 
   const wan = status.lastSamples.filter((sample) => sample.scope === 'wan')
-  const wanMedians = wan.map((sample) => sample.medMs).filter((value): value is number => value !== null)
+  const wanMedians = wan
+    .map((sample) => sample.medMs)
+    .filter((value): value is number => value !== null)
   parts.push(`wan ${wanMedians.length === 0 ? '—' : round(Math.min(...wanMedians))}ms`)
 
   const gateway = status.lastSamples.find((sample) => sample.scope === 'gateway')
@@ -228,11 +239,14 @@ function upMessage(input: HeartbeatInput, status: StatusSnapshot, sampleAge: num
   if (loss >= input.degradedLossPct) parts.push(`DEGRADED ${round(loss, 0)}% loss`)
   else if (loss > 0) parts.push(`${round(loss, 0)}% loss`)
 
-  if (status.vantage !== null) parts.push(`${status.vantage.pathIf ?? 'none'} ${status.vantage.linkMedia ?? 'unknown'}`)
+  if (status.vantage !== null)
+    parts.push(`${status.vantage.pathIf ?? 'none'} ${status.vantage.linkMedia ?? 'unknown'}`)
 
   const speed = status.lastSpeedTest
   if (speed !== null && speed.ok) {
-    parts.push(`${round(speed.downloadMbps, 0)}/${round(speed.uploadMbps, 0)} Mbps ${humanDuration(input.now - speed.ts)} ago`)
+    parts.push(
+      `${round(speed.downloadMbps, 0)}/${round(speed.uploadMbps, 0)} Mbps ${humanDuration(input.now - speed.ts)} ago`,
+    )
   } else if (speed !== null) {
     parts.push('last speed test failed')
   }

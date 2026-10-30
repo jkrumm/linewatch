@@ -22,14 +22,33 @@ const app = new Elysia().use(verdictRoutes)
 const TS = 1_900_000_000_000
 
 interface Body {
-  verdicts: { id: string; severity: string; conclusion: string; evidence: { label: string; value: string }[]; uncertainty: string | null }[]
+  verdicts: {
+    id: string
+    severity: string
+    conclusion: string
+    evidence: { label: string; value: string }[]
+    uncertainty: string | null
+  }[]
   window: { from: number; to: number }
 }
 
 describe('GET /api/verdicts', () => {
   test('serves verdicts that pass the response schema, each citing its numbers', async () => {
     db.insert(probeSample)
-      .values({ ts: TS, target: 'cloudflare', addr: '1.1.1.1', sent: 20, received: 20, lossPct: 0, minMs: 4, medMs: 4, maxMs: 5, avgMs: 4, jitterMs: null, samples: null })
+      .values({
+        ts: TS,
+        target: 'cloudflare',
+        addr: '1.1.1.1',
+        sent: 20,
+        received: 20,
+        lossPct: 0,
+        minMs: 4,
+        medMs: 4,
+        maxMs: 5,
+        avgMs: 4,
+        jitterMs: null,
+        samples: null,
+      })
       .run()
 
     const from = TS - 60 * 60 * 1000

@@ -304,7 +304,8 @@ export class RouterClient {
   sendAction(input: { intent: RouterActionIntent; stack: string }): Promise<RouterActionResponse> {
     return this.serialise(async () => {
       const session = this.session
-      if (session === null) throw new RouterSessionLostError('no session held when sending an action')
+      if (session === null)
+        throw new RouterSessionLostError('no session held when sending an action')
 
       const oid = ACTION_OIDS[input.intent]
       // Belt to the type layer's braces. If this ever throws, something reached
@@ -337,7 +338,12 @@ export class RouterClient {
         // and the caller decides what that means for the action it sent.
       }
 
-      return { ok: response.status === 200 && errorcode === '0', errorcode, httpStatus: response.status, oid }
+      return {
+        ok: response.status === 200 && errorcode === '0',
+        errorcode,
+        httpStatus: response.status,
+        oid,
+      }
     })
   }
 
@@ -411,7 +417,9 @@ export class RouterClient {
     const now = Date.now()
     const session: Session = {
       key: String(now).padEnd(16, '0').slice(0, 16),
-      iv: String(now + 7).padEnd(16, '0').slice(0, 16),
+      iv: String(now + 7)
+        .padEnd(16, '0')
+        .slice(0, 16),
       hash: md5(this.options.user + this.options.password),
       nn,
       ee,

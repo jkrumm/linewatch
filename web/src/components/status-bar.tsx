@@ -1,4 +1,16 @@
-import { Box, Card, Center, Divider, Group, SimpleGrid, Stack, Text, ThemeIcon, Tooltip, VisuallyHidden } from '@mantine/core'
+import {
+  Box,
+  Card,
+  Center,
+  Divider,
+  Group,
+  SimpleGrid,
+  Stack,
+  Text,
+  ThemeIcon,
+  Tooltip,
+  VisuallyHidden,
+} from '@mantine/core'
 import {
   IconAlertTriangle,
   IconCircleCheck,
@@ -30,7 +42,15 @@ import {
   type Comparison,
   type ThresholdTint,
 } from '../lib/kpi'
-import { fmtDateTime, fmtDuration, fmtMbps, fmtMinutes, fmtMs, fmtPct, fmtRelative } from '../lib/format'
+import {
+  fmtDateTime,
+  fmtDuration,
+  fmtMbps,
+  fmtMinutes,
+  fmtMs,
+  fmtPct,
+  fmtRelative,
+} from '../lib/format'
 import classes from './status-bar.module.css'
 
 const SCOPE_LABEL: Record<OngoingOutage['scope'], string> = {
@@ -247,7 +267,9 @@ export function StatusBar({
   // Successful runs only, the same basis `windowDownloadMedian` uses — a failed run has no
   // throughput to plot and plotting it as a gap would say the opposite of what the number above it
   // was taken over.
-  const downloadSeries = denseSparkline(current.tests.map((t) => t.downloadMbps).filter((v) => v !== null))
+  const downloadSeries = denseSparkline(
+    current.tests.map((t) => t.downloadMbps).filter((v) => v !== null),
+  )
 
   /**
    * All-or-nothing across the three plottable cells. Each can independently lose its series to a
@@ -320,7 +342,9 @@ export function StatusBar({
               ? 'Downtime'
               : `Downtime · ${current.downtime.openCount} still open`
           }
-          tone={pending.downtime ? undefined : downtimeTint(current.downtime, windowSeconds, coverage)}
+          tone={
+            pending.downtime ? undefined : downtimeTint(current.downtime, windowSeconds, coverage)
+          }
         >
           <KpiValue>{pending.downtime ? '—' : fmtMinutes(current.downtime.seconds)}</KpiValue>
           <ComparisonBadge comparison={previous === null ? null : downtimeDelta} period={period} />
@@ -335,8 +359,14 @@ export function StatusBar({
         // "Worst 5 minutes", not "worst 5-min bucket loss": the bucket is how the figure is
         // computed, not what it says. What it says is that there was a five-minute stretch in which
         // this share of pings never came back.
-        <Cell railGutter label={`Worst ${bucketLabel(bucketSeconds)}`} tone={pending.series ? undefined : worstLossTint(worstLoss)}>
-          <KpiValue>{pending.series || worstLoss === null ? '—' : `${fmtPct(worstLoss)} lost`}</KpiValue>
+        <Cell
+          railGutter
+          label={`Worst ${bucketLabel(bucketSeconds)}`}
+          tone={pending.series ? undefined : worstLossTint(worstLoss)}
+        >
+          <KpiValue>
+            {pending.series || worstLoss === null ? '—' : `${fmtPct(worstLoss)} lost`}
+          </KpiValue>
           <ComparisonBadge comparison={previous === null ? null : lossDelta} period={period} />
           {sparkSlot(
             // `Sparkline` pools itself to its width and keeps each bucket's extreme (bars: the
@@ -506,9 +536,22 @@ function KpiValue({ children }: { children: ReactNode }) {
  * `+8 min`. The colour is the judgment and the label is the measurement; an arrow that means neither
  * one unambiguously is worse than no arrow.
  */
-function ComparisonBadge({ comparison, period }: { comparison: Comparison | null; period: string }) {
+function ComparisonBadge({
+  comparison,
+  period,
+}: {
+  comparison: Comparison | null
+  period: string
+}) {
   if (comparison === null) return <Box mih={22} />
-  return <DeltaBadge value={comparison.tone} format={() => comparison.label} withGlyph={false} period={period} />
+  return (
+    <DeltaBadge
+      value={comparison.tone}
+      format={() => comparison.label}
+      withGlyph={false}
+      period={period}
+    />
+  )
 }
 
 /**
@@ -618,7 +661,10 @@ function OutageLine({ outage, now }: { outage: OngoingOutage; now: number }) {
   const short = `${SCOPE_LABEL[outage.scope]} · ${fmtDuration((now - outage.startedAt) / 1000)} so far`
 
   return (
-    <Tooltip label={`Started ${fmtDateTime(outage.startedAt)}`} events={{ hover: true, focus: true, touch: true }}>
+    <Tooltip
+      label={`Started ${fmtDateTime(outage.startedAt)}`}
+      events={{ hover: true, focus: true, touch: true }}
+    >
       <Group gap="sm" wrap="nowrap" tabIndex={0} style={{ width: 'fit-content' }}>
         <ThemeIcon size={28} radius="md" color="red" variant="light">
           <IconAlertTriangle size={16} />
@@ -632,7 +678,15 @@ function OutageLine({ outage, now }: { outage: OngoingOutage; now: number }) {
 }
 
 /** One live reading, router or internet, at bar density. */
-function Reading({ kind, reading, now }: { kind: 'router' | 'internet'; reading: LiveReading; now: number }) {
+function Reading({
+  kind,
+  reading,
+  now,
+}: {
+  kind: 'router' | 'internet'
+  reading: LiveReading
+  now: number
+}) {
   const stale = reading.ts !== null && isStale(reading.ts, now)
   const nothing = reading.ts === null
   const down = !stale && !nothing && reading.upCount === 0

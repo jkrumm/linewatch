@@ -1,6 +1,13 @@
 import { describe, expect, test } from 'bun:test'
 import { createTestDb } from '../db/test-db.js'
-import { event, outage, probeCycle, probeSample, routerLineSample, speedTest } from '../db/schema.js'
+import {
+  event,
+  outage,
+  probeCycle,
+  probeSample,
+  routerLineSample,
+  speedTest,
+} from '../db/schema.js'
 import { collectVerdictInput } from './verdict-queries.js'
 import { deriveVerdicts } from './verdict.js'
 
@@ -23,7 +30,12 @@ const NOW = TO
 
 const GATEWAY = 'gateway'
 const ANCHORS = ['cloudflare', 'google', 'quad9']
-const ADDRS: Record<string, string> = { gateway: '192.168.1.1', cloudflare: '1.1.1.1', google: '8.8.8.8', quad9: '9.9.9.9' }
+const ADDRS: Record<string, string> = {
+  gateway: '192.168.1.1',
+  cloudflare: '1.1.1.1',
+  google: '8.8.8.8',
+  quad9: '9.9.9.9',
+}
 
 const STALL_CYCLE = 10
 const GATEWAY_OUTAGE_CYCLE = 12
@@ -42,9 +54,28 @@ const PARAMS = {
 }
 
 /** One target's row for a cycle. `medMs`/`maxMs` null is 100% loss, as the collector writes it. */
-function sample(ts: number, target: string, lossPct: number, medMs: number | null, maxMs: number | null) {
+function sample(
+  ts: number,
+  target: string,
+  lossPct: number,
+  medMs: number | null,
+  maxMs: number | null,
+) {
   const received = Math.round(20 * (1 - lossPct / 100))
-  return { ts, target, addr: ADDRS[target] ?? '0.0.0.0', sent: 20, received, lossPct, minMs: medMs, medMs, maxMs, avgMs: medMs, jitterMs: null, samples: null }
+  return {
+    ts,
+    target,
+    addr: ADDRS[target] ?? '0.0.0.0',
+    sent: 20,
+    received,
+    lossPct,
+    minMs: medMs,
+    medMs,
+    maxMs,
+    avgMs: medMs,
+    jitterMs: null,
+    samples: null,
+  }
 }
 
 function seed() {
@@ -82,13 +113,19 @@ function seed() {
     }
     if (k === GATEWAY_OUTAGE_CYCLE) {
       db.insert(probeSample)
-        .values([sample(ts, GATEWAY, 100, null, null), ...ANCHORS.map((target) => sample(ts, target, 0, 60, 70))])
+        .values([
+          sample(ts, GATEWAY, 100, null, null),
+          ...ANCHORS.map((target) => sample(ts, target, 0, 60, 70)),
+        ])
         .run()
       continue
     }
     if (SYMMETRIC_CYCLES.includes(k)) {
       db.insert(probeSample)
-        .values([sample(ts, GATEWAY, 80, 1.4, 3), ...ANCHORS.map((target) => sample(ts, target, 70, 5, 9))])
+        .values([
+          sample(ts, GATEWAY, 80, 1.4, 3),
+          ...ANCHORS.map((target) => sample(ts, target, 70, 5, 9)),
+        ])
         .run()
       continue
     }
@@ -101,7 +138,14 @@ function seed() {
     .values([
       // Overlaps the derived showtime instant at T0 — the resync attribution
       // candidate.
-      { scope: 'wan', startedAt: T0 - 60_000, endedAt: T0 + 10_000, durationS: 70, cycles: 3, evidence: JSON.stringify(ANCHORS) },
+      {
+        scope: 'wan',
+        startedAt: T0 - 60_000,
+        endedAt: T0 + 10_000,
+        durationS: 70,
+        cycles: 3,
+        evidence: JSON.stringify(ANCHORS),
+      },
       {
         scope: 'gateway',
         startedAt: T0 + GATEWAY_OUTAGE_CYCLE * CYCLE_MS,
@@ -133,12 +177,18 @@ function seed() {
     [T0 + 1_200_000, 1200],
     [TO - 300_000, 3300],
   ] as const) {
-    db.insert(routerLineSample).values({ ts, carrier: 'gfast', status: 'Up', downSyncKbps: 803_140, showtimeStartS }).run()
+    db.insert(routerLineSample)
+      .values({ ts, carrier: 'gfast', status: 'Up', downSyncKbps: 803_140, showtimeStartS })
+      .run()
   }
 
   // Carrier-side, not host-side: this must not count towards the host link gate.
   db.insert(event)
-    .values({ ts: T0 + 60_000, kind: 'link_change', detail: JSON.stringify({ source: 'router-poller', changed: {} }) })
+    .values({
+      ts: T0 + 60_000,
+      kind: 'link_change',
+      detail: JSON.stringify({ source: 'router-poller', changed: {} }),
+    })
     .run()
 
   return db
@@ -198,7 +248,13 @@ describe('collectVerdictInput — the per-rule inputs', () => {
 
   test('the stalled cycle arrives with its per-target medians and its sampling coverage', () => {
     expect(input.pathStalls).toHaveLength(1)
-    expect(input.pathStalls[0]).toMatchObject({ ts: T0 + STALL_CYCLE * CYCLE_MS, targetCount: 4, minRatio: 15, maxLossPct: 0, linkWatchS: 30 })
+    expect(input.pathStalls[0]).toMatchObject({
+      ts: T0 + STALL_CYCLE * CYCLE_MS,
+      targetCount: 4,
+      minRatio: 15,
+      maxLossPct: 0,
+      linkWatchS: 30,
+    })
     expect(input.pathStalls[0]?.perTarget).toHaveLength(4)
   })
 
@@ -250,10 +306,16 @@ describe('the whole layer over a seeded window', () => {
 
   test('the gated rules withhold their attribution, because the sampler covered almost none of this window', () => {
     const verdicts = deriveVerdicts(input)
-    const gated = verdicts.filter((v) => ['carrier_resync_dated', 'gateway_outage_uncorroborated', 'symmetric_loss_not_line'].includes(v.id))
+    const gated = verdicts.filter((v) =>
+      ['carrier_resync_dated', 'gateway_outage_uncorroborated', 'symmetric_loss_not_line'].includes(
+        v.id,
+      ),
+    )
     expect(gated).toHaveLength(3)
     for (const v of gated) expect(v.uncertainty).not.toBeNull()
     expect(verdicts.find((v) => v.id === 'gateway_outage_uncorroborated')?.severity).toBe('info')
-    expect(verdicts.find((v) => v.id === 'carrier_resync_dated')?.conclusion).not.toContain('was the line')
+    expect(verdicts.find((v) => v.id === 'carrier_resync_dated')?.conclusion).not.toContain(
+      'was the line',
+    )
   })
 })

@@ -8,19 +8,35 @@ import { deriveVerdicts } from '../lib/verdict.js'
 
 const EvidenceSchema = z.object({
   label: z.string(),
-  value: z.string().describe('Already formatted, units included. `unknown` where a term was not measured — never 0 standing in for it.'),
+  value: z
+    .string()
+    .describe(
+      'Already formatted, units included. `unknown` where a term was not measured — never 0 standing in for it.',
+    ),
 })
 
 const VerdictSchema = z.object({
-  id: z.string().describe('Rule id. Not unique: a per-row rule emits one verdict per row it fired on.'),
+  id: z
+    .string()
+    .describe('Rule id. Not unique: a per-row rule emits one verdict per row it fired on.'),
   severity: z.enum(['critical', 'warn', 'info', 'ok']),
-  conclusion: z.string().describe('One sentence, templated from the numbers in `evidence`. Never a literal authored in the UI.'),
-  evidence: z.array(EvidenceSchema).describe('The numbers the conclusion rests on. Always non-empty — a verdict that cannot cite them is not constructed.'),
+  conclusion: z
+    .string()
+    .describe(
+      'One sentence, templated from the numbers in `evidence`. Never a literal authored in the UI.',
+    ),
+  evidence: z
+    .array(EvidenceSchema)
+    .describe(
+      'The numbers the conclusion rests on. Always non-empty — a verdict that cannot cite them is not constructed.',
+    ),
   action: z.string().nullable(),
   uncertainty: z
     .string()
     .nullable()
-    .describe('Set when a cause was withheld for want of evidence — most often missing link-sampler coverage. Render it; swallowing it turns a hedged statement into a confident one.'),
+    .describe(
+      'Set when a cause was withheld for want of evidence — most often missing link-sampler coverage. Render it; swallowing it turns a hedged statement into a confident one.',
+    ),
 })
 
 export const verdictRoutes = new Elysia().get(
@@ -35,7 +51,9 @@ export const verdictRoutes = new Elysia().get(
       // Scope, not name — the same reasoning `GET /api/outages` applies: which
       // targets are anchors is configuration, and renaming one must not change
       // what any rule means.
-      wanTargets: config.targets.filter((target) => target.scope === 'wan').map((target) => target.name),
+      wanTargets: config.targets
+        .filter((target) => target.scope === 'wan')
+        .map((target) => target.name),
       gatewayTarget: config.targets.find((target) => target.scope === 'gateway')?.name ?? null,
       expectedTargetCount: config.targets.length,
       router: {

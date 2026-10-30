@@ -6,7 +6,9 @@ const HOUR_MS = 3_600_000
 const HOUR_0 = 10 * HOUR_MS
 const OPTS = { from: HOUR_0, to: HOUR_0 + 3 * HOUR_MS, bucketSeconds: 3600 } as const
 
-function bucket(patch: Partial<ThroughputBucket> & Pick<ThroughputBucket, 'bucket'>): ThroughputBucket {
+function bucket(
+  patch: Partial<ThroughputBucket> & Pick<ThroughputBucket, 'bucket'>,
+): ThroughputBucket {
   return { inBytes: 0, outBytes: 0, spanMs: 0, intervals: 0, skipped: 0, ...patch }
 }
 
@@ -18,7 +20,18 @@ describe('throughputPoints', () => {
    * problem into an apparent traffic collapse.
    */
   test('divides by measured time, not by the bucket width', () => {
-    const [point] = throughputPoints([bucket({ bucket: HOUR_0, inBytes: 6_000_000, outBytes: 600_000, spanMs: 60_000, intervals: 2 })], OPTS)
+    const [point] = throughputPoints(
+      [
+        bucket({
+          bucket: HOUR_0,
+          inBytes: 6_000_000,
+          outBytes: 600_000,
+          spanMs: 60_000,
+          intervals: 2,
+        }),
+      ],
+      OPTS,
+    )
     expect(point?.downBytesPerS).toBe(100_000)
     expect(point?.upBytesPerS).toBe(10_000)
   })
@@ -32,7 +45,10 @@ describe('throughputPoints', () => {
   })
 
   test('a measured but idle bucket keeps its zero rate', () => {
-    const [point] = throughputPoints([bucket({ bucket: HOUR_0, spanMs: 60_000, intervals: 2 })], OPTS)
+    const [point] = throughputPoints(
+      [bucket({ bucket: HOUR_0, spanMs: 60_000, intervals: 2 })],
+      OPTS,
+    )
     expect(point?.downBytesPerS).toBe(0)
     expect(point?.upBytesPerS).toBe(0)
   })
@@ -40,13 +56,19 @@ describe('throughputPoints', () => {
   /** Every interval refused means no measured time at all, so there is no denominator and no rate
    * — but the bucket is still distinct from one that was never reported, via `skipped`. */
   test('a bucket whose every interval was refused has no rate but still reports the refusals', () => {
-    const [point] = throughputPoints([bucket({ bucket: HOUR_0, spanMs: 0, intervals: 0, skipped: 4 })], OPTS)
+    const [point] = throughputPoints(
+      [bucket({ bucket: HOUR_0, spanMs: 0, intervals: 0, skipped: 4 })],
+      OPTS,
+    )
     expect(point?.downBytesPerS).toBeNull()
     expect(point?.skipped).toBe(4)
   })
 
   test('carries the raw volume alongside the rate', () => {
-    const [point] = throughputPoints([bucket({ bucket: HOUR_0, inBytes: 6_000_000, spanMs: 60_000, intervals: 2 })], OPTS)
+    const [point] = throughputPoints(
+      [bucket({ bucket: HOUR_0, inBytes: 6_000_000, spanMs: 60_000, intervals: 2 })],
+      OPTS,
+    )
     expect(point?.downBytes).toBe(6_000_000)
   })
 
@@ -66,7 +88,14 @@ describe('throughputTotals', () => {
     const points = throughputPoints(
       [
         bucket({ bucket: HOUR_0, inBytes: 1_000, outBytes: 100, spanMs: 30_000, intervals: 1 }),
-        bucket({ bucket: HOUR_0 + HOUR_MS, inBytes: 2_000, outBytes: 200, spanMs: 30_000, intervals: 1, skipped: 3 }),
+        bucket({
+          bucket: HOUR_0 + HOUR_MS,
+          inBytes: 2_000,
+          outBytes: 200,
+          spanMs: 30_000,
+          intervals: 1,
+          skipped: 3,
+        }),
       ],
       OPTS,
     )

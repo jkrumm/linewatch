@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test'
-import { eventKindFor, ledgerOutcome, markDelay, notificationMessage, notificationStatus } from './watchdog-report.js'
+import {
+  eventKindFor,
+  ledgerOutcome,
+  markDelay,
+  notificationMessage,
+  notificationStatus,
+} from './watchdog-report.js'
 
 describe('what an attempt costs the latch', () => {
   /**
@@ -56,7 +62,14 @@ describe('a notification that arrived late', () => {
 })
 
 describe('what turns the watchdog monitor red', () => {
-  const subject = { state: 'blocked', outageClass: 'full_wan_down', action: 'none', note: '', armed: true, consecutiveActions: 0 }
+  const subject = {
+    state: 'blocked',
+    outageClass: 'full_wan_down',
+    action: 'none',
+    note: '',
+    armed: true,
+    consecutiveActions: 0,
+  }
 
   test('a latched watchdog is down — it has taken itself out of service', () => {
     expect(notificationStatus({ ...subject, state: 'latched' })).toBe('down')
@@ -80,12 +93,18 @@ describe('what turns the watchdog monitor red', () => {
   })
 
   test('the message leads with the state and names the mode', () => {
-    expect(notificationMessage({ ...subject, note: 'observing' })).toBe('blocked · full_wan_down · armed · observing')
-    expect(notificationMessage({ ...subject, armed: false, note: 'observing' })).toContain('· shadow ·')
+    expect(notificationMessage({ ...subject, note: 'observing' })).toBe(
+      'blocked · full_wan_down · armed · observing',
+    )
+    expect(notificationMessage({ ...subject, armed: false, note: 'observing' })).toContain(
+      '· shadow ·',
+    )
   })
 
   test('uncleared actions are on the face of it, because they are how it latches', () => {
-    expect(notificationMessage({ ...subject, consecutiveActions: 1, note: 'x' })).toContain('1 action(s) uncleared')
+    expect(notificationMessage({ ...subject, consecutiveActions: 1, note: 'x' })).toContain(
+      '1 action(s) uncleared',
+    )
   })
 
   test('a long note is truncated rather than allowed to be dropped by Kuma', () => {

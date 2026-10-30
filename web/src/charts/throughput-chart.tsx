@@ -130,7 +130,13 @@ export const THROUGHPUT_SERIES: MirroredBarsSeries<PlotPoint>[] = [
     getValue: (p) => p.upBytesPerS,
     formatValue: (v, p) => `${fmtRate(v)} · ${fmtBytes(p.upBytes)}`,
   },
-  { key: 'absent', label: 'Not measured', color: THROUGHPUT_ABSENT_COLOR, fillOpacity: ABSENT_ALPHA, getValue: () => null },
+  {
+    key: 'absent',
+    label: 'Not measured',
+    color: THROUGHPUT_ABSENT_COLOR,
+    fillOpacity: ABSENT_ALPHA,
+    getValue: () => null,
+  },
 ]
 
 /**

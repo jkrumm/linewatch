@@ -101,7 +101,10 @@ describe('triageVerdicts', () => {
   /** The change this module was rewritten for: `info` no longer earns a slot on screen. A window
    * whose only findings are informational renders no card at all — just the toggle. */
   test('every info and ok group is routine, however few there are', () => {
-    const groups = groupVerdicts([verdict({ id: 'i1', severity: 'info' }), verdict({ id: 'i2', severity: 'ok' })])
+    const groups = groupVerdicts([
+      verdict({ id: 'i1', severity: 'info' }),
+      verdict({ id: 'i2', severity: 'ok' }),
+    ])
     const { critical, warn, routine } = triageVerdicts(groups)
     expect(critical).toEqual([])
     expect(warn).toEqual([])

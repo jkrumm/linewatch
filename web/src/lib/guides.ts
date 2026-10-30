@@ -42,7 +42,8 @@ export interface ChartCopy {
 }
 
 export const AVAILABILITY_COPY: ChartCopy = {
-  tooltip: 'Packet loss to Cloudflare per bucket — one anchor, not the whole connection. Hatched means never measured, which is not the same as no loss.',
+  tooltip:
+    'Packet loss to Cloudflare per bucket — one anchor, not the whole connection. Hatched means never measured, which is not the same as no loss.',
   guide: [
     {
       body: 'One column per bucket — the axis comes from the range, not from the rows that came back.',
@@ -84,7 +85,8 @@ export const LATENCY_BAND_COPY: ChartCopy = {
 }
 
 export const INTERNET_LATENCY_COPY: ChartCopy = {
-  tooltip: 'Internet RTT — median, p5–p95 spread and worst ping, folded across three anchors — against the router.',
+  tooltip:
+    'Internet RTT — median, p5–p95 spread and worst ping, folded across three anchors — against the router.',
   guide: [
     {
       body: 'One band, not three. Cloudflare, Google and Quad9 answer the same question — how far away is the internet from this machine — and three near-identical traces invite a comparison that is almost never meaningful. Switch to Per target to see an anchor disagree with the other two.',
@@ -113,7 +115,8 @@ export const INTERNET_LATENCY_COPY: ChartCopy = {
 }
 
 export const LINK_SPEED_COPY: ChartCopy = {
-  tooltip: 'The negotiated Ethernet link rate per bucket. A bucket where the NIC renegotiated is marked, never averaged.',
+  tooltip:
+    'The negotiated Ethernet link rate per bucket. A bucket where the NIC renegotiated is marked, never averaged.',
   guide: [
     { body: 'One column per bucket over the whole window.' },
     {
@@ -132,7 +135,8 @@ export const LINK_SPEED_COPY: ChartCopy = {
 }
 
 export const THROUGHPUT_COPY: ChartCopy = {
-  tooltip: 'Bytes carried per bucket — download below the baseline, upload above it. Hatched means never measured, not idle.',
+  tooltip:
+    'Bytes carried per bucket — download below the baseline, upload above it. Hatched means never measured, not idle.',
   guide: [
     {
       lead: 'This is not the speed test.',

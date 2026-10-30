@@ -6,7 +6,9 @@ import { OutageDetector, type TargetCycleResult } from './outage-detector.js'
 const T0 = 1_000_000
 const CYCLE_MS = 30_000
 
-function cycle(overrides: Partial<Record<'gateway' | 'cloudflare' | 'google' | 'quad9', boolean>>): TargetCycleResult[] {
+function cycle(
+  overrides: Partial<Record<'gateway' | 'cloudflare' | 'google' | 'quad9', boolean>>,
+): TargetCycleResult[] {
   const down = { gateway: false, cloudflare: false, google: false, quad9: false, ...overrides }
   return [
     { target: 'gateway', scope: 'gateway', down: down.gateway },

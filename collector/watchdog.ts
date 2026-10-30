@@ -37,7 +37,14 @@
  * fresh process per tick cannot make. So: `KeepAlive`, and `minProcessAgeS`
  * turns a crash loop into a permanent stand-down instead of a fire loop.
  */
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -57,8 +64,20 @@ import {
   type SelfEvidence,
   type WatchdogPolicy,
 } from './watchdog-ladder.js'
-import { eventKindFor, ledgerOutcome, markDelay, notificationMessage, notificationStatus } from './watchdog-report.js'
-import { DEFAULT_DISARM_PATH, DEFAULT_LEDGER_PATH, isDisarmed, readLedger, writeLedger } from './watchdog-state.js'
+import {
+  eventKindFor,
+  ledgerOutcome,
+  markDelay,
+  notificationMessage,
+  notificationStatus,
+} from './watchdog-report.js'
+import {
+  DEFAULT_DISARM_PATH,
+  DEFAULT_LEDGER_PATH,
+  isDisarmed,
+  readLedger,
+  writeLedger,
+} from './watchdog-state.js'
 
 const moduleDir = dirname(fileURLToPath(import.meta.url))
 
@@ -96,7 +115,9 @@ function resolveToken(): string {
     const fileToken = readFileSync(TOKEN_FILE_PATH, 'utf-8').trim()
     if (fileToken) return fileToken
   }
-  throw new Error(`No bearer token: set LINEWATCH_TOKEN or write one to ${TOKEN_FILE_PATH} (chmod 600).`)
+  throw new Error(
+    `No bearer token: set LINEWATCH_TOKEN or write one to ${TOKEN_FILE_PATH} (chmod 600).`,
+  )
 }
 
 function envFlag(name: string): boolean {
@@ -120,16 +141,22 @@ const config = {
   pingIntervalSeconds: Number(process.env['LINEWATCH_WATCHDOG_PING_INTERVAL_S'] ?? 0.2),
   ledgerPath: process.env['LINEWATCH_WATCHDOG_STATE_PATH'] ?? DEFAULT_LEDGER_PATH,
   disarmPath: process.env['LINEWATCH_WATCHDOG_DISARM_PATH'] ?? DEFAULT_DISARM_PATH,
-  eventSpoolPath: process.env['LINEWATCH_WATCHDOG_EVENT_SPOOL'] ?? join(moduleDir, 'watchdog-events.jsonl'),
-  notifySpoolPath: process.env['LINEWATCH_WATCHDOG_NOTIFY_SPOOL'] ?? join(moduleDir, 'watchdog-notify.jsonl'),
+  eventSpoolPath:
+    process.env['LINEWATCH_WATCHDOG_EVENT_SPOOL'] ?? join(moduleDir, 'watchdog-events.jsonl'),
+  notifySpoolPath:
+    process.env['LINEWATCH_WATCHDOG_NOTIFY_SPOOL'] ?? join(moduleDir, 'watchdog-notify.jsonl'),
   /** Roughly a week of 60 s notifications. Enforced in `appendSpool`, and by `canRecord` on the event spool. */
   spoolMaxLines: 10_000,
-  pushUrlFile: process.env['LINEWATCH_WATCHDOG_PUSH_URL_FILE'] ?? join(homedir(), '.config', 'uptime-kuma', 'linewatch-watchdog-push-url'),
+  pushUrlFile:
+    process.env['LINEWATCH_WATCHDOG_PUSH_URL_FILE'] ??
+    join(homedir(), '.config', 'uptime-kuma', 'linewatch-watchdog-push-url'),
   /** Well inside the monitor's own interval, the same margin the line heartbeat keeps. */
   notifyIntervalMs: Number(process.env['LINEWATCH_WATCHDOG_NOTIFY_MS'] ?? 60_000),
   apiTimeoutMs: Number(process.env['LINEWATCH_WATCHDOG_API_TIMEOUT_MS'] ?? 5_000),
   pushTimeoutMs: Number(process.env['LINEWATCH_WATCHDOG_PUSH_TIMEOUT_MS'] ?? 10_000),
-  logPath: process.env['LINEWATCH_WATCHDOG_LOG_PATH'] ?? join(homedir(), 'Library', 'Logs', 'linewatch-watchdog.log'),
+  logPath:
+    process.env['LINEWATCH_WATCHDOG_LOG_PATH'] ??
+    join(homedir(), 'Library', 'Logs', 'linewatch-watchdog.log'),
   logMaxBytes: Number(process.env['LINEWATCH_WATCHDOG_LOG_MAX_BYTES'] ?? DEFAULT_LOG_MAX_BYTES),
   /** `make watchdog-status`: one tick, printed, nothing persisted and nothing pushed. */
   once: envFlag('LINEWATCH_WATCHDOG_ONCE'),
@@ -163,7 +190,9 @@ function log(event: string, fields: Record<string, unknown> = {}): void {
 
 async function getJson<T>(path: string): Promise<T | null> {
   try {
-    const response = await fetch(`${config.apiUrl}${path}`, { signal: AbortSignal.timeout(config.apiTimeoutMs) })
+    const response = await fetch(`${config.apiUrl}${path}`, {
+      signal: AbortSignal.timeout(config.apiTimeoutMs),
+    })
     if (!response.ok) return null
     return (await response.json()) as T
   } catch {
@@ -177,7 +206,11 @@ interface StatusPayload {
   speedtestRunning: boolean
   ongoingOutages: Array<{ scope: 'gateway' | 'wan'; startedAt: number; cycles: number }>
   lastSamples: Array<{ target: string; scope: 'gateway' | 'wan'; received: number }>
-  vantage: { onHomeLine: boolean | null; gatewayAddr: string | null; linkWatchS: number | null } | null
+  vantage: {
+    onHomeLine: boolean | null
+    gatewayAddr: string | null
+    linkWatchS: number | null
+  } | null
 }
 
 /**
@@ -199,10 +232,13 @@ async function fetchRecord(): Promise<RecordEvidence | null> {
     // Only what a decision reads. `evidence` and `pathClass` were carried here
     // for a while and consulted by nothing — see `RecordEvidence` for why the
     // second could never have become a blocker even if someone had tried.
-    ongoingWanOutage: wanOutage === null ? null : { startedAt: wanOutage.startedAt, cycles: wanOutage.cycles },
+    ongoingWanOutage:
+      wanOutage === null ? null : { startedAt: wanOutage.startedAt, cycles: wanOutage.cycles },
     ongoingGatewayOutage: gatewayOutage === null ? null : { startedAt: gatewayOutage.startedAt },
     gateway: gateway === null ? null : { target: gateway.target, received: gateway.received },
-    wanAnchors: status.lastSamples.filter((sample) => sample.scope === 'wan').map((sample) => ({ target: sample.target, received: sample.received })),
+    wanAnchors: status.lastSamples
+      .filter((sample) => sample.scope === 'wan')
+      .map((sample) => ({ target: sample.target, received: sample.received })),
     onHomeLine: status.vantage?.onHomeLine ?? null,
     gatewayAddr: status.vantage?.gatewayAddr ?? null,
     linkWatchS: status.vantage?.linkWatchS ?? null,
@@ -212,10 +248,21 @@ async function fetchRecord(): Promise<RecordEvidence | null> {
 
 async function ping(addr: string, name: string, v6: boolean): Promise<AnchorState> {
   const binary = v6 ? 'ping6' : 'ping'
-  const args = [binary, '-c', String(config.pingCount), '-i', String(config.pingIntervalSeconds), addr]
+  const args = [
+    binary,
+    '-c',
+    String(config.pingCount),
+    '-i',
+    String(config.pingIntervalSeconds),
+    addr,
+  ]
   try {
     const proc = Bun.spawn(args, { stdout: 'pipe', stderr: 'pipe' })
-    const [out] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited])
+    const [out] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited,
+    ])
     // 100% loss exits non-zero and prints no round-trip summary. That is a
     // valid measurement, not an error, so the exit code is never consulted.
     return { target: name, received: parsePingOutput(out).received }
@@ -260,7 +307,11 @@ interface RouterPayload {
   writeEnabled: boolean
   staleAfterMs: number
   now: number
-  line: { ageMs: number; stale: boolean; value: { status: string | null; showtimeStartS: number | null } } | null
+  line: {
+    ageMs: number
+    stale: boolean
+    value: { status: string | null; showtimeStartS: number | null }
+  } | null
 }
 
 /**
@@ -303,7 +354,9 @@ async function fetchLastHumanIntervention(now: number): Promise<number | null> {
   const from = now - policy.humanQuietS * 1000
   const payload = await getJson<EventsPayload>(`/api/events?kind=intervention&from=${from}`)
   if (payload === null) return null
-  const human = payload.events.filter((entry) => entry.source !== 'watchdog').map((entry) => entry.ts)
+  const human = payload.events
+    .filter((entry) => entry.source !== 'watchdog')
+    .map((entry) => entry.ts)
   return human.length === 0 ? null : Math.max(...human)
 }
 
@@ -441,7 +494,8 @@ async function drainEvents(): Promise<void> {
 }
 
 function record(entry: SpooledEvent): void {
-  if (!appendSpool(config.eventSpoolPath, entry, config.spoolMaxLines)) log('event.spool_failed', { action: entry.action })
+  if (!appendSpool(config.eventSpoolPath, entry, config.spoolMaxLines))
+    log('event.spool_failed', { action: entry.action })
 }
 
 // ---------------------------------------------------------------------------
@@ -484,7 +538,12 @@ let warnedNoPushUrl = false
  * *healthy* line where the line monitor is green and staying green. So this one
  * reports the watchdog's own state, and its silence means the watchdog is gone.
  */
-async function notify(outcome: LadderOutcome, ledger: Ledger, now: number, force: boolean): Promise<void> {
+async function notify(
+  outcome: LadderOutcome,
+  ledger: Ledger,
+  now: number,
+  force: boolean,
+): Promise<void> {
   if (!force && now - lastNotifyAt < config.notifyIntervalMs) return
   lastNotifyAt = now
 
@@ -507,7 +566,10 @@ async function notify(outcome: LadderOutcome, ledger: Ledger, now: number, force
     // how the one line that matters gets lost in the log that reports it.
     if (!warnedNoPushUrl) {
       warnedNoPushUrl = true
-      log('notify.no_url', { file: config.pushUrlFile, note: 'the watchdog has no way to report itself — a latch or a crash would be invisible on a healthy line' })
+      log('notify.no_url', {
+        file: config.pushUrlFile,
+        note: 'the watchdog has no way to report itself — a latch or a crash would be invisible on a healthy line',
+      })
     }
     return
   }
@@ -522,7 +584,8 @@ async function notify(outcome: LadderOutcome, ledger: Ledger, now: number, force
   if (backlog.length > 0) rewriteSpool(config.notifySpoolPath, [])
 
   if (!(await push(pushUrl, notification, now))) {
-    if (!appendSpool(config.notifySpoolPath, notification, config.spoolMaxLines)) log('notify.spool_failed', {})
+    if (!appendSpool(config.notifySpoolPath, notification, config.spoolMaxLines))
+      log('notify.spool_failed', {})
   }
 }
 
@@ -552,7 +615,13 @@ async function perform(kind: 'reconnect' | 'reboot'): Promise<ActionAnswer | nul
       // it `failed` would count it against the latch, and two of them would
       // self-disarm a watchdog that had never sent anything.
       const outcome = response.status === 403 ? ('not_executed' as const) : ('failed' as const)
-      return { ok: false, capability: response.status === 403 ? 'null' : 'live', outcome, detail: `HTTP ${response.status}`, steps: [] }
+      return {
+        ok: false,
+        capability: response.status === 403 ? 'null' : 'live',
+        outcome,
+        detail: `HTTP ${response.status}`,
+        steps: [],
+      }
     }
     return (await response.json()) as ActionAnswer
   } catch (error) {
@@ -560,7 +629,13 @@ async function perform(kind: 'reconnect' | 'reboot'): Promise<ActionAnswer | nul
     // a reconnect it is genuinely ambiguous. Either way the honest report is
     // `unknown`, which counts against the latch — the ledger must assume the
     // line was touched, because it may have been.
-    return { ok: false, capability: 'live', outcome: 'unknown', detail: `no answer: ${error instanceof Error ? error.message : String(error)}`, steps: [] }
+    return {
+      ok: false,
+      capability: 'live',
+      outcome: 'unknown',
+      detail: `no answer: ${error instanceof Error ? error.message : String(error)}`,
+      steps: [],
+    }
   }
 }
 
@@ -661,7 +736,13 @@ async function tick(): Promise<void> {
       // itself — the same lie, told about a machine.
       kind: eventKindFor(resolved),
       note: answer?.detail ?? 'no answer from the action route',
-      detail: { outcome: resolved, rung: outcome.rung, outageClass: outcome.outageClass, downForS: outcome.t0 === null ? null : Math.floor((now - outcome.t0) / 1000), steps: answer?.steps ?? [] },
+      detail: {
+        outcome: resolved,
+        rung: outcome.rung,
+        outageClass: outcome.outageClass,
+        downForS: outcome.t0 === null ? null : Math.floor((now - outcome.t0) / 1000),
+        steps: answer?.steps ?? [],
+      },
     })
     await notify(outcome, ledger, now, true)
     await drainEvents()
@@ -741,7 +822,11 @@ function reportExits(): void {
   let reason = 'unknown — died outside the tick loop'
 
   process.on('exit', (code) => {
-    log('watchdog.exit', { reason, code, uptimeS: Math.floor((Date.now() - processStartedAt) / 1000) })
+    log('watchdog.exit', {
+      reason,
+      code,
+      uptimeS: Math.floor((Date.now() - processStartedAt) / 1000),
+    })
   })
 
   for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP'] as const) {
@@ -765,7 +850,8 @@ async function main(): Promise<void> {
   // trailing exit line in that output is noise in something a human reads.
   if (!config.once) reportExits()
 
-  if (!config.once) rotateLogIfNeeded({ logPath: config.logPath, maxBytes: config.logMaxBytes, report: log })
+  if (!config.once)
+    rotateLogIfNeeded({ logPath: config.logPath, maxBytes: config.logMaxBytes, report: log })
 
   log('watchdog.start', {
     armed: policy.armed,

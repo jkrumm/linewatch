@@ -29,12 +29,28 @@
  * file, then `rename` (atomic within a filesystem), then `fsync` on the
  * directory so the rename itself is durable.
  */
-import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import { emptyLedger, type Ledger } from './watchdog-ladder.js'
 
-export const DEFAULT_LEDGER_PATH = join(homedir(), '.local', 'state', 'linewatch', 'watchdog-state.json')
+export const DEFAULT_LEDGER_PATH = join(
+  homedir(),
+  '.local',
+  'state',
+  'linewatch',
+  'watchdog-state.json',
+)
 
 /** `touch` this from a phone in the seconds the link is up and everything stops. */
 export const DEFAULT_DISARM_PATH = join(homedir(), '.config', 'linewatch', 'watchdog-disarmed')
@@ -75,20 +91,32 @@ export function readLedger(path: string = DEFAULT_LEDGER_PATH): LoadedLedger {
   try {
     raw = readFileSync(path, 'utf-8')
   } catch (error) {
-    return { ledger: emptyLedger(), trusted: false, reason: `unreadable: ${error instanceof Error ? error.message : String(error)}` }
+    return {
+      ledger: emptyLedger(),
+      trusted: false,
+      reason: `unreadable: ${error instanceof Error ? error.message : String(error)}`,
+    }
   }
 
   let parsed: unknown
   try {
     parsed = JSON.parse(raw)
   } catch {
-    return { ledger: emptyLedger(), trusted: false, reason: 'not valid JSON — refusing to assume the budgets are empty' }
+    return {
+      ledger: emptyLedger(),
+      trusted: false,
+      reason: 'not valid JSON — refusing to assume the budgets are empty',
+    }
   }
 
   if (!looksLikeLedger(parsed)) {
     // Includes a future `version`. A newer schema read by an older binary is
     // exactly the case where guessing is worst.
-    return { ledger: emptyLedger(), trusted: false, reason: 'not a version 1 ledger — refusing to assume the budgets are empty' }
+    return {
+      ledger: emptyLedger(),
+      trusted: false,
+      reason: 'not a version 1 ledger — refusing to assume the budgets are empty',
+    }
   }
 
   return { ledger: parsed, trusted: true, reason: null }

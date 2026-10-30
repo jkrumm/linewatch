@@ -1,7 +1,12 @@
 import { describe, expect, test } from 'bun:test'
 import { createTestDb } from '../db/test-db.js'
 import { event, probeCycle } from '../db/schema.js'
-import { type CycleVantage, type LinkChangeDetail, recordCycleVantage, resolveOnHomeLine } from './cycle-vantage.js'
+import {
+  type CycleVantage,
+  type LinkChangeDetail,
+  recordCycleVantage,
+  resolveOnHomeLine,
+} from './cycle-vantage.js'
 
 const HOME_GW = '192.168.1.1'
 const T0 = 1_000_000
@@ -24,7 +29,11 @@ function events(db: ReturnType<typeof createTestDb>) {
     .select()
     .from(event)
     .all()
-    .map((row) => ({ ts: row.ts, kind: row.kind, detail: JSON.parse(row.detail) as LinkChangeDetail }))
+    .map((row) => ({
+      ts: row.ts,
+      kind: row.kind,
+      detail: JSON.parse(row.detail) as LinkChangeDetail,
+    }))
 }
 
 describe('resolveOnHomeLine', () => {
@@ -33,14 +42,26 @@ describe('resolveOnHomeLine', () => {
   })
 
   test('Wi-Fi through the same gateway is NOT the home line', () => {
-    expect(resolveOnHomeLine({ ...ETHERNET, pathClass: 'wifi', pathIf: 'en1' }, HOME_GW)).toBe(false)
+    expect(resolveOnHomeLine({ ...ETHERNET, pathClass: 'wifi', pathIf: 'en1' }, HOME_GW)).toBe(
+      false,
+    )
   })
 
   test('cellular failover is not the home line — the case the whole column exists for', () => {
     // en11 is the LTE hotspot, en10 is iPhone USB tethering. Both are ahead of
     // Wi-Fi in the service order, so either can carry the default route silently.
-    expect(resolveOnHomeLine({ pathClass: 'cellular', pathIf: 'en11', gatewayAddr: '192.168.2.1' }, HOME_GW)).toBe(false)
-    expect(resolveOnHomeLine({ pathClass: 'cellular', pathIf: 'en10', gatewayAddr: '172.20.10.1' }, HOME_GW)).toBe(false)
+    expect(
+      resolveOnHomeLine(
+        { pathClass: 'cellular', pathIf: 'en11', gatewayAddr: '192.168.2.1' },
+        HOME_GW,
+      ),
+    ).toBe(false)
+    expect(
+      resolveOnHomeLine(
+        { pathClass: 'cellular', pathIf: 'en10', gatewayAddr: '172.20.10.1' },
+        HOME_GW,
+      ),
+    ).toBe(false)
   })
 
   test('Ethernet through an unexpected gateway is not the home line', () => {
@@ -68,7 +89,9 @@ describe('resolveOnHomeLine', () => {
 
   test('disagreement resolves to false — either party saying "not the home line" disqualifies the cycle', () => {
     expect(resolveOnHomeLine({ ...ETHERNET, onHomeLine: false }, HOME_GW)).toBe(false)
-    expect(resolveOnHomeLine({ ...ETHERNET, pathClass: 'wifi', onHomeLine: true }, HOME_GW)).toBe(false)
+    expect(resolveOnHomeLine({ ...ETHERNET, pathClass: 'wifi', onHomeLine: true }, HOME_GW)).toBe(
+      false,
+    )
   })
 
   // The regression that shipped: requiring *both* pathClass and gatewayAddr
@@ -77,11 +100,21 @@ describe('resolveOnHomeLine', () => {
   // no gateway was stored as the home line — reproduced against a live server.
   describe('a missing gateway never rescues a disqualified path', () => {
     test('cellular with a null gateway and a collector `1` is NOT the home line', () => {
-      expect(resolveOnHomeLine({ pathIf: 'en11', pathClass: 'cellular', gatewayAddr: null, onHomeLine: 1 }, HOME_GW)).toBe(false)
+      expect(
+        resolveOnHomeLine(
+          { pathIf: 'en11', pathClass: 'cellular', gatewayAddr: null, onHomeLine: 1 },
+          HOME_GW,
+        ),
+      ).toBe(false)
     })
 
     test('Wi-Fi with a null gateway and a collector `1` is NOT the home line', () => {
-      expect(resolveOnHomeLine({ pathIf: 'en1', pathClass: 'wifi', gatewayAddr: null, onHomeLine: 1 }, HOME_GW)).toBe(false)
+      expect(
+        resolveOnHomeLine(
+          { pathIf: 'en1', pathClass: 'wifi', gatewayAddr: null, onHomeLine: 1 },
+          HOME_GW,
+        ),
+      ).toBe(false)
     })
 
     test('any known non-Ethernet class is false with no gateway reported at all', () => {
@@ -171,7 +204,13 @@ describe('recordCycleVantage', () => {
     recordCycleVantage(db, { ts: T0, vantage: ETHERNET, homeGatewayAddr: HOME_GW })
     recordCycleVantage(db, {
       ts: T0 + CYCLE_MS,
-      vantage: { pathIf: 'en11', pathClass: 'cellular', linkMbit: 300, linkDuplex: 'full', gatewayAddr: '192.168.2.1' },
+      vantage: {
+        pathIf: 'en11',
+        pathClass: 'cellular',
+        linkMbit: 300,
+        linkDuplex: 'full',
+        gatewayAddr: '192.168.2.1',
+      },
       homeGatewayAddr: HOME_GW,
     })
 
@@ -188,7 +227,11 @@ describe('recordCycleVantage', () => {
   test('a half-duplex renegotiation is a link change', () => {
     const db = createTestDb()
     recordCycleVantage(db, { ts: T0, vantage: ETHERNET, homeGatewayAddr: HOME_GW })
-    recordCycleVantage(db, { ts: T0 + CYCLE_MS, vantage: { ...ETHERNET, linkDuplex: 'half' }, homeGatewayAddr: HOME_GW })
+    recordCycleVantage(db, {
+      ts: T0 + CYCLE_MS,
+      vantage: { ...ETHERNET, linkDuplex: 'half' },
+      homeGatewayAddr: HOME_GW,
+    })
 
     expect(events(db)[0]?.detail.changed).toEqual({ linkDuplex: { before: 'full', after: 'half' } })
   })
@@ -206,8 +249,16 @@ describe('recordCycleVantage', () => {
     // NIC that supports 1000 is a cable, on a NIC that supports 100 it is the
     // adapter. So the ceiling moving is itself a transition worth an event.
     const db = createTestDb()
-    recordCycleVantage(db, { ts: T0, vantage: { ...ETHERNET, linkMaxMbit: 1000 }, homeGatewayAddr: HOME_GW })
-    recordCycleVantage(db, { ts: T0 + CYCLE_MS, vantage: { ...ETHERNET, linkMaxMbit: 2500 }, homeGatewayAddr: HOME_GW })
+    recordCycleVantage(db, {
+      ts: T0,
+      vantage: { ...ETHERNET, linkMaxMbit: 1000 },
+      homeGatewayAddr: HOME_GW,
+    })
+    recordCycleVantage(db, {
+      ts: T0 + CYCLE_MS,
+      vantage: { ...ETHERNET, linkMaxMbit: 2500 },
+      homeGatewayAddr: HOME_GW,
+    })
 
     expect(events(db)[0]?.detail.changed).toEqual({ linkMaxMbit: { before: 1000, after: 2500 } })
   })
@@ -218,7 +269,11 @@ describe('recordCycleVantage', () => {
     // emit a fabricated "the NIC changed" event on its very next cycle.
     const db = createTestDb()
     recordCycleVantage(db, { ts: T0, vantage: ETHERNET, homeGatewayAddr: HOME_GW })
-    recordCycleVantage(db, { ts: T0 + CYCLE_MS, vantage: { ...ETHERNET, linkMaxMbit: 1000 }, homeGatewayAddr: HOME_GW })
+    recordCycleVantage(db, {
+      ts: T0 + CYCLE_MS,
+      vantage: { ...ETHERNET, linkMaxMbit: 1000 },
+      homeGatewayAddr: HOME_GW,
+    })
 
     expect(events(db)).toHaveLength(0)
     expect(db.select().from(probeCycle).all()[1]?.linkMaxMbit).toBe(1000)
@@ -229,8 +284,16 @@ describe('recordCycleVantage', () => {
     // and linkWatchS is a per-cycle coverage counter; an event on either would
     // fire constantly and bury the real transitions. Both are still stored.
     const db = createTestDb()
-    recordCycleVantage(db, { ts: T0, vantage: { ...ETHERNET, dhcpBoundAt: T0 - 3600_000, linkWatchS: 30 }, homeGatewayAddr: HOME_GW })
-    recordCycleVantage(db, { ts: T0 + CYCLE_MS, vantage: { ...ETHERNET, dhcpBoundAt: T0, linkWatchS: 12 }, homeGatewayAddr: HOME_GW })
+    recordCycleVantage(db, {
+      ts: T0,
+      vantage: { ...ETHERNET, dhcpBoundAt: T0 - 3600_000, linkWatchS: 30 },
+      homeGatewayAddr: HOME_GW,
+    })
+    recordCycleVantage(db, {
+      ts: T0 + CYCLE_MS,
+      vantage: { ...ETHERNET, dhcpBoundAt: T0, linkWatchS: 12 },
+      homeGatewayAddr: HOME_GW,
+    })
 
     expect(events(db)).toHaveLength(0)
     const rows = db.select().from(probeCycle).all()
@@ -261,10 +324,18 @@ describe('recordCycleVantage', () => {
   test('a replayed cycle is a no-op: no duplicate row, no duplicate event', () => {
     const db = createTestDb()
     recordCycleVantage(db, { ts: T0, vantage: ETHERNET, homeGatewayAddr: HOME_GW })
-    recordCycleVantage(db, { ts: T0 + CYCLE_MS, vantage: { ...ETHERNET, linkMbit: 100 }, homeGatewayAddr: HOME_GW })
+    recordCycleVantage(db, {
+      ts: T0 + CYCLE_MS,
+      vantage: { ...ETHERNET, linkMbit: 100 },
+      homeGatewayAddr: HOME_GW,
+    })
 
     // The spool replays the whole batch verbatim.
-    const replay = recordCycleVantage(db, { ts: T0 + CYCLE_MS, vantage: { ...ETHERNET, linkMbit: 100 }, homeGatewayAddr: HOME_GW })
+    const replay = recordCycleVantage(db, {
+      ts: T0 + CYCLE_MS,
+      vantage: { ...ETHERNET, linkMbit: 100 },
+      homeGatewayAddr: HOME_GW,
+    })
 
     expect(replay.inserted).toBe(false)
     expect(replay.linkChangeEventId).toBeNull()
@@ -275,7 +346,11 @@ describe('recordCycleVantage', () => {
   test('an out-of-order replay is diffed against its own predecessor, not the newest cycle', () => {
     const db = createTestDb()
     recordCycleVantage(db, { ts: T0, vantage: ETHERNET, homeGatewayAddr: HOME_GW })
-    recordCycleVantage(db, { ts: T0 + 2 * CYCLE_MS, vantage: { ...ETHERNET, linkMbit: 100 }, homeGatewayAddr: HOME_GW })
+    recordCycleVantage(db, {
+      ts: T0 + 2 * CYCLE_MS,
+      vantage: { ...ETHERNET, linkMbit: 100 },
+      homeGatewayAddr: HOME_GW,
+    })
     expect(events(db)).toHaveLength(1)
 
     // A spooled cycle from between the two arrives late, still at 1000 Mbit: its

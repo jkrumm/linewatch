@@ -27,10 +27,7 @@ describe('compareVantage', () => {
   })
 
   it('reports a link-speed disagreement without picking a winner', () => {
-    const disagreements = compareVantage(
-      { ...onEthernet, linkMbit: 100 },
-      routerAgrees,
-    )
+    const disagreements = compareVantage({ ...onEthernet, linkMbit: 100 }, routerAgrees)
     expect(disagreements).toEqual([
       { field: 'link_speed', host: '100 Mbit', router: '1000 Mbit on LAN1' },
     ])

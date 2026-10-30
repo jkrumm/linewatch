@@ -56,7 +56,13 @@ function linkSpeedValue(vantage: Vantage): string {
  * card is the wire out of this machine, `LinkComparison` is the line past the router. "Vantage" is
  * the word the schema uses; it is not a word the reader has.
  */
-export function VantageCard({ vantage, now }: { vantage: Vantage | null | undefined; now: number }) {
+export function VantageCard({
+  vantage,
+  now,
+}: {
+  vantage: Vantage | null | undefined
+  now: number
+}) {
   if (vantage === undefined) {
     return (
       <Card>

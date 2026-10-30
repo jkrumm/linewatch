@@ -34,21 +34,29 @@ const InterventionBody = z.object({
   source: z
     .enum(['manual', 'watchdog'])
     .default('manual')
-    .describe('Who did it. The whole point of the route: a machine action recorded as a human one destroys the attribution it exists to preserve.'),
+    .describe(
+      'Who did it. The whole point of the route: a machine action recorded as a human one destroys the attribution it exists to preserve.',
+    ),
   kind: z
     .enum(['intervention', 'note'])
     .default('intervention')
-    .describe('`intervention` only for something actually done to the line. Everything else — blocked, suppressed, escalated, observed — is a `note`.'),
+    .describe(
+      '`intervention` only for something actually done to the line. Everything else — blocked, suppressed, escalated, observed — is a `note`.',
+    ),
   note: z.string().optional().describe('Why, or what was expected of it'),
   detail: z
     .record(z.string(), z.unknown())
     .optional()
-    .describe('Structured evidence for the action: what was measured, which preconditions passed, what the outcome was.'),
+    .describe(
+      'Structured evidence for the action: what was measured, which preconditions passed, what the outcome was.',
+    ),
   ts: z
     .number()
     .int()
     .optional()
-    .describe('When it happened, epoch ms. Defaults to now — set it when recording after the fact.'),
+    .describe(
+      'When it happened, epoch ms. Defaults to now — set it when recording after the fact.',
+    ),
 })
 
 export const interventionsRoutes = new Elysia().post(

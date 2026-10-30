@@ -31,7 +31,13 @@ function seed(db: ReturnType<typeof createTestDb>, cycles: CycleFixture[]) {
 }
 
 /** A run of cycles one probe cycle apart, each moving `perCycleIn`/`perCycleOut` bytes. */
-function steady(start: number, count: number, perCycleIn: number, perCycleOut: number, base = 1_000_000_000) {
+function steady(
+  start: number,
+  count: number,
+  perCycleIn: number,
+  perCycleOut: number,
+  base = 1_000_000_000,
+) {
   return Array.from({ length: count }, (_, i) => ({
     ts: start + i * CYCLE_MS,
     ifIbytes: base + i * perCycleIn,
@@ -138,7 +144,11 @@ describe('bucketThroughput', () => {
       { ts: HOUR_0 + MAX_INTERVAL_MS, ifIbytes: 140 * MB, ifObytes: 14 * MB },
     ])
 
-    expect(bucketsIn(db, HOUR_0, HOUR_0 + BUCKET_MS)[0]).toMatchObject({ inBytes: 40 * MB, intervals: 1, skipped: 0 })
+    expect(bucketsIn(db, HOUR_0, HOUR_0 + BUCKET_MS)[0]).toMatchObject({
+      inBytes: 40 * MB,
+      intervals: 1,
+      skipped: 0,
+    })
   })
 
   /** A cycle that reported no counters is unknown — not a zero endpoint. Both the

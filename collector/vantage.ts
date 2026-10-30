@@ -234,7 +234,8 @@ export function parseSupportedMedia(output: string): number | null {
  * Local time, no zone marker — measured format `07/30/2026 15:48:29`. Appears
  * exactly once in the summary.
  */
-const DHCP_LEASE_START = /^\s*LeaseStartTime\s*:\s*(\d{2})\/(\d{2})\/(\d{4}) (\d{2}:\d{2}:\d{2})\s*$/m
+const DHCP_LEASE_START =
+  /^\s*LeaseStartTime\s*:\s*(\d{2})\/(\d{2})\/(\d{4}) (\d{2}:\d{2}:\d{2})\s*$/m
 
 /**
  * When the interface last took a DHCP lease, as unix ms. The host-side analogue
@@ -258,7 +259,8 @@ const DHCP_LEASE_START = /^\s*LeaseStartTime\s*:\s*(\d{2})\/(\d{2})\/(\d{4}) (\d
 export function parseDhcpLeaseStart(output: string): number | null {
   const match = DHCP_LEASE_START.exec(output)
   const [, month, day, year, time] = match ?? []
-  if (month === undefined || day === undefined || year === undefined || time === undefined) return null
+  if (month === undefined || day === undefined || year === undefined || time === undefined)
+    return null
 
   // No trailing `Z`: a bare date-time is parsed as *local* time, which is what
   // the OS printed and what handles DST correctly. Appending `Z` would shift
@@ -403,7 +405,8 @@ export function classifyHardwarePort(hardwarePort: string): PathClass {
   // tethering appears as `iPhone USB`, and Netgear's mobile hotspots as an
   // `MR`-prefixed model number. Matching the shape keeps a hardware swap from
   // silently reclassifying a metered cellular egress as the home line.
-  if (/iphone|ipad|modem|broadband|cellular|hotspot|tether|wwan|mifi|\bmr\d{3,4}\b/.test(port)) return 'cellular'
+  if (/iphone|ipad|modem|broadband|cellular|hotspot|tether|wwan|mifi|\bmr\d{3,4}\b/.test(port))
+    return 'cellular'
 
   if (/wi-?fi|airport|wireless/.test(port)) return 'wifi'
 
@@ -437,7 +440,13 @@ const CONTESTED_DEVICE_PRECEDENCE: readonly PathClass[] = ['cellular', 'wifi', '
  * Every service matching the device is considered, not just the first: see
  * CONTESTED_DEVICE_PRECEDENCE.
  */
-export function classifyPath({ iface, services }: { iface: string | null; services: NetworkService[] }): PathClass | null {
+export function classifyPath({
+  iface,
+  services,
+}: {
+  iface: string | null
+  services: NetworkService[]
+}): PathClass | null {
   if (iface === null || services.length === 0) return null
 
   const matched = services.filter((service) => service.device === iface)
@@ -565,7 +574,10 @@ export async function captureVantage(options: CaptureVantageOptions): Promise<Va
 
   const link = parseLinkState(ifconfigOut)
   const counters = parseIfCounters(netstatOut)
-  const pathClass = classifyPath({ iface: route.iface, services: parseServiceOrder(serviceOrderOut) })
+  const pathClass = classifyPath({
+    iface: route.iface,
+    services: parseServiceOrder(serviceOrderOut),
+  })
 
   return {
     pathIf: route.iface,
@@ -579,7 +591,11 @@ export async function captureVantage(options: CaptureVantageOptions): Promise<Va
     ifColl: counters.ifColl,
     ifIbytes: counters.ifIbytes,
     ifObytes: counters.ifObytes,
-    onHomeLine: deriveOnHomeLine({ pathClass, gatewayAddr: route.gateway, expectedGateway: options.expectedGateway }),
+    onHomeLine: deriveOnHomeLine({
+      pathClass,
+      gatewayAddr: route.gateway,
+      expectedGateway: options.expectedGateway,
+    }),
     linkMaxMbit: parseSupportedMedia(ifconfigOut),
     dhcpBoundAt: parseDhcpLeaseStart(dhcpOut),
     // No link sampler in this collector yet. Null, not 0: 0 would claim a cycle
@@ -613,7 +629,10 @@ async function runCommand(
     await proc.exited
     return stdout
   } catch (err) {
-    report('vantage.command_error', { command: args[0], error: err instanceof Error ? err.message : String(err) })
+    report('vantage.command_error', {
+      command: args[0],
+      error: err instanceof Error ? err.message : String(err),
+    })
     return ''
   } finally {
     if (timer !== undefined) clearTimeout(timer)

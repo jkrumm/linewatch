@@ -108,7 +108,9 @@ function ReadingCard({ reading, now }: { reading: RateReading; now: number }) {
     <Stack gap={4}>
       <StatCard
         title={`${reading.label} · ${age}`}
-        value={reading.mbps === null ? '—' : `${reading.mbps.toFixed(reading.mbps < 10 ? 2 : 1)} ${unit}`}
+        value={
+          reading.mbps === null ? '—' : `${reading.mbps.toFixed(reading.mbps < 10 ? 2 : 1)} ${unit}`
+        }
       />
       <Group gap={6}>
         <Text size="xs" c="dimmed">

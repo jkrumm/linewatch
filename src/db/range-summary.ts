@@ -94,7 +94,10 @@ interface VantageRow {
  * All three counts are computed in SQL: the same 4.2M-rows/year constraint that
  * forces `GET /api/probes` to bucket server-side applies here.
  */
-export function rangeSummary(db: BunSQLiteDatabase<typeof schema>, params: RangeSummaryParams): RangeSummary {
+export function rangeSummary(
+  db: BunSQLiteDatabase<typeof schema>,
+  params: RangeSummaryParams,
+): RangeSummary {
   const { from, to, probeCycleSeconds, degradedLossPct } = params
   const cycleMs = Math.max(1, Math.round(probeCycleSeconds * 1000))
   const wanTargets = params.wanTargets && params.wanTargets.length > 0 ? params.wanTargets : null
@@ -115,7 +118,12 @@ export function rangeSummary(db: BunSQLiteDatabase<typeof schema>, params: Range
   // problem — that is exactly why three of them sit on three networks. Cycles
   // already inside a materialised outage are excluded so a real outage is not
   // double-counted as degradation.
-  const targetFilter = wanTargets ? sql`AND target IN (${sql.join(wanTargets.map((name) => sql`${name}`), sql`, `)})` : sql``
+  const targetFilter = wanTargets
+    ? sql`AND target IN (${sql.join(
+        wanTargets.map((name) => sql`${name}`),
+        sql`, `,
+      )})`
+    : sql``
   const [degraded] = db.all<{ degraded_cycles: number }>(sql`
     SELECT COUNT(*) AS degraded_cycles FROM (
       SELECT ts
@@ -151,7 +159,8 @@ export function rangeSummary(db: BunSQLiteDatabase<typeof schema>, params: Range
     // Unknown, not 0. A range shorter than one probe cycle expects less than a
     // whole cycle, and there is no share of it that "recorded 1 of 0" describes.
     // The clamp is for the opposite case — cycles arriving faster than cadence.
-    coveragePct: expectedCycles === 0 ? null : Math.min(100, (100 * recordedCycles) / expectedCycles),
+    coveragePct:
+      expectedCycles === 0 ? null : Math.min(100, (100 * recordedCycles) / expectedCycles),
     firstTs: coverage?.first_ts ?? null,
     lastTs: coverage?.last_ts ?? null,
     degradedCycles: degraded?.degraded_cycles ?? 0,

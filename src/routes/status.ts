@@ -66,7 +66,9 @@ const VantageSchema = z.object({
   onHomeLine: z
     .boolean()
     .nullable()
-    .describe('true = Ethernet through the configured home gateway; false = some other path; null = not reported, i.e. UNKNOWN. Never render null as true.'),
+    .describe(
+      'true = Ethernet through the configured home gateway; false = some other path; null = not reported, i.e. UNKNOWN. Never render null as true.',
+    ),
   linkWatchS: z
     .number()
     .int()
@@ -88,12 +90,14 @@ const StatusResponse = z.object({
   speedtestRunning: z
     .boolean()
     .describe(
-      'A speed test is saturating the line right now. From the runner\'s own in-process guard, not inferred from the newest `speed_test` row — that row is written when a run *ends*, so inferring from it is exactly inverted. Automated action on the line must stand down while this is true or it poisons the throughput history.',
+      "A speed test is saturating the line right now. From the runner's own in-process guard, not inferred from the newest `speed_test` row — that row is written when a run *ends*, so inferring from it is exactly inverted. Automated action on the line must stand down while this is true or it poisons the throughput history.",
     ),
   ongoingOutages: z.array(OngoingOutageSchema),
   lastSamples: z.array(LastSampleSchema),
   lastSpeedTest: LastSpeedTestSchema.nullable(),
-  vantage: VantageSchema.nullable().describe('The most recent cycle vantage, or null when no cycle ever reported one'),
+  vantage: VantageSchema.nullable().describe(
+    'The most recent cycle vantage, or null when no cycle ever reported one',
+  ),
 })
 
 export const statusRoute = new Elysia().get(
@@ -176,7 +180,12 @@ export const statusRoute = new Elysia().get(
     // Its own query rather than a max over `lastSamples`: that array is built
     // per configured target, so retiring a target would leave its stale row
     // deciding the freshness of everything.
-    const newestSampleRow = db.select({ ts: probeSample.ts }).from(probeSample).orderBy(desc(probeSample.ts)).limit(1).get()
+    const newestSampleRow = db
+      .select({ ts: probeSample.ts })
+      .from(probeSample)
+      .orderBy(desc(probeSample.ts))
+      .limit(1)
+      .get()
 
     return {
       up: ongoingOutages.length === 0,

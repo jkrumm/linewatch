@@ -65,8 +65,26 @@ describe('GET /api/status', () => {
     const base = Date.now() - 60_000
     db.insert(probeSample)
       .values([
-        { ts: base, target: 'gateway', addr: '192.168.1.1', sent: 20, received: 20, lossPct: 0, medMs: 1, jitterMs: 0.1 },
-        { ts: base + 30_000, target: 'cloudflare', addr: '1.1.1.1', sent: 20, received: 20, lossPct: 0, medMs: 5, jitterMs: 0.2 },
+        {
+          ts: base,
+          target: 'gateway',
+          addr: '192.168.1.1',
+          sent: 20,
+          received: 20,
+          lossPct: 0,
+          medMs: 1,
+          jitterMs: 0.1,
+        },
+        {
+          ts: base + 30_000,
+          target: 'cloudflare',
+          addr: '1.1.1.1',
+          sent: 20,
+          received: 20,
+          lossPct: 0,
+          medMs: 5,
+          jitterMs: 0.2,
+        },
       ])
       .run()
 
@@ -75,12 +93,22 @@ describe('GET /api/status', () => {
 
   test('link coverage is carried through, and null stays null', async () => {
     const ts = Date.now()
-    db.insert(probeCycle).values({ ts, pathIf: 'en0', pathClass: 'ethernet', onHomeLine: 1, linkWatchS: null }).run()
+    db.insert(probeCycle)
+      .values({ ts, pathIf: 'en0', pathClass: 'ethernet', onHomeLine: 1, linkWatchS: null })
+      .run()
     // Null means nothing watched the link. Coalescing it to 0 would read as
     // "watched, saw nothing", which is the opposite claim.
     expect((await get()).vantage?.linkWatchS).toBeNull()
 
-    db.insert(probeCycle).values({ ts: ts + 30_000, pathIf: 'en0', pathClass: 'ethernet', onHomeLine: 1, linkWatchS: 29 }).run()
+    db.insert(probeCycle)
+      .values({
+        ts: ts + 30_000,
+        pathIf: 'en0',
+        pathClass: 'ethernet',
+        onHomeLine: 1,
+        linkWatchS: 29,
+      })
+      .run()
     expect((await get()).vantage?.linkWatchS).toBe(29)
   })
 })

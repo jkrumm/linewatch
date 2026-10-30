@@ -154,7 +154,10 @@ export function resolveOnHomeLine(vantage: CycleVantage, homeGatewayAddr: string
  * `'en0' → null` (the collector losing the ability to report) are both silence.
  * Only a genuine value-to-value difference is a link change.
  */
-export function diffVantage(previous: WatchedVantage | null, current: WatchedVantage): LinkChangeDetail['changed'] {
+export function diffVantage(
+  previous: WatchedVantage | null,
+  current: WatchedVantage,
+): LinkChangeDetail['changed'] {
   const changed: LinkChangeDetail['changed'] = {}
   if (!previous) return changed
 
@@ -211,9 +214,21 @@ export function recordCycleVantage(
   // Read the predecessor *before* inserting, so "previous" cannot be this row.
   // Strictly `< ts`: an out-of-order spool replay of an older cycle must be
   // compared against what preceded *it*, not against the newest cycle on record.
-  const previous = db.select().from(probeCycle).where(lt(probeCycle.ts, ts)).orderBy(desc(probeCycle.ts)).limit(1).get() ?? null
+  const previous =
+    db
+      .select()
+      .from(probeCycle)
+      .where(lt(probeCycle.ts, ts))
+      .orderBy(desc(probeCycle.ts))
+      .limit(1)
+      .get() ?? null
 
-  const insertedRow = db.insert(probeCycle).values(row).onConflictDoNothing({ target: probeCycle.ts }).returning({ id: probeCycle.id }).get()
+  const insertedRow = db
+    .insert(probeCycle)
+    .values(row)
+    .onConflictDoNothing({ target: probeCycle.ts })
+    .returning({ id: probeCycle.id })
+    .get()
   if (!insertedRow) return { inserted: false, linkChangeEventId: null }
 
   // The very first cycle on record has no predecessor, so there is nothing it
@@ -223,7 +238,11 @@ export function recordCycleVantage(
   if (Object.keys(changed).length === 0) return { inserted: true, linkChangeEventId: null }
 
   const detail: LinkChangeDetail = { source: 'vantage-diff', changed }
-  const eventRow = db.insert(event).values({ ts, kind: 'link_change', detail: JSON.stringify(detail) }).returning({ id: event.id }).get()
+  const eventRow = db
+    .insert(event)
+    .values({ ts, kind: 'link_change', detail: JSON.stringify(detail) })
+    .returning({ id: event.id })
+    .get()
   return { inserted: true, linkChangeEventId: eventRow.id }
 }
 

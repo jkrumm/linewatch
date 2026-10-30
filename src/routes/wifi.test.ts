@@ -52,7 +52,9 @@ function sample(overrides: Partial<WifiSampleInput> = {}): WifiSampleInput {
 }
 
 function insert(ts: number, overrides: Partial<WifiSampleInput> = {}): void {
-  db.insert(wifiSample).values({ ts, ...sample(overrides) }).run()
+  db.insert(wifiSample)
+    .values({ ts, ...sample(overrides) })
+    .run()
 }
 
 interface WifiBucket {

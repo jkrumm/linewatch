@@ -170,7 +170,10 @@ const RESTART_TOLERANCE_S = 10
  *   restart on every single poll forever.
  * - A missing reading on either side is unknown, never a restart.
  */
-export function detectRestart(previous: UptimeObservation | null, current: UptimeObservation): boolean {
+export function detectRestart(
+  previous: UptimeObservation | null,
+  current: UptimeObservation,
+): boolean {
   if (previous === null || previous.seconds === null || current.seconds === null) return false
   if (previous.seconds === 0 && current.seconds === 0) return false
   const previousStart = previous.ts - previous.seconds * 1000
@@ -182,6 +185,9 @@ export function detectRestart(previous: UptimeObservation | null, current: Uptim
  * True when the carrier line resynced between two polls — `detectRestart` over
  * `showtimeStart`, which counts seconds since the line reached showtime.
  */
-export function detectResync(previous: UptimeObservation | null, current: UptimeObservation): boolean {
+export function detectResync(
+  previous: UptimeObservation | null,
+  current: UptimeObservation,
+): boolean {
   return detectRestart(previous, current)
 }

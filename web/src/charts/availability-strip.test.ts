@@ -2,13 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { foldBands } from 'basalt-ui/charts'
 import { VX } from 'basalt-ui/tokens'
 import { ABSENT_COLOR } from './band-shared'
-import {
-  bandStates,
-  columnRows,
-  getBand,
-  mergeColumns,
-  type Column,
-} from './availability-strip'
+import { bandStates, columnRows, getBand, mergeColumns, type Column } from './availability-strip'
 import type { ProbeBucket } from '../lib/types'
 
 function bucket(over: Partial<ProbeBucket> = {}): ProbeBucket {
@@ -214,7 +208,7 @@ describe('the absent state is told apart by colour, not only by opacity', () => 
     expect(colorOf('absent')).toBe(ABSENT_COLOR)
   })
 
-  test('a partly-measured band paints the absent share in the strip\'s absent state', () => {
+  test("a partly-measured band paints the absent share in the strip's absent state", () => {
     const [folded] = fold([column('0', bucket()), column('1', null)], 1)
     expect(getBand(folded!)).toMatchObject({ state: 'clean', absentFraction: 0.5 })
   })

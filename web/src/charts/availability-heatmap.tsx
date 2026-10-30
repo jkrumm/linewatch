@@ -95,7 +95,9 @@ const cellValue = (c: AvailabilityCell): number | null => c.bucket?.lossPct ?? n
 export function cellRows(c: AvailabilityCell, expectedCycles: number): ChartTooltipRow[] {
   const { bucket } = c
   if (bucket === null)
-    return [{ label: 'Not measured', value: `0 of ${expectedCycles} expected cycles`, color: VX.neutral }]
+    return [
+      { label: 'Not measured', value: `0 of ${expectedCycles} expected cycles`, color: VX.neutral },
+    ]
   return [
     { label: 'Worst cycle', value: fmtPct(bucket.maxLossPct), color: VX.warnSolid },
     { label: 'Cycles fully down', value: String(bucket.downCycles), color: VX.badSolid },

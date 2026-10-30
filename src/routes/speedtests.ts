@@ -59,7 +59,8 @@ export const speedtestsRoutes = new Elysia()
       detail: {
         tags: ['Speed Tests'],
         summary: 'List speed tests',
-        description: 'Hourly Ookla runs, most recent first. Failed runs are included (`ok: false`, `error` set) — a failed test is data, not noise.',
+        description:
+          'Hourly Ookla runs, most recent first. Failed runs are included (`ok: false`, `error` set) — a failed test is data, not noise.',
       },
     },
   )
@@ -104,7 +105,8 @@ export const speedtestsRoutes = new Elysia()
       detail: {
         tags: ['Speed Tests'],
         summary: 'Rolling speed-test summary',
-        description: 'p50/p95/best/worst download and upload (Mbps) over successful runs in the last `days` (default 7).',
+        description:
+          'p50/p95/best/worst download and upload (Mbps) over successful runs in the last `days` (default 7).',
       },
     },
   )
@@ -119,7 +121,12 @@ export const speedtestsRoutes = new Elysia()
       // The limit is enforced against the newest speed_test row (`ts` = run
       // start), not an in-process timer, so restarting the container cannot
       // reset the budget.
-      const last = db.select({ ts: speedTest.ts }).from(speedTest).orderBy(desc(speedTest.ts)).limit(1).get()
+      const last = db
+        .select({ ts: speedTest.ts })
+        .from(speedTest)
+        .orderBy(desc(speedTest.ts))
+        .limit(1)
+        .get()
       const minIntervalMs = config.speedtestMinIntervalS * 1000
       if (last) {
         const elapsedMs = Date.now() - last.ts
@@ -140,7 +147,9 @@ export const speedtestsRoutes = new Elysia()
       response: {
         200: z.object({
           ok: z.literal(true),
-          triggered: z.boolean().describe('false if a run — scheduled or manual — was already in progress'),
+          triggered: z
+            .boolean()
+            .describe('false if a run — scheduled or manual — was already in progress'),
         }),
         429: z.object({
           error: z.literal('rate_limited'),

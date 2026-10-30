@@ -86,7 +86,11 @@ describe('parseLiveWan', () => {
   })
 
   it('returns null when nothing is connected and there is nothing to carry forward', () => {
-    const allDown = adtWan.map((row) => ({ ...row, connStatusV4: 'Disconnected', connStatusV6: 'Disconnected' }))
+    const allDown = adtWan.map((row) => ({
+      ...row,
+      connStatusV4: 'Disconnected',
+      connStatusV6: 'Disconnected',
+    }))
     expect(parseLiveWan(allDown)).toBeNull()
   })
 
@@ -122,7 +126,11 @@ describe('parseLiveWan', () => {
    * resetting to zero are what identified the 2026-08-01 incident.
    */
   it('carries the previous connection forward when the router disconnects them all', () => {
-    const allDown = adtWan.map((row) => ({ ...row, connStatusV4: 'Disconnected', connStatusV6: 'Disconnected' }))
+    const allDown = adtWan.map((row) => ({
+      ...row,
+      connStatusV4: 'Disconnected',
+      connStatusV6: 'Disconnected',
+    }))
     const wan = parseLiveWan(allDown, { previousName: 'ipoe_ptm_0_0_d' })
     expect(wan?.ifName).toBe('ppp0')
     expect(wan?.connStatusV4).toBe('Disconnected')

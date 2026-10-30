@@ -50,7 +50,9 @@ describe('summariseEventDetail', () => {
   })
 
   test('a null field prints null rather than disappearing into an empty string', () => {
-    expect(summariseEventDetail({ previousShowtimeStartS: null })).toBe('previousShowtimeStartS null')
+    expect(summariseEventDetail({ previousShowtimeStartS: null })).toBe(
+      'previousShowtimeStartS null',
+    )
   })
 
   test('a non-object detail is not silently swallowed', () => {

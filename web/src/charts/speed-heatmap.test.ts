@@ -38,7 +38,9 @@ const run = (hour: number, over: Partial<SpeedTest> = {}): SpeedTest => ({
 })
 
 const cellAt = (cells: ReturnType<typeof speedCells>['cells'], hour: number) => {
-  const target = cells.find((c) => c.hour?.bucket === Math.floor((FROM + hour * HOUR_MS) / HOUR_MS) * HOUR_MS)
+  const target = cells.find(
+    (c) => c.hour?.bucket === Math.floor((FROM + hour * HOUR_MS) / HOUR_MS) * HOUR_MS,
+  )
   if (!target) throw new Error(`no cell for hour ${hour}`)
   return target
 }

@@ -14,27 +14,37 @@ describe('outageSpans', () => {
 
   test('an outage inside the grid maps to itself', () => {
     const start = slot(1).bucketStart
-    expect(outageSpans(slots, [{ startedAt: start, endedAt: start + MIN }], BUCKET, gridEnd)).toEqual([
-      { start, end: start + MIN },
-    ])
+    expect(
+      outageSpans(slots, [{ startedAt: start, endedAt: start + MIN }], BUCKET, gridEnd),
+    ).toEqual([{ start, end: start + MIN }])
   })
 
   test('one that began before the window is clamped to the left edge, not dropped', () => {
-    const [span] = outageSpans(slots, [{ startedAt: 0, endedAt: slot(1).bucketStart }], BUCKET, gridEnd)
+    const [span] = outageSpans(
+      slots,
+      [{ startedAt: 0, endedAt: slot(1).bucketStart }],
+      BUCKET,
+      gridEnd,
+    )
     expect(span).toEqual({ start: gridStart, end: slot(1).bucketStart })
   })
 
   test('an ongoing outage runs to the window end, clamped to the grid', () => {
-    const [span] = outageSpans(slots, [{ startedAt: slot(1).bucketStart, endedAt: null }], BUCKET, gridEnd + BUCKET)
+    const [span] = outageSpans(
+      slots,
+      [{ startedAt: slot(1).bucketStart, endedAt: null }],
+      BUCKET,
+      gridEnd + BUCKET,
+    )
     expect(span).toEqual({ start: slot(1).bucketStart, end: gridEnd })
   })
 
   test('a single-slot window still draws the outage inside it', () => {
     const only = [slot(0)]
     const start = slot(0).bucketStart
-    expect(outageSpans(only, [{ startedAt: start, endedAt: start + MIN }], BUCKET, start + BUCKET)).toEqual([
-      { start, end: start + MIN },
-    ])
+    expect(
+      outageSpans(only, [{ startedAt: start, endedAt: start + MIN }], BUCKET, start + BUCKET),
+    ).toEqual([{ start, end: start + MIN }])
   })
 
   test('an outage entirely outside the grid, and an empty grid, draw nothing', () => {

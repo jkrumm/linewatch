@@ -62,7 +62,10 @@ const CycleInput = z.object({
   // The server re-derives the verdict from pathClass + gatewayAddr whenever both
   // are present and takes the stricter of the two — "which gateway is home" is
   // server config, so the server gets the last word.
-  onHomeLine: z.union([z.boolean(), z.literal(0), z.literal(1)]).nullable().optional(),
+  onHomeLine: z
+    .union([z.boolean(), z.literal(0), z.literal(1)])
+    .nullable()
+    .optional(),
   // The NIC's ceiling from its supported-media list, which is what makes a
   // 100 Mbit `linkMbit` actionable: supported 1000 means cable or switch port,
   // supported 100 means the hardware. Null when the collector could not read it.
@@ -145,8 +148,12 @@ const VantageBucketSchema = z.object({
   bucket: z.number().int(),
   cycles: z.number().int().describe('Distinct cycle timestamps with probe samples in this bucket'),
   vantageCycles: z.number().int().describe('…of which this many recorded a vantage at all'),
-  pathClasses: z.array(z.string()).describe('Distinct path classes seen — more than one means the path changed mid-bucket'),
-  linkMbits: z.array(z.number().int()).describe('Distinct negotiated link speeds seen — more than one means the NIC renegotiated'),
+  pathClasses: z
+    .array(z.string())
+    .describe('Distinct path classes seen — more than one means the path changed mid-bucket'),
+  linkMbits: z
+    .array(z.number().int())
+    .describe('Distinct negotiated link speeds seen — more than one means the NIC renegotiated'),
   pathIfs: z.array(z.string()),
   onHomeLine: HomeLineVerdictSchema,
   homeLineCycles: z.number().int(),
@@ -180,7 +187,10 @@ const ProbeBucketSchema = z.object({
  *
  * Returns how many rows were actually written.
  */
-function recordLinkTransitions(transitions: { ts: number; state: 'up' | 'down' }[], iface: string | null): number {
+function recordLinkTransitions(
+  transitions: { ts: number; state: 'up' | 'down' }[],
+  iface: string | null,
+): number {
   let written = 0
   for (const transition of transitions) {
     const existing = db
@@ -196,7 +206,9 @@ function recordLinkTransitions(transitions: { ts: number; state: 'up' | 'down' }
     // plausible interface there would attribute the transition to hardware
     // nobody looked at.
     const detail = { source: 'link-sampler', state: transition.state, iface }
-    db.insert(event).values({ ts: transition.ts, kind: 'link_change', detail: JSON.stringify(detail) }).run()
+    db.insert(event)
+      .values({ ts: transition.ts, kind: 'link_change', detail: JSON.stringify(detail) })
+      .run()
     written += 1
   }
   return written
@@ -244,11 +256,22 @@ export const probesRoutes = new Elysia()
       // verbatim. One POST is always exactly one cycle (one `ts`, every
       // target) — see collector/probe.ts — so "a row for this ts already
       // exists" means the whole batch was already recorded.
-      const existing = db.select({ id: probeSample.id }).from(probeSample).where(eq(probeSample.ts, body.ts)).limit(1).all()
+      const existing = db
+        .select({ id: probeSample.id })
+        .from(probeSample)
+        .where(eq(probeSample.ts, body.ts))
+        .limit(1)
+        .all()
       if (existing.length > 0) {
         // `cycleStored: false` with `skipped: true` is the correct outcome, not
         // a warning: the vantage for this ts was stored the first time round.
-        return { ok: true as const, inserted: 0, skipped: true, linkChange: false, cycleStored: false }
+        return {
+          ok: true as const,
+          inserted: 0,
+          skipped: true,
+          linkChange: false,
+          cycleStored: false,
+        }
       }
 
       db.insert(probeSample)
@@ -275,14 +298,20 @@ export const probesRoutes = new Elysia()
       // Written before the outage machine runs so that if a link_change and an
       // outage land on the same cycle, the timeline already carries the cause.
       const cycle = body.cycle
-        ? recordCycleVantage(db, { ts: body.ts, vantage: body.cycle, homeGatewayAddr: config.homeGatewayAddr })
+        ? recordCycleVantage(db, {
+            ts: body.ts,
+            vantage: body.cycle,
+            homeGatewayAddr: config.homeGatewayAddr,
+          })
         : { inserted: false, linkChangeEventId: null }
 
       // Same reasoning as the vantage above: written before the outage machine
       // runs, so a link transition inside an outage is already on the timeline
       // when the outage lands. Nothing here is reached on a replay — the
       // `skipped: true` branch returned long before.
-      const linkEventsWritten = body.linkEvents ? recordLinkTransitions(body.linkEvents, body.cycle?.pathIf ?? null) : 0
+      const linkEventsWritten = body.linkEvents
+        ? recordLinkTransitions(body.linkEvents, body.cycle?.pathIf ?? null)
+        : 0
 
       // One cycle in ten carries this; the rest carry nothing and that is not a
       // gap in the radio's history, it is the sampling cadence.
@@ -313,7 +342,7 @@ export const probesRoutes = new Elysia()
           linkChange: z
             .boolean()
             .describe(
-              'true when this batch materialised a `link_change` event — either from the 30 s vantage diff or from a sub-cycle transition the collector\'s 1 Hz sampler reported in `linkEvents`.',
+              "true when this batch materialised a `link_change` event — either from the 30 s vantage diff or from a sub-cycle transition the collector's 1 Hz sampler reported in `linkEvents`.",
             ),
           cycleStored: z
             .boolean()
@@ -327,7 +356,7 @@ export const probesRoutes = new Elysia()
         tags: ['Probes'],
         summary: 'Ingest one probe cycle',
         description:
-          'Batch ingest from the native collector: one cycle timestamp plus one sample per target, plus an optional `cycle` object recording what the cycle measured *through* (interface, path class, negotiated link, the NIC ceiling, gateway, DHCP lease start, NIC error counters). Idempotent — replaying an already-ingested `ts` is a no-op (`skipped: true`), and `probe_cycle.ts` is UNIQUE so a replayed vantage cannot duplicate either. `cycleStored` reports whether the vantage actually landed: an API predating a `cycle` field parses the batch leniently, drops what it does not know and still answers 200, which once discarded 106 consecutive real vantages while every POST looked healthy. Feeds the outage state machine and materialises `link_change` events — both from the 30 s vantage diff and from the optional `linkEvents` array, the sub-cycle transitions the collector\'s 1 Hz link sampler observed during the cycle. An absent or empty `linkEvents` means no transition longer than that sampling resolution was seen, never that the link was stable; `cycle.linkWatchS` is what says how much of the cycle was watched at all. The optional `wifi` object is the radio state of an alternate radio path currently attached, sampled every 10th cycle (5 min) because `system_profiler` costs ~4.8 s — it is written to `wifi_sample` with `onConflictDoNothing` on its UNIQUE `ts`, and it deliberately carries no SSID, BSSID or MAC.',
+          "Batch ingest from the native collector: one cycle timestamp plus one sample per target, plus an optional `cycle` object recording what the cycle measured *through* (interface, path class, negotiated link, the NIC ceiling, gateway, DHCP lease start, NIC error counters). Idempotent — replaying an already-ingested `ts` is a no-op (`skipped: true`), and `probe_cycle.ts` is UNIQUE so a replayed vantage cannot duplicate either. `cycleStored` reports whether the vantage actually landed: an API predating a `cycle` field parses the batch leniently, drops what it does not know and still answers 200, which once discarded 106 consecutive real vantages while every POST looked healthy. Feeds the outage state machine and materialises `link_change` events — both from the 30 s vantage diff and from the optional `linkEvents` array, the sub-cycle transitions the collector's 1 Hz link sampler observed during the cycle. An absent or empty `linkEvents` means no transition longer than that sampling resolution was seen, never that the link was stable; `cycle.linkWatchS` is what says how much of the cycle was watched at all. The optional `wifi` object is the radio state of an alternate radio path currently attached, sampled every 10th cycle (5 min) because `system_profiler` costs ~4.8 s — it is written to `wifi_sample` with `onConflictDoNothing` on its UNIQUE `ts`, and it deliberately carries no SSID, BSSID or MAC.",
         security: [{ BearerAuth: [] }],
       },
     },
@@ -355,7 +384,10 @@ export const probesRoutes = new Elysia()
         target: z.string().optional(),
         bucket: z.coerce.number().int().min(1).default(3600),
       }),
-      response: z.object({ buckets: z.array(ProbeBucketSchema), vantage: z.array(VantageBucketSchema) }),
+      response: z.object({
+        buckets: z.array(ProbeBucketSchema),
+        vantage: z.array(VantageBucketSchema),
+      }),
       detail: {
         tags: ['Probes'],
         summary: 'Server-bucketed probe timeseries',

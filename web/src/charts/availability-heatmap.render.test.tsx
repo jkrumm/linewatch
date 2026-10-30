@@ -42,7 +42,9 @@ describe('AvailabilityHeatmap isPending', () => {
   })
 
   test('does not render the pending caption once the query has resolved', () => {
-    const html = renderToStaticMarkup(<AvailabilityHeatmap buckets={[]} {...WINDOW} isPending={false} />)
+    const html = renderToStaticMarkup(
+      <AvailabilityHeatmap buckets={[]} {...WINDOW} isPending={false} />,
+    )
     expect(html).not.toContain('Loading')
   })
 

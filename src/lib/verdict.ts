@@ -312,7 +312,10 @@ function ev(label: string, value: string | number | null): Evidence {
  * where it is indistinguishable from a measured one.
  */
 function verdict(v: Verdict): Verdict {
-  if (v.evidence.length === 0) throw new Error(`verdict "${v.id}" has no evidence — a conclusion that cannot cite its numbers must not exist`)
+  if (v.evidence.length === 0)
+    throw new Error(
+      `verdict "${v.id}" has no evidence — a conclusion that cannot cite its numbers must not exist`,
+    )
   return v
 }
 
@@ -325,7 +328,10 @@ function verdict(v: Verdict): Verdict {
  */
 export function linkCertain(link: LinkState): boolean {
   if (link.watchedS === null || link.windowS <= 0) return false
-  return link.watchedS / link.windowS >= VERDICT_THRESHOLDS.linkCoverageMinShare && link.transitions === 0
+  return (
+    link.watchedS / link.windowS >= VERDICT_THRESHOLDS.linkCoverageMinShare &&
+    link.transitions === 0
+  )
 }
 
 /**
@@ -343,7 +349,8 @@ function linkCoveragePct(link: LinkState): number {
 /** Why an attribution over this window is not defensible, or null when it is. */
 function linkUncertainty(link: LinkState): string | null {
   if (linkCertain(link)) return null
-  if (link.transitions > 0) return `${link.transitions} host link transitions were recorded in this window, so no attribution over it is defensible.`
+  if (link.transitions > 0)
+    return `${link.transitions} host link transitions were recorded in this window, so no attribution over it is defensible.`
   return `The host link sampler covered ${round1(linkCoveragePct(link))}% of this window, so a link transition inside it cannot be ruled out.`
 }
 
@@ -373,7 +380,8 @@ export function collectorSilent(input: VerdictInput): Verdict | null {
     return verdict({
       id: 'no_data',
       severity: 'warn',
-      conclusion: 'No probe cycle has ever been ingested. Nothing in this record describes the line — an empty record is not an uptime record.',
+      conclusion:
+        'No probe cycle has ever been ingested. Nothing in this record describes the line — an empty record is not an uptime record.',
       evidence: [ev('Probe cycles on record', 0)],
       action: 'Check the launchd collector: `make collector-logs`.',
       uncertainty: null,
@@ -385,11 +393,18 @@ export function collectorSilent(input: VerdictInput): Verdict | null {
 
   return verdict({
     id: 'collector_silent',
-    severity: ageS > probeCycleSeconds * VERDICT_THRESHOLDS.collectorSilentCriticalCycles ? 'critical' : 'warn',
+    severity:
+      ageS > probeCycleSeconds * VERDICT_THRESHOLDS.collectorSilentCriticalCycles
+        ? 'critical'
+        : 'warn',
     conclusion:
       `No probe cycle has been ingested for ${ageS} s. The line's state is unknown, not healthy — the outage detector only advances ` +
       'when a cycle arrives, so an absent collector produces no outage row and reads as green.',
-    evidence: [ev('Last probe cycle', utc(lastProbeTs)), ev('Age', `${ageS} s`), ev('Probe cadence', `${probeCycleSeconds} s`)],
+    evidence: [
+      ev('Last probe cycle', utc(lastProbeTs)),
+      ev('Age', `${ageS} s`),
+      ev('Probe cadence', `${probeCycleSeconds} s`),
+    ],
     action: 'Check the launchd collector: `make collector-logs`.',
     uncertainty: null,
   })
@@ -405,7 +420,12 @@ export function collectorSilent(input: VerdictInput): Verdict | null {
  */
 export function throughputExceedsLink(input: VerdictInput): Verdict[] {
   return input.throughput
-    .filter((t) => t.vantageCycles > 0 && t.maxLinkMbit > 0 && t.wireMbps > t.maxLinkMbit * VERDICT_THRESHOLDS.throughputExceedsLinkFactor)
+    .filter(
+      (t) =>
+        t.vantageCycles > 0 &&
+        t.maxLinkMbit > 0 &&
+        t.wireMbps > t.maxLinkMbit * VERDICT_THRESHOLDS.throughputExceedsLinkFactor,
+    )
     .map((t) => {
       const ceilingMbps = round1(t.maxLinkMbit * VERDICT_THRESHOLDS.ethernetPayloadShare)
       // Only claimed when it is true: a link_change in the window is a candidate
@@ -451,7 +471,13 @@ export function throughputExceedsLink(input: VerdictInput): Verdict[] {
 export function linkBelowCarrierSync(input: VerdictInput): Verdict | null {
   const s = input.linkVsSync
   const { linkMbit, downSyncKbps, downloadMbps, syncObservedAt } = s
-  if (linkMbit === null || downSyncKbps === null || downloadMbps === null || syncObservedAt === null) return null
+  if (
+    linkMbit === null ||
+    downSyncKbps === null ||
+    downloadMbps === null ||
+    syncObservedAt === null
+  )
+    return null
   if (s.distinctLinkMbits > 1) return null
   if (s.vantageCycles === 0 || s.homeLineCycles !== s.vantageCycles) return null
 
@@ -470,7 +496,9 @@ export function linkBelowCarrierSync(input: VerdictInput): Verdict | null {
   // null ceiling must never become an implied 1000 — that would invent a cable
   // fault out of an unread field.
   const nicCanDoMore = s.linkMaxMbit !== null && s.linkMaxMbit > linkMbit
-  const maxClause = nicCanDoMore ? ` The NIC advertises ${s.linkMaxMbit} Mbit as supported, so this is the cable or the switch port, not the hardware.` : ''
+  const maxClause = nicCanDoMore
+    ? ` The NIC advertises ${s.linkMaxMbit} Mbit as supported, so this is the cable or the switch port, not the hardware.`
+    : ''
 
   const action = nicCanDoMore
     ? 'Swap the Ethernet cable, then the router LAN port, and record each attempt with POST /api/interventions so the recovery is attributable.'
@@ -523,7 +551,11 @@ export function probeCoverageLow(input: VerdictInput): Verdict | null {
       conclusion:
         `Coverage for this window is unknown: it is shorter than one probe cycle, so there is no share of it to report. ` +
         `${c.recordedCycles} cycles were recorded inside it.`,
-      evidence: [ev('Recorded cycles', c.recordedCycles), ev('Expected cycles', c.expectedCycles), ev('Coverage', 'unknown')],
+      evidence: [
+        ev('Recorded cycles', c.recordedCycles),
+        ev('Expected cycles', c.expectedCycles),
+        ev('Coverage', 'unknown'),
+      ],
       action: null,
       uncertainty: 'A window shorter than one probe cycle cannot be scored for coverage.',
     })
@@ -535,8 +567,10 @@ export function probeCoverageLow(input: VerdictInput): Verdict | null {
   // later than `from`. The window figure is still reported — it is what every
   // range chart is drawn over.
   const startedLate = c.firstTs !== null && c.firstTs > input.from
-  const expectedSince = startedLate && c.firstTs !== null ? Math.round((input.to - c.firstTs) / cycleMs) : 0
-  const sincePct = expectedSince > 0 ? Math.min(100, (100 * c.recordedCycles) / expectedSince) : null
+  const expectedSince =
+    startedLate && c.firstTs !== null ? Math.round((input.to - c.firstTs) / cycleMs) : 0
+  const sincePct =
+    expectedSince > 0 ? Math.min(100, (100 * c.recordedCycles) / expectedSince) : null
   const effectivePct = sincePct ?? c.coveragePct
   if (effectivePct >= VERDICT_THRESHOLDS.coverageWarnPct) return null
 
@@ -651,16 +685,26 @@ export function routerCoverageLow(input: VerdictInput): Verdict | null {
  */
 export function carrierResyncDated(input: VerdictInput): Verdict[] {
   return input.resyncClusters
-    .filter((cluster) => cluster.samples >= VERDICT_THRESHOLDS.resyncMinSamples && cluster.spreadMs <= VERDICT_THRESHOLDS.resyncMaxSpreadMs)
+    .filter(
+      (cluster) =>
+        cluster.samples >= VERDICT_THRESHOLDS.resyncMinSamples &&
+        cluster.spreadMs <= VERDICT_THRESHOLDS.resyncMaxSpreadMs,
+    )
     .map((cluster) => {
       const certain = linkCertain(cluster.linkState)
       const outage = cluster.outage
       // Both terms required: a null `ended_at` (ongoing) has no delta to state
       // and a null `duration_s` has no length, and neither may be filled in.
-      const attributable = certain && outage !== null && outage.endedAt !== null && outage.durationS !== null
-      const deltaS = outage !== null && outage.endedAt !== null ? Math.round((outage.endedAt - cluster.upAt) / 1000) : null
+      const attributable =
+        certain && outage !== null && outage.endedAt !== null && outage.durationS !== null
+      const deltaS =
+        outage !== null && outage.endedAt !== null
+          ? Math.round((outage.endedAt - cluster.upAt) / 1000)
+          : null
       const attributionClause =
-        attributable && outage !== null ? ` Outage #${outage.id} (${outage.durationS} s) ended ${deltaS} s after it, so that outage was the line.` : ''
+        attributable && outage !== null
+          ? ` Outage #${outage.id} (${outage.durationS} s) ended ${deltaS} s after it, so that outage was the line.`
+          : ''
 
       return applyLinkGate(
         verdict({
@@ -672,12 +716,18 @@ export function carrierResyncDated(input: VerdictInput): Verdict[] {
             ev('Agreeing polls', cluster.samples),
             ev('Agreement spread', `${round1(cluster.spreadMs / 1000)} s`),
             ev('Overlapping WAN outage', outage === null ? 'none' : `#${outage.id}`),
-            ev('That outage lasted', outage === null ? 'none' : outage.durationS === null ? null : `${outage.durationS} s`),
+            ev(
+              'That outage lasted',
+              outage === null ? 'none' : outage.durationS === null ? null : `${outage.durationS} s`,
+            ),
             ev('Outage ended after showtime by', deltaS === null ? 'none' : `${deltaS} s`),
             ev('Link sampler coverage around it', `${round1(linkCoveragePct(cluster.linkState))}%`),
             ev('Link transitions around it', cluster.linkState.transitions),
           ],
-          action: attributable || certain ? null : 'Enable the link sampler so the next resync can be separated from a host-side link event.',
+          action:
+            attributable || certain
+              ? null
+              : 'Enable the link sampler so the next resync can be separated from a host-side link event.',
           uncertainty: null,
         }),
         cluster.linkState,
@@ -700,7 +750,9 @@ export function carrierResyncDated(input: VerdictInput): Verdict[] {
  */
 export function subCyclePathStall(input: VerdictInput): Verdict[] {
   return input.pathStalls
-    .filter((stall) => stall.maxLossPct === 0 && stall.minRatio >= VERDICT_THRESHOLDS.pathStallMinRatio)
+    .filter(
+      (stall) => stall.maxLossPct === 0 && stall.minRatio >= VERDICT_THRESHOLDS.pathStallMinRatio,
+    )
     .map((stall) => {
       const sampled = stall.linkWatchS !== null
       const action = !sampled
@@ -721,12 +773,20 @@ export function subCyclePathStall(input: VerdictInput): Verdict[] {
           ev('Targets', stall.targetCount),
           ev('Smallest max/median ratio', `${round1(stall.minRatio)}×`),
           ev('Medians', stall.perTarget.map((t) => `${t.target} ${round1(t.medMs)} ms`).join(', ')),
-          ev('Worst round trips', stall.perTarget.map((t) => `${t.target} ${round1(t.maxMs)} ms`).join(', ')),
+          ev(
+            'Worst round trips',
+            stall.perTarget.map((t) => `${t.target} ${round1(t.maxMs)} ms`).join(', '),
+          ),
           ev('Worst loss in the cycle', `${stall.maxLossPct}%`),
-          ev('Link sampling behind this cycle', stall.linkWatchS === null ? null : `${stall.linkWatchS} s`),
+          ev(
+            'Link sampling behind this cycle',
+            stall.linkWatchS === null ? null : `${stall.linkWatchS} s`,
+          ),
         ],
         action,
-        uncertainty: sampled ? null : 'The link sampler did not back this cycle, so a link transition inside it cannot be ruled out.',
+        uncertainty: sampled
+          ? null
+          : 'The link sampler did not back this cycle, so a link transition inside it cannot be ruled out.',
       })
     })
 }
@@ -780,8 +840,16 @@ export function gatewayOutageUncorroborated(input: VerdictInput): Verdict[] {
             ev('Cycle', utc(o.ts)),
             ev('Gateway replies', `${o.gatewayReceived} of ${gatewaySent}`),
             ev('WAN anchors answering', o.wanAliveCount),
-            ev('Anchor replies', o.anchors.map((a) => `${a.target} ${a.received}/${a.sent}`).join(', ')),
-            ev('Anchor medians', o.anchors.map((a) => `${a.target} ${a.medMs === null ? 'unknown' : `${round1(a.medMs)} ms`}`).join(', ')),
+            ev(
+              'Anchor replies',
+              o.anchors.map((a) => `${a.target} ${a.received}/${a.sent}`).join(', '),
+            ),
+            ev(
+              'Anchor medians',
+              o.anchors
+                .map((a) => `${a.target} ${a.medMs === null ? 'unknown' : `${round1(a.medMs)} ms`}`)
+                .join(', '),
+            ),
             ev('On home line', o.onHomeLine),
             ev('Link transitions in window', input.linkState.transitions),
           ],
@@ -809,7 +877,8 @@ export function symmetricLossNotLine(input: VerdictInput): Verdict | null {
   const s = input.symmetricLoss
   if (s === null || s.cycles === 0) return null
 
-  const medianClause = s.worstMedMs === null ? '' : `, with medians topping out at ${round1(s.worstMedMs)} ms`
+  const medianClause =
+    s.worstMedMs === null ? '' : `, with medians topping out at ${round1(s.worstMedMs)} ms`
   const deltasKnown = s.ifIerrsDelta !== null && s.ifOerrsDelta !== null && s.ifCollDelta !== null
   const nicClause = deltasKnown
     ? ` The NIC error counters moved by ${s.ifIerrsDelta}/${s.ifOerrsDelta}/${s.ifCollDelta} across that window.`
@@ -821,7 +890,12 @@ export function symmetricLossNotLine(input: VerdictInput): Verdict | null {
       : [
           ev('Worked example', utc(s.exampleTs)),
           ev('Its loss', s.exampleTargets.map((t) => `${t.target} ${t.lossPct}%`).join(', ')),
-          ev('Its medians', s.exampleTargets.map((t) => `${t.target} ${t.medMs === null ? 'unknown' : `${round1(t.medMs)} ms`}`).join(', ')),
+          ev(
+            'Its medians',
+            s.exampleTargets
+              .map((t) => `${t.target} ${t.medMs === null ? 'unknown' : `${round1(t.medMs)} ms`}`)
+              .join(', '),
+          ),
         ]
 
   return applyLinkGate(
@@ -870,5 +944,7 @@ export function deriveVerdicts(input: VerdictInput): Verdict[] {
     symmetricLossNotLine(input),
   ].filter((v): v is Verdict => v !== null)
 
-  return verdicts.sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || a.id.localeCompare(b.id))
+  return verdicts.sort(
+    (a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || a.id.localeCompare(b.id),
+  )
 }

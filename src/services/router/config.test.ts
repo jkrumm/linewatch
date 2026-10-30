@@ -10,7 +10,10 @@ import { buildRouterConfig, resolvePollCron } from './config.js'
  * which exists on the machine this runs on — the suite would then pass or fail
  * depending on whose laptop it ran on, and would read a live credential to do it.
  */
-function withPasswordFile(contents: string | null): { env: NodeJS.ProcessEnv; cleanup: () => void } {
+function withPasswordFile(contents: string | null): {
+  env: NodeJS.ProcessEnv
+  cleanup: () => void
+} {
   const dir = mkdtempSync(join(tmpdir(), 'linewatch-router-cfg-'))
   const path = join(dir, 'router-password')
   if (contents !== null) writeFileSync(path, contents, { mode: 0o600 })
@@ -39,7 +42,9 @@ describe('buildRouterConfig', () => {
   it('trims the environment value — compose passes the .env line through verbatim', () => {
     const { env, cleanup } = withPasswordFile(null)
     try {
-      expect(buildRouterConfig({ ...env, LINEWATCH_ROUTER_PASSWORD: '  padded  ' }).password).toBe('padded')
+      expect(buildRouterConfig({ ...env, LINEWATCH_ROUTER_PASSWORD: '  padded  ' }).password).toBe(
+        'padded',
+      )
     } finally {
       cleanup()
     }
@@ -127,7 +132,10 @@ describe('buildRouterConfig', () => {
   it('falls back on an unparseable cron instead of throwing the process down at boot', () => {
     const { env, cleanup } = withPasswordFile('secret-from-file')
     try {
-      const config = buildRouterConfig({ ...env, LINEWATCH_ROUTER_CRON: 'every five minutes please' })
+      const config = buildRouterConfig({
+        ...env,
+        LINEWATCH_ROUTER_CRON: 'every five minutes please',
+      })
       // Still polling — degraded, not off. `new Cron` in the scheduler would
       // otherwise throw out of startRouterPoller and take the API with it.
       expect(config.enabled).toBe(true)
@@ -143,7 +151,11 @@ describe('buildRouterConfig', () => {
 
 describe('resolvePollCron', () => {
   it('measures the period from the pattern rather than parsing it', () => {
-    expect(resolvePollCron('*/5 * * * *')).toMatchObject({ cron: '*/5 * * * *', intervalMs: 300_000, reason: null })
+    expect(resolvePollCron('*/5 * * * *')).toMatchObject({
+      cron: '*/5 * * * *',
+      intervalMs: 300_000,
+      reason: null,
+    })
     expect(resolvePollCron('*/30 * * * * *')).toMatchObject({ intervalMs: 30_000, reason: null })
   })
 })

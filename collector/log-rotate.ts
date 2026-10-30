@@ -70,7 +70,12 @@ export interface FileIdentity {
  * `LINEWATCH_LOG_PATH` have drifted apart, and `no-log-file` means the path is
  * wrong outright.
  */
-export type RotationSkipReason = 'disabled' | 'no-log-file' | 'stdout-not-a-file' | 'stdout-elsewhere' | 'under-threshold'
+export type RotationSkipReason =
+  | 'disabled'
+  | 'no-log-file'
+  | 'stdout-not-a-file'
+  | 'stdout-elsewhere'
+  | 'under-threshold'
 
 export type RotationDecision = { rotate: true } | { rotate: false; reason: RotationSkipReason }
 
@@ -112,7 +117,8 @@ export function decideRotation(input: {
   // every comparison against it is false — including `size < maxBytes`, which
   // would make an unparseable override rotate on *every* cycle and shred the
   // log instead of bounding it. An override nobody can read is not a bound.
-  if (!Number.isFinite(input.maxBytes) || input.maxBytes <= 0) return { rotate: false, reason: 'disabled' }
+  if (!Number.isFinite(input.maxBytes) || input.maxBytes <= 0)
+    return { rotate: false, reason: 'disabled' }
   if (input.log === null) return { rotate: false, reason: 'no-log-file' }
   if (input.stdout === null) return { rotate: false, reason: 'stdout-not-a-file' }
   if (input.stdout.dev !== input.log.dev || input.stdout.ino !== input.log.ino) {
@@ -201,6 +207,11 @@ export function rotateLogIfNeeded(options: {
 
   // Reported after the truncate on purpose: this becomes the first line of the
   // fresh file and explains why it starts mid-history.
-  options.report('log.rotated', { path: options.logPath, previous, bytes: log.size, maxBytes: options.maxBytes })
+  options.report('log.rotated', {
+    path: options.logPath,
+    previous,
+    bytes: log.size,
+    maxBytes: options.maxBytes,
+  })
   return true
 }

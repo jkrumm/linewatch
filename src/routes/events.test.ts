@@ -33,7 +33,9 @@ interface EventRow {
   detail: unknown
 }
 
-async function get(query: string): Promise<{ events: EventRow[]; linkSamplingSince: number | null }> {
+async function get(
+  query: string,
+): Promise<{ events: EventRow[]; linkSamplingSince: number | null }> {
   const res = await app.handle(new Request(`http://localhost/api/events?${query}`))
   expect(res.status).toBe(200)
   return (await res.json()) as { events: EventRow[]; linkSamplingSince: number | null }
@@ -51,10 +53,21 @@ describe('GET /api/events', () => {
         {
           ts: BASE,
           kind: 'link_change',
-          detail: JSON.stringify({ source: 'vantage-diff', changed: { linkMbit: { before: 1000, after: 100 } } }),
+          detail: JSON.stringify({
+            source: 'vantage-diff',
+            changed: { linkMbit: { before: 1000, after: 100 } },
+          }),
         },
-        { ts: BASE + 1000, kind: 'link_change', detail: JSON.stringify({ source: 'link-sampler', state: 'down', iface: 'en0' }) },
-        { ts: BASE + 2000, kind: 'link_change', detail: JSON.stringify({ source: 'router-poller', reason: 'line_resync' }) },
+        {
+          ts: BASE + 1000,
+          kind: 'link_change',
+          detail: JSON.stringify({ source: 'link-sampler', state: 'down', iface: 'en0' }),
+        },
+        {
+          ts: BASE + 2000,
+          kind: 'link_change',
+          detail: JSON.stringify({ source: 'router-poller', reason: 'line_resync' }),
+        },
         // A row written before `vantage-diff` was stamped. It is left null rather
         // than back-filled with the source it most likely had.
         { ts: BASE + 3000, kind: 'link_change', detail: JSON.stringify({ changed: {} }) },
@@ -62,7 +75,12 @@ describe('GET /api/events', () => {
       .run()
 
     const { events } = await get(`from=${BASE}&to=${BASE + 10_000}`)
-    expect(events.map((row) => row.source)).toEqual([null, 'router-poller', 'link-sampler', 'vantage-diff'])
+    expect(events.map((row) => row.source)).toEqual([
+      null,
+      'router-poller',
+      'link-sampler',
+      'vantage-diff',
+    ])
   })
 
   test('linkSamplingSince is null when cycles exist but none reported link_watch_s', async () => {

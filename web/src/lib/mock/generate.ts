@@ -357,7 +357,12 @@ function homeLineVerdict(cycles: number, home: number, off: number): HomeLineVer
   return 'mixed'
 }
 
-function overlapFraction(start: number, end: number, windowStart: number, windowEnd: number): number {
+function overlapFraction(
+  start: number,
+  end: number,
+  windowStart: number,
+  windowEnd: number,
+): number {
   const span = end - start
   if (span <= 0) return 0
   const overlap = Math.min(end, windowEnd) - Math.max(start, windowStart)
@@ -379,7 +384,9 @@ function vantageBucketAt(bucketStart: number, stepMs: number, cycles: number): V
   const vantageCycles = Math.round(reportedFraction * cycles)
   const wifiCycles = Math.min(
     vantageCycles,
-    Math.round(overlapFraction(bucketStart, bucketEnd, WIFI_WINDOW.start, WIFI_WINDOW.end) * cycles),
+    Math.round(
+      overlapFraction(bucketStart, bucketEnd, WIFI_WINDOW.start, WIFI_WINDOW.end) * cycles,
+    ),
   )
   const homeLineCycles = vantageCycles - wifiCycles
 
@@ -520,7 +527,11 @@ export function generateThroughput(
   const stepMs = bucketSeconds * 1000
   const buckets: ThroughputBucket[] = []
 
-  for (let bucketStart = Math.floor(from / stepMs) * stepMs; bucketStart < to; bucketStart += stepMs) {
+  for (
+    let bucketStart = Math.floor(from / stepMs) * stepMs;
+    bucketStart < to;
+    bucketStart += stepMs
+  ) {
     if (!bucketRecorded(bucketStart)) continue
 
     const cadenceIntervals = Math.max(1, Math.round(stepMs / PROBE_CYCLE_MS))
@@ -528,14 +539,18 @@ export function generateThroughput(
     // or a gap longer than MOCK_MAX_INTERVAL_MS.
     const skipped =
       noiseAt('throughput-skip', bucketStart) < 0.2
-        ? Math.max(1, Math.round(cadenceIntervals * 0.3 * noiseAt('throughput-skip-share', bucketStart)))
+        ? Math.max(
+            1,
+            Math.round(cadenceIntervals * 0.3 * noiseAt('throughput-skip-share', bucketStart)),
+          )
         : 0
     const intervals = Math.max(0, cadenceIntervals - skipped)
     if (intervals === 0) continue
 
     const spanMs = intervals * PROBE_CYCLE_MS
     const seconds = spanMs / 1000
-    const downRate = 120_000 + 3_400_000 * diurnalFactor(bucketStart) * noiseAt('throughput-down', bucketStart)
+    const downRate =
+      120_000 + 3_400_000 * diurnalFactor(bucketStart) * noiseAt('throughput-down', bucketStart)
     const upRate = downRate * (0.08 + 0.12 * noiseAt('throughput-up', bucketStart))
 
     buckets.push({
@@ -671,7 +686,11 @@ export function generateEvents(from: number, to: number): EventsResponse {
       ts: outageStart + 12 * 60_000,
       kind: 'intervention',
       source: 'manual',
-      detail: { source: 'manual', action: 'power-cycled the router', note: 'ten minutes into the outage' },
+      detail: {
+        source: 'manual',
+        action: 'power-cycled the router',
+        note: 'ten minutes into the outage',
+      },
     },
     {
       id: 6,
@@ -855,7 +874,10 @@ export function generateStatus(now: number = NOW): StatusResponse {
 
   return {
     up: ongoingOutages.length === 0,
-    newestSampleTs: lastSamples.reduce<number | null>((newest, sample) => (newest === null || sample.ts > newest ? sample.ts : newest), null),
+    newestSampleTs: lastSamples.reduce<number | null>(
+      (newest, sample) => (newest === null || sample.ts > newest ? sample.ts : newest),
+      null,
+    ),
     // Always false: the mock generates a *history*, and a speed test in flight
     // is an instantaneous condition with no history to generate. A mock that
     // flipped this at random would make the dashboard's stand-down state appear
@@ -1019,8 +1041,24 @@ export function generateRouterSnapshot(): RouterSnapshot {
       clientType: 'computer',
     }),
     ports: routerPart(lanTs, [
-      { id: 5, ts: lanTs, name: 'eth0', alias: 'LAN1', status: 'Up', maxBitRate: 1000, duplexMode: 'Full' },
-      { id: 6, ts: lanTs, name: 'eth1', alias: 'LAN2', status: 'Down', maxBitRate: null, duplexMode: null },
+      {
+        id: 5,
+        ts: lanTs,
+        name: 'eth0',
+        alias: 'LAN1',
+        status: 'Up',
+        maxBitRate: 1000,
+        duplexMode: 'Full',
+      },
+      {
+        id: 6,
+        ts: lanTs,
+        name: 'eth1',
+        alias: 'LAN2',
+        status: 'Down',
+        maxBitRate: null,
+        duplexMode: null,
+      },
     ]),
   }
 }

@@ -196,7 +196,10 @@ export const outage = sqliteTable(
     cycles: integer('cycles').notNull().default(1),
     evidence: text('evidence').notNull(),
   },
-  (t) => [index('outage_started').on(t.startedAt), index('outage_scope_started').on(t.scope, t.startedAt)],
+  (t) => [
+    index('outage_started').on(t.startedAt),
+    index('outage_scope_started').on(t.scope, t.startedAt),
+  ],
 )
 
 export const speedTest = sqliteTable(

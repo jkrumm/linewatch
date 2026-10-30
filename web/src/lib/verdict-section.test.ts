@@ -1,5 +1,11 @@
 import { describe, expect, test } from 'bun:test'
-import { SECTION_KEYS, VERDICT_SECTION, isSectionKey, sectionAnchor, unmappedVerdictIds } from './verdict-section'
+import {
+  SECTION_KEYS,
+  VERDICT_SECTION,
+  isSectionKey,
+  sectionAnchor,
+  unmappedVerdictIds,
+} from './verdict-section'
 import type { Severity, Verdict } from './types'
 
 function v(id: string, severity: Severity = 'warn'): Verdict {
@@ -64,9 +70,9 @@ describe('unmappedVerdictIds', () => {
   })
 
   test('an unmapped id is reported rather than silently dropped, once per id', () => {
-    expect(unmappedVerdictIds([v('some_future_rule', 'critical'), v('some_future_rule', 'warn')])).toEqual([
-      'some_future_rule',
-    ])
+    expect(
+      unmappedVerdictIds([v('some_future_rule', 'critical'), v('some_future_rule', 'warn')]),
+    ).toEqual(['some_future_rule'])
   })
 
   /** Severity is irrelevant here — an `info` rule pointing nowhere is the same page defect as a

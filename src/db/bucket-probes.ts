@@ -89,7 +89,10 @@ interface BucketRow {
  * ever describe how the *median* moved (docs/DESIGN.md, "stored as median +
  * spread + loss fraction, so a graph shows jitter as a band").
  */
-export function bucketProbes(db: BunSQLiteDatabase<typeof schema>, params: BucketProbesParams): ProbeBucket[] {
+export function bucketProbes(
+  db: BunSQLiteDatabase<typeof schema>,
+  params: BucketProbesParams,
+): ProbeBucket[] {
   const bucketMs = Math.max(1, Math.round(params.bucketSeconds * 1000))
   const targetFilter = params.target ? sql`AND target = ${params.target}` : sql``
 
@@ -219,7 +222,10 @@ export function homeLineVerdict(cycles: number, home: number, off: number): Home
  * whose cycles predate the vantage is reported as `cycles > 0,
  * unknownHomeLineCycles = cycles` rather than silently disappearing.
  */
-export function bucketVantage(db: BunSQLiteDatabase<typeof schema>, params: BucketProbesParams): VantageBucket[] {
+export function bucketVantage(
+  db: BunSQLiteDatabase<typeof schema>,
+  params: BucketProbesParams,
+): VantageBucket[] {
   const bucketMs = Math.max(1, Math.round(params.bucketSeconds * 1000))
 
   const rows = db.all<VantageRow>(sql`

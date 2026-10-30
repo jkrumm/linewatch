@@ -60,7 +60,12 @@ describe('POST /api/speedtests/run', () => {
 
     const second = await run()
     expect(second.status).toBe(429)
-    const body = (await second.json()) as { error: string; secondsUntilNext: number; minIntervalS: number; lastRunTs: number }
+    const body = (await second.json()) as {
+      error: string
+      secondsUntilNext: number
+      minIntervalS: number
+      lastRunTs: number
+    }
     expect(body.error).toBe('rate_limited')
     expect(body.minIntervalS).toBe(300)
     // Not just "some number": it has to be a usable countdown.
@@ -73,7 +78,9 @@ describe('POST /api/speedtests/run', () => {
     // A second app instance stands in for a restarted container: no in-process
     // state carries over, only the row.
     const restarted = new Elysia().use(speedtestsRoutes)
-    const res = await restarted.handle(new Request('http://localhost/api/speedtests/run', { method: 'POST' }))
+    const res = await restarted.handle(
+      new Request('http://localhost/api/speedtests/run', { method: 'POST' }),
+    )
 
     expect(res.status).toBe(429)
   })

@@ -19,16 +19,16 @@
   "dependencies": {
     "@elysiajs/openapi": "1.4.16",
     "croner": "10.0.1",
-    "drizzle-orm": "0.45.2",
+    "drizzle-orm": "0.45.4",
     "elysia": "1.4.30",
-    "zod": "4.6.5"
+    "zod": "4.6.7"
   },
   "devDependencies": {
-    "bun-types": "1.4.2",
-    "drizzle-kit": "0.31.10",
-    "oxfmt": "^0.72.0",
-    "oxlint": "^1.87.0",
-    "oxlint-tsgolint": "^7.0.2003",
+    "bun-types": "1.4.4",
+    "drizzle-kit": "0.31.11",
+    "oxfmt": "^0.75.0",
+    "oxlint": "^1.90.0",
+    "oxlint-tsgolint": "^7.0.2005",
     "typescript": "6.0.3"
   }
 }

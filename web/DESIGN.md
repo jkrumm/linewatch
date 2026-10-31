@@ -69,10 +69,11 @@ has no hatch: never-measured is a flat fill, legended, in a colour no measured s
 **and the neutral ramp genuinely cannot do it** — and never inline a hex to do it.
 
 | Series name | Light hex | Dark hex | `defineSeries` key | Role / earned reason |
-|-|-|-|-|-|
-| _(none)_ | | | | |
+| ----------- | --------- | -------- | ------------------ | -------------------- |
+| _(none)_    |           |          |                    |                      |
 
 Rules for this table (from the `basalt-tokens` / `basalt-charts` rules — do not relax):
+
 - One hue per series, drawn from the identity families only. Never raw Material/AntD/Tailwind.
 - A series earns a color only for **trend**, **signal/status**, or **categorical separation**.
   A lone single-series metric stays neutral (`var(--vx-line)`).

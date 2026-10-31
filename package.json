@@ -18,7 +18,7 @@
   },
   "dependencies": {
     "@elysiajs/openapi": "1.4.16",
-    "croner": "10.0.1",
+    "croner": "11.0.0",
     "drizzle-orm": "0.45.4",
     "elysia": "1.4.30",
     "zod": "4.6.7"

@@ -27,7 +27,7 @@ Not this: a bespoke facts layout per entity kind.
 
 ## Distribution in a card
 
-One `Bars` in a `ChartCard`: one bar per level on a shared scale, the level's series colour as the swatch, the count right-aligned at the bar's end. 2–6 parts of one whole: `Meter` `segments` with captions instead.
+One `Bars` in a `ChartCard`: one bar per level on a shared scale, the level's series colour as the swatch, the count right-aligned at the bar's end. 2–6 parts of one whole: `Meter` `segments` with captions instead, each part a series `color` (muted parts share one fill and read as one slab).
 
 Not this: a hand-built swatch-and-count list, or a donut when the parts are not the page's subject.
 

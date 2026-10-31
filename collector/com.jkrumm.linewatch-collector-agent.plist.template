@@ -5,8 +5,8 @@
   <key>Label</key><string>com.jkrumm.linewatch-collector-agent</string>
   <!-- The native half of linewatch (docs/DESIGN.md "Shape"): Colima's NAT
        fabricates ICMP replies inside a container, so ping has to run on the
-       host. RunAtLoad + KeepAlive — same always-on shape as the herdr brew
-       service and the collie LaunchAgent — so it survives a reboot and gets
+       host. RunAtLoad + KeepAlive — same always-on shape as the herdr-core LaunchAgent
+       and the collie LaunchAgent — so it survives a reboot and gets
        restarted if it ever exits. -->
   <key>ProgramArguments</key>
   <array>

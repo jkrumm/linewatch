@@ -279,13 +279,13 @@ export function Chat() {
 
 ## Verify
 
-1. `./node_modules/.bin/basalt-ui doctor`; read to the last line. `SKIPPED` exits non-zero.
-2. Fix every finding doctor prints, then rerun until it is clean.
-3. Run the repo's own gate (e.g. `make check`), which runs lint, the theme guard (`basalt-ui check-theme`) and typecheck; fix every finding at its source, and every type error without `as never` or `any`.
+1. `./node_modules/.bin/basalt-ui doctor`; read to the last line (`SKIPPED` exits non-zero); fix every finding it prints and rerun until it is clean.
+2. Run the repo's own gate (e.g. `make check`), which runs lint, the theme guard (`basalt-ui check-theme`) and typecheck; fix every finding at its source, and every type error without `as never` or `any`.
 
 ## Refresh after any upgrade
 
 1. `./node_modules/.bin/basalt-ui sync` (`--check` in CI, `--force` overwrites local edits); read its output: edited files are skipped, retired files are deleted, the AGENTS.md block is rewritten.
+2. A bump with a board: build the OLD version first (`vite build --outDir /tmp/before-dist`; the new CLI shoots it), bump, build, read `basalt-ui doctor --from <old version>`, then `shot /a /b --dist /tmp/before-dist --out <app-dir>/.shots/before` and the same with `--dist dist --out <app-dir>/.shots/after` (`--out` inside the app dir; each route its own argument). `shot` finds `playwright` in any ancestor `node_modules`: `bun add --cwd "$(dirname "$PWD")" playwright` keeps it out of the repo's manifest. A locked or API-backed app shoots its lock screen on every route: serve fixtures on `127.0.0.1` and pass `--api /api=http://127.0.0.1:<port>` (read-only unless `--api-allow-writes`) plus `--local-storage key=@env:NAME`.
 
 ## Upgrade 1.x to 2.x
 

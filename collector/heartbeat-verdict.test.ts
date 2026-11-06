@@ -109,31 +109,32 @@ describe('decideHeartbeat', () => {
     expect(verdict.reason).toBe('collector_stale')
   })
 
-  test('measuring some other uplink is down, not up', () => {
+  test('measuring some other uplink skips the push, neither up nor down', () => {
     const verdict = decide({
       status: snapshot({
         vantage: { onHomeLine: false, pathIf: 'en1', pathClass: 'wifi', linkMedia: 'autoselect' },
       }),
     })
-    expect(verdict.status).toBe('down')
+    expect(verdict.status).toBe('skip')
     expect(verdict.reason).toBe('off_home_line')
     expect(verdict.msg).toContain('onHomeLine=false')
   })
 
   /** null is unknown. Never coalesced to true — docs/DESIGN.md, and the two recorded nulls sit inside a router reboot. */
-  test('an unknown home-line verdict is not treated as a yes', () => {
+  test('an unknown home-line verdict is not treated as a yes and pushes nothing', () => {
     const verdict = decide({
       status: snapshot({
         vantage: { onHomeLine: null, pathIf: null, pathClass: null, linkMedia: null },
       }),
     })
-    expect(verdict.status).toBe('down')
+    expect(verdict.status).toBe('skip')
     expect(verdict.reason).toBe('off_home_line')
     expect(verdict.msg).toContain('onHomeLine=unknown')
   })
 
-  test('no vantage at all is reported as such rather than assumed', () => {
+  test('no vantage at all is reported as such rather than assumed, and pushes nothing', () => {
     const verdict = decide({ status: snapshot({ vantage: null }) })
+    expect(verdict.status).toBe('skip')
     expect(verdict.reason).toBe('vantage_unknown')
   })
 

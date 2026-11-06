@@ -68,9 +68,10 @@ push, Kuma alerts on the missed heartbeat, and that alert leaves the homelab ove
 a WAN the outage does not touch. **The push failing is the signal.**
 
 Two failure classes stay distinguishable in one monitor. Silence means the line
-or the mini is gone. An explicit `down` push means linewatch stopped measuring
-while the line still works — a dead collector, an unreachable API, or the mini
-having failed over to Wi-Fi and no longer measuring *this* line at all.
+or the mini is gone. An explicit `down` push means a dead collector, an
+unreachable API, a stale record, or a real outage. "Not measuring this line" (a
+Wi-Fi failover, an unknown vantage) pushes nothing: Kuma's window absorbs
+transients, and only a sustained stretch alarms as a missed heartbeat.
 
 That second class is the one worth having, and it needs care: `GET /api/status`
 reports `up: true` whenever no cycle is being ingested, because the outage state

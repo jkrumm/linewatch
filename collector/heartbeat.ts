@@ -17,7 +17,9 @@
  * crash and a line outage would produce the identical signal — silence — and
  * telling those two apart is the entire job. From out here, a dead collector is
  * an explicit `down` push with a message saying so, because the API is still
- * answering and the push still leaves the host. It also keeps an outbound call
+ * answering and the push still leaves the host. "Not measuring this line"
+ * (Wi-Fi failover, unknown vantage) is the opposite: nothing is pushed, and
+ * Kuma's own window absorbs transients. It also keeps an outbound call
  * that can hang for its whole timeout out of a 30 s measurement loop whose
  * contract is never to miss a cycle.
  *
@@ -159,6 +161,11 @@ async function main(): Promise<void> {
     staleSampleMs: config.staleSampleMs,
     degradedLossPct: config.degradedLossPct,
   })
+
+  if (verdict.status === 'skip') {
+    log('heartbeat.skipped', { reason: verdict.reason, msg: verdict.msg })
+    return
+  }
 
   const delivered = await push(pushUrl, verdict.status, verdict.msg)
   log('heartbeat', { status: verdict.status, reason: verdict.reason, delivered, msg: verdict.msg })

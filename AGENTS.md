@@ -35,8 +35,10 @@ the homelab, on a different WAN, and the Tailscale ACL has no `tag:homelab →
 tag:mac` grant — so it cannot probe this line even in principle. The mini pushes
 to it every 60 s (`Home Line - Push`, 240 s to DOWN); a home-line outage severs
 the push and the alert leaves the homelab over a WAN the outage does not touch.
-Silence means the line or the mini is gone; an explicit `down` push means
-linewatch stopped measuring while the line works. **`GET /api/status`'s own `up`
+Silence means the line or the mini is gone; an explicit `down` push means a
+dead collector, unreachable API, stale record or real outage. "Not measuring this
+line" (Wi-Fi failover, unknown vantage) pushes nothing, so Kuma's window absorbs
+transients and only a sustained stretch alarms. **`GET /api/status`'s own `up`
 field cannot be used for this** — no ingest means no outage row can open, so a
 dead collector reports a flawless line forever. `collector/heartbeat-verdict.ts`
 checks sample freshness for that reason and its tests pin it.

@@ -9,11 +9,15 @@
  * homelab over a WAN this outage does not touch. The push failing *is* the
  * signal.
  *
- * Which leaves exactly one thing this module must get right: the difference
- * between "the line is down" (silence, because the push cannot land) and
- * "linewatch stopped measuring" (an explicit `down` push, which can land). If
- * those two produced the same signal the monitor would be worth very little —
- * a dead collector would read as an outage and an outage as a dead collector.
+ * Three outcomes, and the difference between them is the whole job:
+ * - **explicit `down`** — the push can land and something is wrong that the
+ *   record can name: API unreachable, collector dead or never delivered, or a
+ *   real gateway/WAN outage. A dead collector must not read as an outage.
+ * - **`up`** — fresh record, measuring the home line, no outage open.
+ * - **`skip`** — push nothing. The line is gone or the mini is measuring
+ *   something else (Wi-Fi failover, unknown vantage): unknowable, so neither up
+ *   nor down. Silence is what Kuma's own window (interval plus retry) rides out;
+ *   only a sustained stretch becomes a missed-heartbeat DOWN.
  *
  * **`status.up` is not usable on its own, and that is the whole reason this
  * file exists.** It is `ongoingOutages.length === 0`, and no outage row can
@@ -22,7 +26,7 @@
  * the load-bearing check; the outage list is the cheap one.
  */
 
-export type HeartbeatStatus = 'up' | 'down'
+export type HeartbeatStatus = 'up' | 'down' | 'skip'
 
 /**
  * Ordered by how much they mean, not alphabetically: `decide` returns the first
@@ -169,16 +173,18 @@ export function decideHeartbeat(input: HeartbeatInput): HeartbeatVerdict {
     }
   }
 
-  // 4/5. The monitor asserts a *measured* home line, so it cannot stay green
+  // 4/5. The monitor asserts a *measured* home line, so it cannot report green
   //      while the mini is measuring something else — a Wi-Fi failover, a
-  //      hotspot, a travel router. `onHomeLine` is three-state and null means
-  //      the collector did not report, which is unknown, not yes. Coalescing it
+  //      hotspot, a travel router. Nor can it report down: that is unknowable,
+  //      so these skip the push and let Kuma's window decide. `onHomeLine` is
+  //      three-state and null means the collector did not report, which is
+  //      unknown, not yes. Coalescing it
   //      is the fabrication docs/DESIGN.md names explicitly, and it is not
   //      theoretical: of 5210 recorded cycles 5202 read 1, six read 0 during a
   //      real Wi-Fi failover, and the two nulls fall inside a router reboot.
   if (status.vantage === null) {
     return {
-      status: 'down',
+      status: 'skip',
       reason: 'vantage_unknown',
       msg: 'no cycle vantage on record — cannot show these samples measured the home line',
     }
@@ -186,7 +192,7 @@ export function decideHeartbeat(input: HeartbeatInput): HeartbeatVerdict {
   if (status.vantage.onHomeLine !== true) {
     const verdict = status.vantage.onHomeLine === null ? 'unknown' : 'false'
     return {
-      status: 'down',
+      status: 'skip',
       reason: 'off_home_line',
       msg: `not measuring the home line (onHomeLine=${verdict}, path ${pathLabel(status.vantage)}) — samples describe some other uplink`,
     }

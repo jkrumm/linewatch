@@ -8,5 +8,5 @@ deploy:
   # only if `make deploy` ever performs the deploy and `make version` exists.
   mode: none
 ship:
-  - { paths: ["**"], via: push }
+  - { paths: ['**'], via: push }
 leads: 1

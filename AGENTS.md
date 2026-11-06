@@ -377,6 +377,16 @@ watchdog are launchd agents with their own `make *-setup` / `make *-teardown`; a
   homelab's different WAN, so a severed push is the home-line outage signature. A
   second push monitor, `Home Line - Watchdog`, carries the watchdog's own liveness.
   `make heartbeat-status` prints the verdict without pushing.
+- **Both pushers are bounded; launchd never starts a second instance of a running
+  job, so one hung call silences a monitor for good** (dotfiles hit a 28 h freeze,
+  2026-11-06). The heartbeat runs under `jobrun --timeout 45 --every 60` (cadence 60 s;
+  API read 5 s and push 15 s sit inside it; a killed run pushes nothing, and silence
+  is what Kuma alerts on). Its log bound survives jobrun's pipe via
+  `LINEWATCH_HEARTBEAT_LOG_VIA_JOBRUN=1`. The watchdog is a KeepAlive daemon, so
+  jobrun's deadline does not fit: every `ping` goes through `spawnBounded`
+  (`collector/bounded-spawn.ts`), and a tick past `LINEWATCH_WATCHDOG_TICK_DEADLINE_MS`
+  pushes `down` to its own monitor and exits for KeepAlive to restart. A new external
+  call in either pusher needs its own deadline.
 - **OTel `service.name`:** none — this repo carries no OpenTelemetry
   instrumentation and exports no traces, metrics or logs. The Uptime Kuma
   heartbeat above is the whole monitoring surface; there is no OTel resource to key

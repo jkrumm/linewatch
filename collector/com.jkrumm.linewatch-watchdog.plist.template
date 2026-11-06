@@ -16,7 +16,13 @@
        process has itself watched N consecutive ticks"), which a fresh process
        per tick cannot make. minProcessAgeS then turns a crash loop into a
        permanent stand-down rather than a fire loop: a job launchd keeps
-       restarting never reaches the age at which it may act. -->
+       restarting never reaches the age at which it may act.
+
+       NOT under jobrun --timeout: that is a deadline for a run that ends, and
+       this process is meant to live. Its bounds are in-process instead — every
+       ping and fetch has a deadline, and a tick that outlives
+       LINEWATCH_WATCHDOG_TICK_DEADLINE_MS pushes `down` to its own monitor and
+       exits so KeepAlive replaces it (collector/watchdog.ts). -->
   <key>ProgramArguments</key>
   <array>
     <string>__REPO_DIR__/collector/run-agent.sh</string>

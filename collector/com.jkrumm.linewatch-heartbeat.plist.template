@@ -13,9 +13,24 @@
        heartbeat rather than leaving a dead daemon and a monitor that is green
        purely because nothing is left to contradict it. The 60 s cadence sits
        four heartbeats inside the monitor's 240 s interval, so a single skipped
-       run cannot page — the same margin the other MacMini push monitors keep. -->
+       run cannot page — the same margin the other MacMini push monitors keep.
+
+       Runs under jobrun with a deadline a little under the cadence. launchd
+       never starts a second instance of a running job, so without it one hung
+       call (2026-11-06: a 28 h freeze in another pusher) silences this monitor
+       and nothing restarts it. jobrun kills the process group at 45 s (TERM,
+       then KILL after 10 s) and records the run for `jobs-grade`; a killed run
+       pushes nothing, which is correct, because silence is what Kuma alerts on.
+       Hangs the run can name (API, push) are already bounded in heartbeat.ts
+       and push `down` with the reason. -->
   <key>ProgramArguments</key>
   <array>
+    <string>__HOME__/.local/bin/jobrun</string>
+    <string>com.jkrumm.linewatch-heartbeat</string>
+    <string>--owner</string><string>linewatch</string>
+    <string>--every</string><string>60</string>
+    <string>--timeout</string><string>45</string>
+    <string>--</string>
     <string>__REPO_DIR__/collector/run-agent.sh</string>
     <string>__REPO_DIR__/collector/heartbeat.ts</string>
   </array>
@@ -25,15 +40,16 @@
   <key>EnvironmentVariables</key>
   <dict>
     <key>LINEWATCH_BUN</key><string>__BUN__</string>
-    <!-- launchd starts this with no shell profile at all. Nothing here spawns a
-         subprocess today, but the collector's plist documents the same trap and
-         a divergence between the two would be the surprising thing. -->
-    <key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <!-- launchd starts this with no shell profile at all. jobrun is a
+         `#!/usr/bin/env bun` script, so PATH needs bun's directory and
+         ~/.local/bin (where jobrun lives) as well as the system dirs. -->
+    <key>PATH</key><string>__BUN_DIR__:__HOME__/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
     <!-- Must stay identical to StandardOutPath below: heartbeat.ts bounds this
-         file by truncating it in place, and collector/log-rotate.ts refuses to
-         touch anything unless fd 1 is provably this path. A drift costs the
-         size bound, never the log. -->
+         file by truncating it in place. Under jobrun fd 1 is a pipe, so
+         collector/log-rotate.ts cannot prove the path itself; the flag below
+         asserts it instead. A drift costs the size bound, never the log. -->
     <key>LINEWATCH_HEARTBEAT_LOG_PATH</key><string>__HOME__/Library/Logs/linewatch-heartbeat.log</string>
+    <key>LINEWATCH_HEARTBEAT_LOG_VIA_JOBRUN</key><string>1</string>
   </dict>
   <key>StandardOutPath</key><string>__HOME__/Library/Logs/linewatch-heartbeat.log</string>
   <key>StandardErrorPath</key><string>__HOME__/Library/Logs/linewatch-heartbeat.log</string>

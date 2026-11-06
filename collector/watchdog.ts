@@ -48,6 +48,7 @@ import {
 import { dirname, join } from 'node:path'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
+import { spawnBounded } from './bounded-spawn.js'
 import { DEFAULT_LOG_MAX_BYTES, rotateLogIfNeeded } from './log-rotate.js'
 import { parsePingOutput } from './ping-parser.js'
 import { captureVantage } from './vantage.js'
@@ -154,6 +155,19 @@ const config = {
   notifyIntervalMs: Number(process.env['LINEWATCH_WATCHDOG_NOTIFY_MS'] ?? 60_000),
   apiTimeoutMs: Number(process.env['LINEWATCH_WATCHDOG_API_TIMEOUT_MS'] ?? 5_000),
   pushTimeoutMs: Number(process.env['LINEWATCH_WATCHDOG_PUSH_TIMEOUT_MS'] ?? 10_000),
+  /**
+   * Hard cap on one `ping`/`ping6`. A healthy run takes pingCount × interval
+   * (0.6 s); this is the wedged one, and it fails that probe as full loss
+   * instead of holding the whole tick.
+   */
+  pingTimeoutMs: Number(process.env['LINEWATCH_WATCHDOG_PING_TIMEOUT_MS'] ?? 8_000),
+  /**
+   * Whole-tick deadline. The slowest legitimate tick ends in the 30 s reboot
+   * call plus a notify push; this sits well past it. Past it the tick is hung,
+   * and a hung tick is a watchdog that is silently absent: the process says so
+   * to its Kuma monitor and exits, and KeepAlive starts a fresh one.
+   */
+  tickDeadlineMs: Number(process.env['LINEWATCH_WATCHDOG_TICK_DEADLINE_MS'] ?? 120_000),
   logPath:
     process.env['LINEWATCH_WATCHDOG_LOG_PATH'] ??
     join(homedir(), 'Library', 'Logs', 'linewatch-watchdog.log'),
@@ -257,15 +271,15 @@ async function ping(addr: string, name: string, v6: boolean): Promise<AnchorStat
     addr,
   ]
   try {
-    const proc = Bun.spawn(args, { stdout: 'pipe', stderr: 'pipe' })
-    const [out] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ])
+    const { stdout, timedOut } = await spawnBounded(args, config.pingTimeoutMs)
+    // A killed ping is a failed probe, not a partial reading.
+    if (timedOut) {
+      log('ping.timeout', { target: name, timeoutMs: config.pingTimeoutMs })
+      return { target: name, received: 0 }
+    }
     // 100% loss exits non-zero and prints no round-trip summary. That is a
     // valid measurement, not an error, so the exit code is never consulted.
-    return { target: name, received: parsePingOutput(out).received }
+    return { target: name, received: parsePingOutput(stdout).received }
   } catch {
     return { target: name, received: 0 }
   }
@@ -868,15 +882,44 @@ async function main(): Promise<void> {
   }
 
   for (;;) {
+    const deadline = setTimeout(() => void abandonHungTick(), config.tickDeadlineMs)
     try {
       await tick()
     } catch (error) {
       // A watchdog that dies on an unexpected evidence shape is absent for the
       // month it exists for, and every restart resets the confirmation counters.
       log('tick.error', { error: error instanceof Error ? error.message : String(error) })
+    } finally {
+      clearTimeout(deadline)
     }
     await Bun.sleep(policy.tickMs)
   }
+}
+
+/**
+ * A tick that outlived `tickDeadlineMs` is hung somewhere no per-call bound
+ * reached. Name it to the watchdog's own monitor (bounded by the push timeout),
+ * then exit non-zero so KeepAlive replaces the process. Restarting costs the
+ * confirmation counters, which is the right price: the alternative is a
+ * watchdog that is up in `launchctl` and doing nothing. A rung interrupted
+ * here is safe — the ledger entry was fsynced before it was performed.
+ */
+async function abandonHungTick(): Promise<void> {
+  log('tick.deadline', { deadlineMs: config.tickDeadlineMs })
+  const pushUrl = resolvePushUrl()
+  if (pushUrl !== null) {
+    const now = Date.now()
+    await push(
+      pushUrl,
+      {
+        ts: now,
+        status: 'down',
+        msg: `watchdog tick hung > ${config.tickDeadlineMs / 1000}s, restarting`,
+      },
+      now,
+    )
+  }
+  process.exit(1)
 }
 
 await main()

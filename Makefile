@@ -109,6 +109,7 @@ define install_agent
 	@BUN_BIN=$$(command -v bun); \
 	TMP=$$(mktemp); \
 	sed -e "s|__BUN__|$$BUN_BIN|g" \
+		-e "s|__BUN_DIR__|$$(dirname "$$BUN_BIN")|g" \
 		-e "s|__REPO_DIR__|$(REPO_DIR)|g" \
 		-e "s|__HOME__|$(HOME)|g" \
 		"collector/$(1).plist.template" > "$$TMP"; \

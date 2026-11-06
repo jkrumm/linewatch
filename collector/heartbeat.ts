@@ -61,7 +61,11 @@ const config = {
   /**
    * The push crosses the WAN this monitor is about, so during an outage it does
    * not fail fast — it hangs until this fires. Kept well under the 60 s
-   * StartInterval so two runs can never overlap.
+   * StartInterval so two runs can never overlap. Status read (5 s) + push (15 s)
+   * leave the run well inside jobrun's `--timeout 45` in the plist, which is the
+   * backstop for everything these two bounds do not reach: launchd never starts a
+   * second instance of a running job, so one hung run would otherwise silence
+   * the monitor for good.
    */
   pushTimeoutMs: Number(process.env['LINEWATCH_HEARTBEAT_PUSH_TIMEOUT_MS'] ?? 15_000),
   /** Must equal the plist's StandardOutPath — launchd opens it once, O_APPEND, and never reopens it. */
@@ -69,6 +73,8 @@ const config = {
     process.env['LINEWATCH_HEARTBEAT_LOG_PATH'] ??
     join(homedir(), 'Library', 'Logs', 'linewatch-heartbeat.log'),
   logMaxBytes: Number(process.env['LINEWATCH_HEARTBEAT_LOG_MAX_BYTES'] ?? DEFAULT_LOG_MAX_BYTES),
+  /** Set by the plist: jobrun owns launchd's log descriptor, so fd 1 here is a pipe. */
+  logViaJobrun: process.env['LINEWATCH_HEARTBEAT_LOG_VIA_JOBRUN'] === '1',
   /**
    * `make heartbeat-status`: compute the verdict, print it, push nothing. So the
    * decision can be inspected at any moment without writing a heartbeat Kuma
@@ -127,7 +133,12 @@ async function push(baseUrl: string, status: 'up' | 'down', msg: string): Promis
 
 async function main(): Promise<void> {
   if (!config.dryRun)
-    rotateLogIfNeeded({ logPath: config.logPath, maxBytes: config.logMaxBytes, report: log })
+    rotateLogIfNeeded({
+      logPath: config.logPath,
+      maxBytes: config.logMaxBytes,
+      report: log,
+      stdoutIsLog: config.logViaJobrun,
+    })
 
   const pushUrl = resolvePushUrl()
   if (config.dryRun) {

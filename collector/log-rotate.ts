@@ -189,9 +189,18 @@ export function rotateLogIfNeeded(options: {
   logPath: string
   maxBytes: number
   report: (event: string, fields?: Record<string, unknown>) => void
+  /**
+   * The process runs under `jobrun`, which owns launchd's descriptor and hands
+   * this process a pipe. fd 1 can then never prove it is the log, so the plist
+   * asserts it instead (an env flag set only there). Truncation stays safe: the
+   * descriptor jobrun holds is O_APPEND, exactly as described above.
+   */
+  stdoutIsLog?: boolean
 }): boolean {
   const log = statLog(options.logPath)
-  const decision = decideRotation({ stdout: statStdout(), log, maxBytes: options.maxBytes })
+  const stdout =
+    options.stdoutIsLog === true && log !== null ? { dev: log.dev, ino: log.ino } : statStdout()
+  const decision = decideRotation({ stdout, log, maxBytes: options.maxBytes })
   if (!decision.rotate || log === null) return false
 
   const previous = rotatedLogPath(options.logPath)

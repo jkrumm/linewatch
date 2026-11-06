@@ -1,0 +1,12 @@
+# How the factory ships this project (software-factory docs/design.md §9).
+apiVersion: factory/v2
+name: linewatch
+deploy:
+  # No CD: `make deploy` only prints the recipe, and the container ships by
+  # `make up` on the mini from an up-to-date master checkout (AGENTS.md §Deploy).
+  # Nothing the factory can run deploys it, so the mode is none; flip to `make`
+  # only if `make deploy` ever performs the deploy and `make version` exists.
+  mode: none
+ship:
+  - { paths: ["**"], via: push }
+leads: 1

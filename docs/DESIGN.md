@@ -390,9 +390,10 @@ is nothing; `redact.ts` now blanks name-shaped keys as a second guard, and
 
 ## API
 
-Bearer token on the four routes that write to the historical record or to the
+Bearer token on the five routes that write to the historical record or to the
 line itself: `POST /api/probes`, `POST /api/interventions`, `POST
-/api/router/poll` and `POST /api/router/actions/reconnect`. The last carries a
+/api/router/poll`, `POST /api/router/actions/reconnect` and `POST
+/api/router/actions/reboot`. The last two carry a
 second, independent gate — `LINEWATCH_ROUTER_WRITE`, unset by default — because
 the two stop different people: the bearer stops someone else acting, the
 capability switch stops *us*.
@@ -419,6 +420,7 @@ in-process timer, so restarting the container cannot reset the budget.
 | `GET /api/router/throughput?from&to&role&limit` | per-interface rates, `role=wan` for the live internet-facing one |
 | `POST /api/router/poll` | run one read-only poll now (bearer; 429 within 60 s of the newest stored sample) |
 | `POST /api/router/actions/reconnect` | re-dial the WAN (bearer **and** `LINEWATCH_ROUTER_WRITE=1`; 403 without it) |
+| `POST /api/router/actions/reboot` | snapshot WAN state, then reboot the router (bearer **and** `LINEWATCH_ROUTER_WRITE=1`; 403 without it). Outcome is `executed`, `failed` or `unknown` |
 | `GET /api/wifi?from&to&bucket` | radio history, bucketed in SQL: signal/noise, SNR derived on read, PHY rate (not throughput), interface-bound RTT |
 
 Bucketing happens in SQL. The dashboard must never pull 4M rows to draw a year.

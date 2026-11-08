@@ -1,4 +1,4 @@
-import type { EventKind, LinewatchEvent } from './types'
+import type { EventKind } from './types'
 import { fmtDateTime } from './format'
 
 export const EVENT_KIND_LABEL: Record<EventKind, string> = {
@@ -13,7 +13,7 @@ export const EVENT_KIND_LABEL: Record<EventKind, string> = {
  *
  * The three writers of `link_change` report the same kind of fact from three distances. A
  * `vantage-diff` row is stamped at the *sampling* instant, so the transition happened somewhere in
- * the preceding 30 s cycle; a `link-sampler` row is stamped at the transition itself to ~1 s; a
+ * the preceding 30 s cycle; a `link-sampler` row is stamped at the transition itself to ~2 s; a
  * `router-poller` row is the carrier's own account, up to a poll interval late. Presenting all
  * three as one timestamp column implies a precision two of them do not have.
  */
@@ -27,7 +27,7 @@ export interface EventSourceLabel {
 const SOURCE_LABELS: Record<string, EventSourceLabel> = {
   'link-sampler': {
     label: 'link sampler',
-    precision: 'the transition itself, to ~1 s',
+    precision: 'the transition itself, to ~2 s',
     color: 'teal',
   },
   'vantage-diff': {
@@ -152,11 +152,6 @@ export function timelineEmptyState(linkSamplingSince: number | null): TimelineEm
   }
   return {
     title: 'No transitions recorded',
-    description: `Link sampling has covered this window since ${fmtDateTime(linkSamplingSince)}. Since then no transition longer than its ~1 s resolution was observed; shorter ones are below what it can see, and nothing is claimed about the window before that point.`,
+    description: `Link sampling has covered this window since ${fmtDateTime(linkSamplingSince)}. Since then no transition longer than its ~2 s resolution was observed; shorter ones are below what it can see, and nothing is claimed about the window before that point.`,
   }
-}
-
-/** Newest first, matching `GET /api/events`'s own ordering, so a mock and the real API agree. */
-export function sortEventsNewestFirst(events: LinewatchEvent[]): LinewatchEvent[] {
-  return events.toSorted((a, b) => b.ts - a.ts)
 }

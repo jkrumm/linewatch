@@ -239,22 +239,6 @@ export type StatusSpeedTest = {
   error: string | null
 }
 
-export type SpeedSummaryStat = {
-  p50: number | null
-  p95: number | null
-  best: number | null
-  worst: number | null
-}
-
-/** `GET /api/speedtests/summary` — `count` is the number of successful runs the percentiles were
- * computed over (0 when there's no data yet, in which case every stat is null). */
-export type SpeedSummary = {
-  days: number
-  count: number
-  download: SpeedSummaryStat
-  upload: SpeedSummaryStat
-}
-
 export type EventKind = 'intervention' | 'link_change' | 'config_change' | 'note'
 
 /** `detail.source` on a `link_change`, lifted to the top level by `GET /api/events`.
@@ -262,7 +246,7 @@ export type EventKind = 'intervention' | 'link_change' | 'config_change' | 'note
  * The three writers observe the same *kind* of fact at three precisions, and the timeline is
  * misleading unless it says which one it is showing: `vantage-diff` compares two 30 s snapshots, so
  * the transition happened somewhere inside the preceding cycle; `link-sampler` stamps the transition
- * itself to ~1 s; `router-poller` sees the carrier side up to a poll interval late. Typed as a plain
+ * itself to ~2 s; `router-poller` sees the carrier side up to a poll interval late. Typed as a plain
  * `string | null` rather than a union because the wire field is one — a source this build has never
  * heard of must render as itself, not fall into a bucket. **Null is "the writer recorded none"**
  * (every `link_change` written before `vantage-diff` was stamped), never a guess at which it was. */

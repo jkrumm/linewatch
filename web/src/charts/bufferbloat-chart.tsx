@@ -71,6 +71,7 @@ export function BufferbloatChart({
   to,
   bucketSeconds,
   isPending,
+  error,
 }: {
   tests: SpeedTest[]
   /** The window and bucket size the bucketed charts draw — see `SpeedChart`. */
@@ -81,6 +82,9 @@ export function BufferbloatChart({
    * latency lines with nothing under them, which reads as three measurements that came back empty;
    * `state` conceals the legend as well. */
   isPending?: boolean
+  /** A failed query with nothing to show: drawn as the framework's error state, never as pending
+   * or as an empty window. */
+  error?: unknown
 }) {
   const points = useMemo(() => toRuns(tests), [tests])
   const xDomain = useMemo(() => slotExtent({ from, to, bucketSeconds }), [from, to, bucketSeconds])
@@ -118,7 +122,7 @@ export function BufferbloatChart({
             // is the same `fmtMs` the latency band's own left axis uses, and the two read together.
             y={{ domain: 'auto', format: fmtMs }}
             height={BUFFERBLOAT_RESPONSIVE_HEIGHT}
-            state={{ pending }}
+            state={{ pending, error }}
             ariaLabel="Idle ping against latency measured while the line was saturated, one point per speed-test run"
             tooltip={tooltip}
           />

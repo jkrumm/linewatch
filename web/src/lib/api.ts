@@ -3,7 +3,6 @@ import {
   generateOutages,
   generateProbeBuckets,
   generateRouterSnapshot,
-  generateSpeedSummary,
   generateSpeedTests,
   generateStatus,
   generateThroughput,
@@ -16,7 +15,6 @@ import type {
   ProbeBucketSeconds,
   RangeSummary,
   RouterSnapshot,
-  SpeedSummary,
   SpeedTest,
   StatusResponse,
   TargetName,
@@ -130,16 +128,10 @@ export async function getSpeedTests(params: { from: number; to: number }): Promi
   return speedTests
 }
 
-/** `GET /api/speedtests/summary?days`. No envelope. */
-export async function getSpeedSummary(days: number): Promise<SpeedSummary> {
-  if (USE_MOCK) return generateSpeedSummary(days)
-  return fetchJson<SpeedSummary>(`/speedtests/summary?days=${days}`)
-}
-
 /** `GET /api/events?from&to` — the timeline overlay. `link_change` IS materialised (by the probe
  * ingest when the host-side vantage changes, by the router poller from the carrier side, and by
- * the collector's link sampler) and `intervention` by `POST /api/interventions`; only
- * `config_change` and `note` are still unwritten.
+ * the collector's link sampler) and `intervention` by `POST /api/interventions`;
+ * `config_change` and `note` are written too, so all four kinds can appear.
  *
  * Returned whole, `linkSamplingSince` included, for the same reason `getOutages` keeps its
  * `summary`: an empty `events` array is the timeline's most dangerous response, because it reads

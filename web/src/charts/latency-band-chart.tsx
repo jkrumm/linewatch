@@ -138,6 +138,7 @@ export function LatencyBandChart({
   to,
   bucketSeconds,
   isPending,
+  error,
   overlay,
   extraTooltipRows,
   outages,
@@ -157,6 +158,9 @@ export function LatencyBandChart({
    * moving the chart when the data arrives.
    */
   isPending?: boolean
+  /** A failed query with nothing to show: drawn as the framework's error state, never as pending
+   * or as an empty window. */
+  error?: unknown
   /**
    * A second median line drawn over the band, with no band of its own.
    *
@@ -372,7 +376,7 @@ export function LatencyBandChart({
         // says what the amber and red dots mean, and `toggle` would let a reader hide the finding
         // they opened the page for. `state` conceals it while pending (basalt-ui 2.10.0).
         legend={{ toggle: false }}
-        state={{ pending }}
+        state={{ pending, error }}
         tooltip={tooltip}
         ariaLabel={
           overlay

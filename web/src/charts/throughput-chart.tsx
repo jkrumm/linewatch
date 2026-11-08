@@ -179,6 +179,7 @@ export function ThroughputChart({
   to,
   bucketSeconds,
   isPending,
+  error,
 }: {
   buckets: readonly ThroughputBucket[]
   from: number
@@ -186,6 +187,9 @@ export function ThroughputChart({
   bucketSeconds: ProbeBucketSeconds
   /** True while the throughput query for this window is in flight — see the component docblock. */
   isPending?: boolean
+  /** A failed query with nothing to show: drawn as the framework's error state, never as pending
+   * or as an empty window. */
+  error?: unknown
 }) {
   const points: PlotPoint[] = useMemo(
     () =>
@@ -223,7 +227,7 @@ export function ThroughputChart({
         fold={FOLD}
         height={CHART_FRAME_HEIGHT}
         formatX={formatX}
-        state={{ pending: isPending === true }}
+        state={{ pending: isPending === true, error }}
         ariaLabel="Data carried per bucket — download below the baseline, upload above it, with unmeasured buckets marked"
         // "Not measured" is a flat fill, not a series with values, so a three-entry toggle would
         // offer to hide a state rather than a measurement. The two real halves are scaled

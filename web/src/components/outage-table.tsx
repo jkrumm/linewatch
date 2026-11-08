@@ -5,6 +5,7 @@ import swap from './table-card-swap.module.css'
 import type { Outage, TargetName } from '../lib/types'
 import { TARGET_LABEL } from '../lib/types'
 import { fmtDateTime, fmtDuration } from '../lib/format'
+import { QueryError } from './query-error'
 
 /** `Outage.evidence` is typed as plain `string[]` by the API (it doesn't promise every entry is
  * one of our known targets) — fall back to the raw name for anything outside `TARGET_LABEL`. */
@@ -28,7 +29,19 @@ function targetLabel(name: string): string {
  * exists to prevent. A `Divider` between rows reads as a list inside one panel, which is what this
  * actually is.
  */
-export function OutageTable({ outages, isPending }: { outages: Outage[]; isPending?: boolean }) {
+export function OutageTable({
+  outages,
+  isPending,
+  error,
+}: {
+  outages: Outage[]
+  isPending?: boolean
+  /** A failed query with nothing to show — neither the skeleton nor "No outages in range". */
+  error?: unknown
+}) {
+  if (outages.length === 0 && error !== undefined)
+    return <QueryError what="outages" error={error} />
+
   if (outages.length === 0 && isPending === true) {
     return (
       <Stack gap="xs">

@@ -201,6 +201,7 @@ export function SpeedHeatmap({
   from,
   to,
   isPending,
+  error,
 }: {
   tests: SpeedTest[]
   from: number
@@ -215,6 +216,9 @@ export function SpeedHeatmap({
    * line, all of them over a question nobody had answered yet.
    */
   isPending?: boolean
+  /** A failed query with nothing to show: drawn as the framework's error state, never as pending
+   * or as an empty window. */
+  error?: unknown
 }) {
   const { cells, rows, fastest } = useMemo(() => speedCells(tests, from, to), [tests, from, to])
   const [compact] = dashboard.field.compact.use()
@@ -261,7 +265,7 @@ export function SpeedHeatmap({
           legend={legend}
           tooltip={TOOLTIP}
           height={Math.max(220, rows.length * ROW_PX + FRAME_CHROME_PX)}
-          state={{ pending: isPending === true }}
+          state={{ pending: isPending === true, error }}
           ariaLabel="Download throughput by hour of day, with hours that had no run or a failed run marked"
         />
       </div>

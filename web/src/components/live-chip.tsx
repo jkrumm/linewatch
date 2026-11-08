@@ -58,22 +58,40 @@ export interface HeaderLive {
  */
 export function LiveChip({
   live,
+  fetchFailed = false,
+  fetchedAt = null,
 }: {
   /** `null` while `GET /api/status` has not resolved. The chip renders a dash, never "Up" — an
    * unanswered status query is not evidence the line is working, which is the same rule
    * `StatusBar`'s verdict column enforces and the reason `reporting` gates green there. */
   live: HeaderLive | null
+  /** The status query's latest fetch failed. With no `live` it is "API unreachable"; with `live` the
+   * reading is the last one that arrived, not the line's present state. */
+  fetchFailed?: boolean
+  /** When the status data last arrived (`dataUpdatedAt`), or null when it never did. A reading
+   * this client has not refreshed for two probe cycles is stale even if no request failed — a
+   * background tab does not poll. */
+  fetchedAt?: number | null
 }) {
   const sizeClass = useSizeClass()
   if (live === null) {
-    return (
+    return fetchFailed ? (
+      <Text size="sm" fw={600} c={VX.status.warn} style={{ whiteSpace: 'nowrap' }}>
+        API unreachable
+      </Text>
+    ) : (
       <Text size="sm" c="dimmed" ff="monospace">
         —
       </Text>
     )
   }
 
-  const reporting = live.latestTs !== null && !isStale(live.latestTs, live.now)
+  // Two different staleness verdicts: the SAMPLE's (the collector stopped reporting) and the FETCH's
+  // (this tab stopped hearing from the API). Either one downgrades the chip; the second is what an
+  // open tab with the API down needs, since the sample's own timestamp is frozen but `now` advances
+  // only because the page has a clock.
+  const refreshStale = fetchFailed || (fetchedAt !== null && isStale(fetchedAt, live.now))
+  const reporting = live.latestTs !== null && !isStale(live.latestTs, live.now) && !refreshStale
   const state =
     live.openOutages > 0
       ? {
@@ -83,7 +101,7 @@ export function LiveChip({
           word: live.openOutages > 1 ? `${live.openOutages} outages` : 'Outage',
         }
       : !reporting
-        ? { color: VX.status.warn, word: 'No data' }
+        ? { color: VX.status.warn, word: refreshStale ? 'Not updating' : 'No data' }
         : // `VX.status.good` is the one place green is allowed in the page bar — it is verdict text,
           // the same rule `verdict-panel.tsx`'s `SEVERITY_COLOR` already carries. No `StatCard`, no
           // rail, no green anywhere else in this component.
@@ -112,7 +130,11 @@ export function LiveChip({
       )}
       {sizeClass === 'expanded' && (
         <Text size="xs" ff="monospace" c="dimmed">
-          {live.latestTs === null ? 'no data' : fmtRelative(live.latestTs, live.now)}
+          {refreshStale && fetchedAt !== null
+            ? `updated ${fmtRelative(fetchedAt, live.now)}`
+            : live.latestTs === null
+              ? 'no data'
+              : fmtRelative(live.latestTs, live.now)}
         </Text>
       )}
     </Group>

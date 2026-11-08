@@ -9,10 +9,10 @@ describe('eventSourceLabel', () => {
     const poller = eventSourceLabel('router-poller')
 
     expect(new Set([sampler.label, diff.label, poller.label]).size).toBe(3)
-    // The precision is the reason the column exists: ~1 s against a 30 s cycle against a poll
+    // The precision is the reason the column exists: ~2 s against a 30 s cycle against a poll
     // interval. Identical text on any two of them would present three distances as one.
     expect(new Set([sampler.precision, diff.precision, poller.precision]).size).toBe(3)
-    expect(sampler.precision).toContain('1 s')
+    expect(sampler.precision).toContain('2 s')
     expect(diff.precision).toContain('30 s')
   })
 

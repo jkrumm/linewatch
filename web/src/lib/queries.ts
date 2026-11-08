@@ -242,3 +242,22 @@ export const eventsQuery = (params: { from: number; to: number }) => {
       keepAcrossTimeAdvance(queryKey, previousData, previousQuery),
   })
 }
+
+/**
+ * The 30-day heatmap's own window: `spanMs` ending at the close of the bucket that contains `now`.
+ *
+ * Independent of the page range on purpose. It used to ride the page's `to`, which on `1h` rotates
+ * every 30 s, so a full 30-day `probe_sample` query re-ran every minute for a grid whose cells are
+ * an hour wide. Ending at the bucket's close keeps the key stable for the whole bucket while still
+ * including the current, partial bucket; `from` stays bucket-aligned so the grid has exactly
+ * `spanMs / bucket` cells.
+ */
+export function bucketAlignedWindow(
+  now: number,
+  spanMs: number,
+  bucketSeconds: number,
+): { from: number; to: number } {
+  const bucketMs = bucketSeconds * 1000
+  const to = (Math.floor(now / bucketMs) + 1) * bucketMs
+  return { from: to - spanMs, to }
+}

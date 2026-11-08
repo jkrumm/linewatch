@@ -1,6 +1,7 @@
 import { createRootRouteWithContext, Outlet } from '@tanstack/react-router'
 import type { BasaltRouterContext } from 'basalt-ui'
 import { Box, Container } from '@mantine/core'
+import { RouteError } from '../components/route-error'
 import classes from '../shell/root-layout.module.css'
 
 /**
@@ -29,6 +30,7 @@ import classes from '../shell/root-layout.module.css'
  */
 export const Route = createRootRouteWithContext<BasaltRouterContext>()({
   component: RootLayout,
+  errorComponent: RouteError,
 })
 
 function RootLayout() {

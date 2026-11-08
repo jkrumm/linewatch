@@ -1,10 +1,22 @@
 import { describe, expect, test } from 'bun:test'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 
-const source = readFileSync(new URL('./latency-band-chart.tsx', import.meta.url), 'utf8')
+const CHARTS_DIR = new URL('./', import.meta.url)
 
 /** Comments stripped, so the docblocks that NAME the old bug do not themselves satisfy the check. */
-const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
+}
+
+/** Every chart module that sets `tooltip.formatHeader`, comments stripped. Discovered, not listed,
+ * so a new chart that sets one is pinned the day it lands. */
+const charts = readdirSync(CHARTS_DIR)
+  .filter((name) => name.endsWith('.tsx') && !name.endsWith('.test.tsx'))
+  .map((name) => ({
+    name,
+    code: stripComments(readFileSync(new URL(name, CHARTS_DIR), 'utf8')),
+  }))
+  .filter(({ code }) => code.includes('formatHeader'))
 
 /**
  * A tooltip header that names a different day than the axis under it.
@@ -25,16 +37,32 @@ const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '')
  * `renderToStaticMarkup` never produces one. What has to hold is structural, so that is what this
  * asserts: the header formats from the INSTANT, and the key is the one the strips resolve against.
  */
-describe('the latency band tooltip header and its axis cannot name different days', () => {
-  test('the header formats from the bucket instant, never from the x value', () => {
-    expect(code).toContain('formatHeader: (_x: Date, p: Point) => fmtDateTime(p.bucketStart)')
+describe('every tooltip header and its axis cannot name different days', () => {
+  test('the discovery found the charts that set a header', () => {
+    expect(charts.length).toBeGreaterThanOrEqual(6)
   })
 
-  test('the x value is the bucket instant as a Date, shared with the strips', () => {
-    expect(code).toContain('const getPointX = (p: Point): Date => new Date(p.bucketStart)')
-    // The local-ISO workaround and the string key this replaced. Re-keying the domain to make a
-    // formatter come out right is the regression.
-    expect(code).not.toContain('localOffsetIso')
-    expect(code).not.toContain('key: slot.key')
+  for (const { name, code } of charts) {
+    test(`${name}: the header formats from the bucket instant or a run header, never from the x value`, () => {
+      const value = /formatHeader:\s*([^\n]+)/.exec(code)?.[1] ?? ''
+      // `runHeader` formats a run's own timestamp; the inline form takes the x value as its first
+      // parameter and must ignore it (`_x`), formatting the datum's instant instead.
+      if (/^runHeader\b/.test(value)) return
+      const arrow = /^\(\s*(\w+)[^)]*\)\s*=>\s*(.+?),?\s*$/.exec(value)
+      expect(arrow).not.toBeNull()
+      const [, xParam = '', body = ''] = arrow ?? []
+      expect(xParam.startsWith('_')).toBe(true)
+      expect(body).toMatch(/fmtDateTime\(\w+\.bucketStart\)/)
+    })
+
+    test(`${name}: no local-ISO string key re-keys the domain to make a formatter come out right`, () => {
+      expect(code).not.toContain('localOffsetIso')
+      expect(code).not.toContain('key: slot.key')
+    })
+  }
+
+  test('the latency band keys x on the bucket instant as a Date, shared with the strips', () => {
+    const band = charts.find(({ name }) => name === 'latency-band-chart.tsx')
+    expect(band?.code).toMatch(/=\s*\(\w+: Point\): Date =>\s*new Date\(\w+\.bucketStart\)/)
   })
 })

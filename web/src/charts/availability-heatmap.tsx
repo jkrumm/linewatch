@@ -140,12 +140,16 @@ export function AvailabilityHeatmap({
   from,
   to,
   isPending,
+  error,
 }: {
   buckets: ProbeBucket[]
   from: number
   to: number
   /** True while the probe-buckets query behind this grid is in flight — see the component docblock. */
   isPending?: boolean
+  /** A failed query with nothing to show: drawn as the framework's error state, never as pending
+   * or as an empty window. */
+  error?: unknown
 }) {
   const { cells, rows } = useMemo(() => availabilityCells(buckets, from, to), [buckets, from, to])
   const [compact] = dashboard.field.compact.use()
@@ -177,7 +181,7 @@ export function AvailabilityHeatmap({
           legend={LEGEND}
           tooltip={TOOLTIP}
           height={Math.max(220, rows.length * ROW_PX + FRAME_CHROME_PX)}
-          state={{ pending: isPending === true }}
+          state={{ pending: isPending === true, error }}
           ariaLabel="WAN availability by hour of day over the last 30 days, with unmeasured hours marked"
         />
       </div>

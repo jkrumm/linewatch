@@ -81,6 +81,7 @@ export function SpeedChart({
   bucketSeconds,
   refLines = [],
   isPending,
+  error,
 }: {
   tests: SpeedTest[]
   /** The window and bucket size the bucketed charts above draw: the x domain is theirs, so one
@@ -97,6 +98,9 @@ export function SpeedChart({
    * not on screen.
    */
   isPending?: boolean
+  /** A failed query with nothing to show: drawn as the framework's error state, never as pending
+   * or as an empty window. */
+  error?: unknown
 }) {
   const points = useMemo(() => toRuns(tests), [tests])
   const xDomain = useMemo(() => slotExtent({ from, to, bucketSeconds }), [from, to, bucketSeconds])
@@ -144,7 +148,7 @@ export function SpeedChart({
           formatX={runTickFormat}
           y={{ domain: 'auto' }}
           height={compact ? SPEED_HEIGHT_COMPACT : SPEED_HEIGHT}
-          state={{ pending }}
+          state={{ pending, error }}
           ariaLabel="Download against upload in Mbps, one point per speed-test run"
           tooltip={tooltip}
         />

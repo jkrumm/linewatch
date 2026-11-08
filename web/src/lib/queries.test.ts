@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  bucketAlignedWindow,
   quantiseWindow,
   sameWindowedQuery,
   WINDOW_KEY_MAX_STEP_MS,
@@ -102,5 +103,33 @@ describe('sameWindowedQuery', () => {
 
   test('non-numeric trailing positions never match — a malformed key gets no placeholder data, never a wrong one', () => {
     expect(sameWindowedQuery(['a', 'x', 'y'], ['a', 'x', 'y'])).toBe(false)
+  })
+})
+
+describe('bucketAlignedWindow', () => {
+  const HOUR = 3_600_000
+  const SPAN = 30 * 86_400_000
+
+  test('is stable for every instant inside one bucket, whatever the page range does', () => {
+    const start = Date.UTC(2026, 6, 30, 12, 0, 0)
+    const first = bucketAlignedWindow(start, SPAN, 3_600)
+    for (const offset of [PROBE_CYCLE_MS, 5 * 60_000, HOUR - 1]) {
+      expect(bucketAlignedWindow(start + offset, SPAN, 3_600)).toEqual(first)
+    }
+  })
+
+  test('rotates exactly when the next bucket begins', () => {
+    const start = Date.UTC(2026, 6, 30, 12, 0, 0)
+    const next = bucketAlignedWindow(start + HOUR, SPAN, 3_600)
+    expect(next.to - bucketAlignedWindow(start, SPAN, 3_600).to).toBe(HOUR)
+  })
+
+  test('keeps the span exact, bucket-aligned, and includes the current bucket', () => {
+    const now = Date.UTC(2026, 6, 30, 12, 34, 56)
+    const { from, to } = bucketAlignedWindow(now, SPAN, 3_600)
+    expect(to - from).toBe(SPAN)
+    expect(from % HOUR).toBe(0)
+    expect(to).toBeGreaterThan(now)
+    expect(to - now).toBeLessThanOrEqual(HOUR)
   })
 })

@@ -22,6 +22,7 @@ import {
   timelineEmptyState,
 } from '../lib/events'
 import { fmtDateTime } from '../lib/format'
+import { QueryError } from './query-error'
 
 /**
  * One hue per kind, from the identity set only. `grape` was off-identity (the theme guard's
@@ -64,7 +65,7 @@ const PAGE_SIZE = 25
  *
  * The source column is not decoration. A `vantage-diff` row is stamped when the *snapshot* was
  * taken, so its transition happened somewhere in the preceding 30 s; a `link-sampler` row is
- * stamped at the transition itself to ~1 s. One timestamp column showing both without saying which
+ * stamped at the transition itself to ~2 s. One timestamp column showing both without saying which
  * is which claims a precision two of the three writers do not have.
  *
  * **Two renderings of the same rows, and the reason is not density.** Inside `Card`'s `overflow:
@@ -84,6 +85,7 @@ export function TransitionTimeline({
   events,
   linkSamplingSince,
   isPending,
+  error,
 }: {
   events: LinewatchEvent[]
   /** Earliest cycle in this window that reported `link_watch_s`, or null when none did. Decides
@@ -93,6 +95,8 @@ export function TransitionTimeline({
    * the empty state then claims "no transition was observed" over a window nobody has asked about
    * yet — which is the exact over-claim `timelineEmptyState`'s two branches exist to avoid. */
   isPending?: boolean
+  /** A failed query with nothing to show — not "no transition was observed". */
+  error?: unknown
 }) {
   const [page, setPage] = useState(1)
 
@@ -110,6 +114,10 @@ export function TransitionTimeline({
   if (seen !== signature) {
     setSeen(signature)
     setPage(1)
+  }
+
+  if (events.length === 0 && error !== undefined) {
+    return <QueryError what="the transition timeline" error={error} />
   }
 
   if (events.length === 0 && isPending === true) {
@@ -230,7 +238,7 @@ export function TransitionTimeline({
                 </Group>
                 {/* The precision caveat is a visible line here, not a hover. On the table path it
                     rides a Tooltip on the badge; a phone has no hover, and this caveat is the
-                    difference between a timestamp meaning "within 30 s of this" and "within 1 s of
+                    difference between a timestamp meaning "within 30 s of this" and "within 2 s of
                     this". */}
                 <Text size="xs" c="dimmed">
                   Timestamp means: {source.precision}

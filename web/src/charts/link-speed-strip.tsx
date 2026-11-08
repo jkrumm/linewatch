@@ -263,6 +263,7 @@ export function LinkSpeedStrip({
   to,
   bucketSeconds,
   isPending,
+  error,
 }: {
   vantage: VantageBucket[]
   from: number
@@ -277,6 +278,9 @@ export function LinkSpeedStrip({
    * nobody had answered. Same guard, same reason, as `availability-strip.tsx`'s.
    */
   isPending?: boolean
+  /** A failed query with nothing to show: drawn as the framework's error state, never as pending
+   * or as an empty window. */
+  error?: unknown
 }) {
   const columns: Column[] = useMemo(
     () =>
@@ -319,7 +323,7 @@ export function LinkSpeedStrip({
   return (
     // A floor, not a height — see `availability-strip.tsx`'s identical wrapper.
     <div ref={viewRef} style={{ minHeight: STRIP_FRAME_HEIGHT }}>
-      {isPending !== true && <LinkVerdict summary={summary} />}
+      {isPending !== true && error === undefined && <LinkVerdict summary={summary} />}
       <BandStrip
         data={columns}
         x={columnX}
@@ -330,7 +334,7 @@ export function LinkSpeedStrip({
         height={STRIP_FRAME_HEIGHT}
         formatX={formatX}
         ariaLabel="Negotiated link speed per bucket, with unmeasured buckets marked and renegotiations marked rather than averaged"
-        state={{ pending: isPending === true }}
+        state={{ pending: isPending === true, error }}
         // Four states, not four series — there is nothing to toggle. `state` conceals the legend
         // while pending (basalt-ui 2.10.0).
         legend={{ toggle: false }}

@@ -223,6 +223,7 @@ export function AvailabilityStrip({
   to,
   bucketSeconds,
   isPending,
+  error,
 }: {
   /** Which target's buckets these are — the tooltip names it rather than assuming the WAN anchor. */
   target: TargetName
@@ -242,6 +243,9 @@ export function AvailabilityStrip({
    * silently remove.
    */
   isPending?: boolean
+  /** A failed query with nothing to show: drawn as the framework's error state, never as pending
+   * or as an empty window. */
+  error?: unknown
 }) {
   const columns: Column[] = useMemo(
     () =>
@@ -290,7 +294,7 @@ export function AvailabilityStrip({
         height={STRIP_FRAME_HEIGHT}
         formatX={formatX}
         ariaLabel={`${label}, with unmeasured buckets marked`}
-        state={{ pending: isPending === true }}
+        state={{ pending: isPending === true, error }}
         // The legend toggles nothing: these four entries are STATES, not series with values, so
         // hiding one would remove a name from the key and change no mark — except `absent`, whose
         // toggle would zero every band's absent share and make a folded band read fully measured.

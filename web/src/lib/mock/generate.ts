@@ -18,8 +18,6 @@ import type {
   ProbeBucketSeconds,
   RangeSummary,
   RouterSnapshot,
-  SpeedSummary,
-  SpeedSummaryStat,
   SpeedTest,
   StatusResponse,
   StatusSample,
@@ -33,6 +31,9 @@ import type {
 } from '../types'
 import { TARGETS } from '../types'
 
+// Anchors the synthetic world (outage windows, vantage history) so it stays one consistent history.
+// Anything that reports "now" — status, router ages — reads `Date.now()` per call instead, or the
+// page would go stale a minute into a mock session.
 const NOW = Date.now()
 
 /** The collector's probe cadence — the same 30s `src/config.ts` defaults to. */
@@ -92,7 +93,7 @@ const VANTAGE_UNKNOWN_WINDOW = { start: NOW - 20 * 3_600_000, end: NOW - 19 * 3_
 /**
  * When the synthetic collector's 1 Hz link sampler started. Before it, `link_watch_s` is null on
  * every cycle and an empty timeline means nothing was watching; after it, an empty timeline means
- * no transition longer than the ~1 s sampling resolution was observed. The mock carries the
+ * no transition longer than the ~2 s sampling resolution was observed. The mock carries the
  * boundary so both sentences are reachable by picking a range.
  */
 const LINK_SAMPLING_SINCE = NOW - 12 * 3_600_000
@@ -630,7 +631,7 @@ export function generateOutages(
  *
  * Every row carries a `source`, and the four differ in what they are evidence *of*: a
  * `vantage-diff` row says the path had changed by the time the next 30 s snapshot was taken, a
- * `link-sampler` row dates the transition itself to ~1 s, a `router-poller` row is the carrier's
+ * `link-sampler` row dates the transition itself to ~2 s, a `router-poller` row is the carrier's
  * own account up to a poll interval late, and `manual` is a human saying what they did.
  */
 export function generateEvents(from: number, to: number): EventsResponse {
@@ -824,30 +825,7 @@ export function generateSpeedTests(from: number, to: number): SpeedTest[] {
   return out
 }
 
-function percentileValue(sorted: number[], p: number): number {
-  const idx = Math.min(sorted.length - 1, Math.max(0, Math.floor(p * sorted.length)))
-  return sorted[idx] ?? 0
-}
-
-function summarize(values: number[]): SpeedSummaryStat {
-  if (values.length === 0) return { p50: null, p95: null, best: null, worst: null }
-  const sorted = values.toSorted((a, b) => a - b)
-  return {
-    p50: round1(percentileValue(sorted, 0.5)),
-    p95: round1(percentileValue(sorted, 0.95)),
-    best: round1(Math.max(...sorted)),
-    worst: round1(Math.min(...sorted)),
-  }
-}
-
-export function generateSpeedSummary(days: number): SpeedSummary {
-  const rows = generateSpeedTests(NOW - days * 86_400_000, NOW).filter((r) => r.ok)
-  const downs = rows.flatMap((r) => (r.downloadMbps === null ? [] : [r.downloadMbps]))
-  const ups = rows.flatMap((r) => (r.uploadMbps === null ? [] : [r.uploadMbps]))
-  return { days, count: rows.length, download: summarize(downs), upload: summarize(ups) }
-}
-
-export function generateStatus(now: number = NOW): StatusResponse {
+export function generateStatus(now: number = Date.now()): StatusResponse {
   const ongoingOutages: OngoingOutage[] = OUTAGE_DEFS.filter((def) => {
     const w = outageWindow(def)
     return now >= w.start && now <= w.end
@@ -968,8 +946,8 @@ const ROUTER_STALE_AFTER_MS = 2 * ROUTER_POLL_INTERVAL_MS
 /** Wraps a value in the same per-part envelope `GET /api/router` sends, deriving `stale` from the
  * age rather than asserting it — the mock must not be able to claim a fresh reading is stale or
  * the reverse. */
-function routerPart<T>(observedAt: number, value: T) {
-  const ageMs = NOW - observedAt
+function routerPart<T>(now: number, observedAt: number, value: T) {
+  const ageMs = now - observedAt
   return { observedAt, ageMs, stale: ageMs > ROUTER_STALE_AFTER_MS, value }
 }
 
@@ -981,9 +959,10 @@ function routerPart<T>(observedAt: number, value: T) {
  * repo, see AGENTS.md).
  */
 export function generateRouterSnapshot(): RouterSnapshot {
-  const lineTs = NOW - 2 * 60_000
-  const wanTs = NOW - 26 * 60_000
-  const lanTs = NOW - 90_000
+  const now = Date.now()
+  const lineTs = now - 2 * 60_000
+  const wanTs = now - 26 * 60_000
+  const lanTs = now - 90_000
 
   return {
     pollerEnabled: true,
@@ -991,9 +970,9 @@ export function generateRouterSnapshot(): RouterSnapshot {
     configWarning: null,
     collectorHostIp: '192.168.1.100',
     pollIntervalMs: ROUTER_POLL_INTERVAL_MS,
-    now: NOW,
+    now,
     staleAfterMs: ROUTER_STALE_AFTER_MS,
-    line: routerPart(lineTs, {
+    line: routerPart(now, lineTs, {
       id: 1,
       ts: lineTs,
       carrier: 'gfast' as const,
@@ -1010,7 +989,7 @@ export function generateRouterSnapshot(): RouterSnapshot {
       erroredSecs: 12,
       severelyErroredSecs: 0,
     }),
-    wan: routerPart(wanTs, {
+    wan: routerPart(now, wanTs, {
       id: 2,
       ts: wanTs,
       name: 'wan-1',
@@ -1021,7 +1000,7 @@ export function generateRouterSnapshot(): RouterSnapshot {
       bytesRx: 812_000_000_000,
       bytesTx: 74_000_000_000,
     }),
-    lan: routerPart(lanTs, {
+    lan: routerPart(now, lanTs, {
       id: 3,
       ts: lanTs,
       name: 'br-lan',
@@ -1032,7 +1011,7 @@ export function generateRouterSnapshot(): RouterSnapshot {
       bytesRx: 71_000_000_000,
       bytesTx: 806_000_000_000,
     }),
-    collectorHost: routerPart(lanTs, {
+    collectorHost: routerPart(now, lanTs, {
       id: 4,
       ts: lanTs,
       ip: '192.168.1.100',
@@ -1040,7 +1019,7 @@ export function generateRouterSnapshot(): RouterSnapshot {
       active: 1,
       clientType: 'computer',
     }),
-    ports: routerPart(lanTs, [
+    ports: routerPart(now, lanTs, [
       {
         id: 5,
         ts: lanTs,

@@ -10,6 +10,7 @@ import {
   eventsQuery,
   outagesQuery,
   probeBucketsQuery,
+  bucketAlignedWindow,
   quantiseWindow,
   routerQuery,
   speedTestsQuery,
@@ -21,6 +22,7 @@ import { StatusBar, type KpiWindow } from '../components/status-bar'
 import { VerdictPanel } from '../components/verdict-panel'
 import { CompactToggle } from '../components/compact-toggle'
 import { LiveChip } from '../components/live-chip'
+import { RouteError } from '../components/route-error'
 import { DashboardSection } from '../components/dashboard-section'
 import barClasses from '../shell/page-bar.module.css'
 import { StatStrip, type Stat } from '../components/stat-strip'
@@ -59,6 +61,8 @@ import { coverageKind, fmtCoveragePct } from '../lib/coverage'
 import { speedWindowStats } from '../lib/speed-stats'
 import { unmappedVerdictIds } from '../lib/verdict-section'
 import { RANGE_LABEL, rangeToBucket, rangeToWindow } from '../lib/range'
+import { loadState } from '../lib/query-state'
+import { useNow } from '../lib/use-now'
 import {
   dashboard,
   latencyViews,
@@ -143,24 +147,26 @@ export const Route = createFileRoute('/')({
     range: search.range,
     minDuration: search.minDuration,
   }),
-  loader: ({ context, deps }) => {
+  loader: async ({ context, deps }) => {
     const bucket = rangeToBucket(deps.range)
     // The same quantisation the component applies, so the loader warms the keys the component asks
     // for. At a 30 s quantum this agreed on a coin flip; at the bucket-sized one a disagreement
     // costs one refetch every few minutes instead of a fully-empty first paint on every range change.
     const { from, to } = quantiseWindow(rangeToWindow(deps.range), bucket)
-    return Promise.all([
-      context.queryClient.ensureQueryData(statusQuery()),
-      context.queryClient.ensureQueryData(verdictsQuery({ from, to })),
-      context.queryClient.ensureQueryData(
-        outagesQuery({ from, to, minDuration: deps.minDuration }),
-      ),
-      context.queryClient.ensureQueryData(speedTestsQuery({ from, to })),
+    // `prefetchQuery`, not `ensureQueryData`: it never rejects, so one failing endpoint cannot
+    // replace the whole page (status bar included) with the router's error screen. A failed query
+    // lands in the cache as an error and the section that reads it draws its own error state.
+    await Promise.all([
+      context.queryClient.prefetchQuery(statusQuery()),
+      context.queryClient.prefetchQuery(verdictsQuery({ from, to })),
+      context.queryClient.prefetchQuery(outagesQuery({ from, to, minDuration: deps.minDuration })),
+      context.queryClient.prefetchQuery(speedTestsQuery({ from, to })),
       ...TARGETS.map((target) =>
-        context.queryClient.ensureQueryData(probeBucketsQuery({ from, to, target, bucket })),
+        context.queryClient.prefetchQuery(probeBucketsQuery({ from, to, target, bucket })),
       ),
     ])
   },
+  errorComponent: RouteError,
   component: DashboardPage,
 })
 
@@ -190,15 +196,21 @@ function DashboardPage() {
    * takes `nowTick`. Anything answering "over what stretch" takes `from`/`to`.
    */
   const bucket = rangeToBucket(search.range)
-  const nowTick = rangeToWindow(search.range).to
-  const { from, to } = quantiseWindow(rangeToWindow(search.range), bucket)
+  // A real clock: without it a failed background refetch re-renders nothing, so every age on the
+  // page froze at its last value and an open tab with the API down kept saying "Up · just now".
+  const now = useNow()
+  const nowTick = rangeToWindow(search.range, now).to
+  const { from, to } = quantiseWindow(rangeToWindow(search.range, now), bucket)
+  // The 30-day heatmap rides its own bucket-aligned window, not the page's `to` — see
+  // `bucketAlignedWindow`.
+  const heatmapWindow = bucketAlignedWindow(nowTick, HEATMAP_SPAN_MS, HEATMAP_BUCKET_SECONDS)
   // The span `downtimeTint` and `StatusBar` bands its thresholds against — computed once here so the
   // KPI card's tint and the Uptime section's own downtime tint can never disagree about the window.
   const windowSeconds = (to - from) / 1000
 
-  const { data: status } = useQuery(statusQuery())
-  const { data: verdicts } = useQuery(verdictsQuery({ from, to }))
-  const { data: outageData } = useQuery(outagesQuery({ from, to, minDuration: search.minDuration }))
+  const statusResult = useQuery(statusQuery())
+  const verdictsResult = useQuery(verdictsQuery({ from, to }))
+  const outageDataResult = useQuery(outagesQuery({ from, to, minDuration: search.minDuration }))
   // Both the latency band's outage overlay AND the headline `downtime` figure below read this
   // UNFILTERED list. `search.minDuration` is a filter on the outage TABLE and the Outages COUNT
   // only — a reader who sets "≥10m" is narrowing a list, not asserting that shorter outages did
@@ -207,15 +219,14 @@ function DashboardPage() {
   // tint, AND compared that filtered zero against `prevOutageData` below (always unfiltered) on
   // the window-over-window badge — reporting a fabricated improvement off a table filter. When
   // the filter is at its default this is the identical query key as `outageData` and costs nothing.
-  const { data: allOutageData } = useQuery(outagesQuery({ from, to }))
-  const { data: tests } = useQuery(speedTestsQuery({ from, to }))
-  const { data: router } = useQuery(routerQuery())
-  const { data: events } = useQuery(eventsQuery({ from, to }))
-  const { data: throughput } = useQuery(throughputQuery({ from, to, bucket }))
-  const { data: heatmapData } = useQuery(
+  const allOutageDataResult = useQuery(outagesQuery({ from, to }))
+  const testsResult = useQuery(speedTestsQuery({ from, to }))
+  const routerResult = useQuery(routerQuery())
+  const eventsResult = useQuery(eventsQuery({ from, to }))
+  const throughputResult = useQuery(throughputQuery({ from, to, bucket }))
+  const heatmapDataResult = useQuery(
     probeBucketsQuery({
-      from: to - HEATMAP_SPAN_MS,
-      to,
+      ...heatmapWindow,
       target: 'cloudflare',
       bucket: HEATMAP_BUCKET_SECONDS,
     }),
@@ -228,8 +239,20 @@ function DashboardPage() {
   // Same bucket size on both sides on purpose: the worst-stretch figure is a maximum over
   // fixed-length stretches, and comparing a 5-minute worst against a 4-hour one is not a delta.
   const prevFrom = from - (to - from)
-  const { data: prevOutageData } = useQuery(outagesQuery({ from: prevFrom, to: from }))
-  const { data: prevTests } = useQuery(speedTestsQuery({ from: prevFrom, to: from }))
+  const prevOutageDataResult = useQuery(outagesQuery({ from: prevFrom, to: from }))
+  const prevTestsResult = useQuery(speedTestsQuery({ from: prevFrom, to: from }))
+
+  const { data: status } = statusResult
+  const { data: verdicts } = verdictsResult
+  const { data: outageData } = outageDataResult
+  const { data: allOutageData } = allOutageDataResult
+  const { data: tests } = testsResult
+  const { data: router } = routerResult
+  const { data: events } = eventsResult
+  const { data: throughput } = throughputResult
+  const { data: heatmapData } = heatmapDataResult
+  const { data: prevOutageData } = prevOutageDataResult
+  const { data: prevTests } = prevTestsResult
 
   const targetResults = useQueries({
     queries: TARGETS.map((target) => probeBucketsQuery({ from, to, target, bucket })),
@@ -269,16 +292,35 @@ function DashboardPage() {
   // page asserted the window was entirely unmeasured, tinted warn, with a hint explaining why. That
   // is the exact fabrication class the rest of this repo is built to refuse; it must not be
   // reachable from a loading state either.
-  const outagesPending = outageData === undefined
-  // The FILTERED query's own pending state — gates the Outages count/table only. `downtime` and
-  // both its tints now read the UNFILTERED `allOutageData` (see that query's own comment), so they
-  // gate on this instead, not `outagesPending`.
+  // `downtime` and both its tints read the UNFILTERED `allOutageData` (see that query's own
+  // comment), so they gate on this; the FILTERED outage table has its own `outagesLoad` below.
   const allOutagesPending = allOutageData === undefined
   const throughputPending = throughput === undefined
-  const heatmapPending = heatmapData === undefined
   const testsPending = tests === undefined
-  const eventsPending = events === undefined
   const seriesPending = targetResults.some((r) => r.data === undefined)
+  // What the CHARTS and tables draw: loading and failed are separate states. The `*Pending` flags
+  // above stay "no data yet" — they gate computed figures, which must stay dashes after a failure
+  // too — while these tell a section whether to show a skeleton or its error.
+  const outagesLoad = loadState([outageDataResult])
+  const heatmapLoad = loadState([heatmapDataResult])
+  const testsLoad = loadState([testsResult])
+  const eventsLoad = loadState([eventsResult])
+  const throughputLoad = loadState([throughputResult])
+  const seriesLoad = loadState(targetResults)
+  const parts: [string, { isError: boolean }][] = [
+    ['status', statusResult],
+    ['verdicts', verdictsResult],
+    ['outages', allOutageDataResult],
+    ['speed tests', testsResult],
+    ['router', routerResult],
+    ['events', eventsResult],
+    ['throughput', throughputResult],
+    ['the 30-day pattern', heatmapDataResult],
+    ['latency', { isError: targetResults.some((r) => r.isError) }],
+  ]
+  // Includes a failed BACKGROUND refetch that still holds data: that data is on screen, and the
+  // reader is owed the fact that it is no longer being refreshed.
+  const failedParts = parts.filter(([, r]) => r.isError).map(([label]) => label)
   // The share of the window `points` actually measured — the same signal `downtimeTint` needs to
   // decide whether a defined zero earns `'good'` or is just an unwatched window. Computed once here
   // so the KPI card and the Uptime section's own Downtime stat can never disagree about it.
@@ -364,6 +406,8 @@ function DashboardPage() {
                         now: nowTick,
                       }
                 }
+                fetchFailed={statusResult.isError}
+                fetchedAt={statusResult.data === undefined ? null : statusResult.dataUpdatedAt}
               />
             ),
           },
@@ -385,6 +429,13 @@ function DashboardPage() {
         windowSeconds={windowSeconds}
         pending={{ downtime: allOutagesPending, series: seriesPending, tests: testsPending }}
       />
+
+      {failedParts.length > 0 && (
+        <Callout kind="bad" title="Some data could not be loaded">
+          The last request for {failedParts.join(', ')} failed. Anything still drawn for it is the
+          last data received, not the current state of the line.
+        </Callout>
+      )}
 
       {/* Renders unconditionally now — see `VerdictPanel`'s own docblock for the third,
           "not asked yet" state. Unmounting it while `verdicts` was `undefined` dragged every
@@ -480,7 +531,8 @@ function DashboardPage() {
                       from={from}
                       to={to}
                       bucketSeconds={bucket}
-                      isPending={seriesPending}
+                      isPending={seriesLoad.pending}
+                      error={seriesLoad.error}
                     />
                   </GuidedChart>
                   <CoverageCallout
@@ -502,7 +554,11 @@ function DashboardPage() {
                     Every recorded outage in the window. Single-cycle blips are recorded, not
                     discarded — only filtered here.
                   </Text>
-                  <OutageTable outages={outageData?.outages ?? []} isPending={outagesPending} />
+                  <OutageTable
+                    outages={outageData?.outages ?? []}
+                    isPending={outagesLoad.pending}
+                    error={outagesLoad.error}
+                  />
                 </Card>
               ),
             },
@@ -523,9 +579,10 @@ function DashboardPage() {
                   </Text>
                   <AvailabilityHeatmap
                     buckets={heatmapData?.buckets ?? []}
-                    from={to - HEATMAP_SPAN_MS}
-                    to={to}
-                    isPending={heatmapPending}
+                    from={heatmapWindow.from}
+                    to={heatmapWindow.to}
+                    isPending={heatmapLoad.pending}
+                    error={heatmapLoad.error}
                   />
                 </Stack>
               ),
@@ -579,7 +636,8 @@ function DashboardPage() {
                     from={from}
                     to={to}
                     bucketSeconds={bucket}
-                    isPending={seriesPending}
+                    isPending={seriesLoad.pending}
+                    error={seriesLoad.error}
                     overlay={{ label: 'Router', buckets: bucketsByTarget.get('gateway') ?? [] }}
                     extraTooltipRows={(b) => {
                       const fold = internetByBucket.get(b.bucket)
@@ -612,7 +670,8 @@ function DashboardPage() {
                         from={from}
                         to={to}
                         bucketSeconds={bucket}
-                        isPending={seriesPending}
+                        isPending={seriesLoad.pending}
+                        error={seriesLoad.error}
                         outages={allOutageData?.outages.filter((o) =>
                           name === 'gateway' ? o.scope === 'gateway' : o.scope === 'wan',
                         )}
@@ -666,7 +725,8 @@ function DashboardPage() {
                     to={to}
                     bucketSeconds={bucket}
                     refLines={throughputRefLines(status?.vantage, router, nowTick)}
-                    isPending={testsPending}
+                    isPending={testsLoad.pending}
+                    error={testsLoad.error}
                   />
                   <ServerChangeNote tests={tests ?? []} isPending={testsPending} />
                 </Stack>
@@ -676,7 +736,13 @@ function DashboardPage() {
               key: 'by-hour',
               label: 'By hour of day',
               render: () => (
-                <SpeedHeatmap tests={tests ?? []} from={from} to={to} isPending={testsPending} />
+                <SpeedHeatmap
+                  tests={tests ?? []}
+                  from={from}
+                  to={to}
+                  isPending={testsLoad.pending}
+                  error={testsLoad.error}
+                />
               ),
             },
             {
@@ -689,7 +755,8 @@ function DashboardPage() {
                   from={from}
                   to={to}
                   bucketSeconds={bucket}
-                  isPending={testsPending}
+                  isPending={testsLoad.pending}
+                  error={testsLoad.error}
                 />
               ),
             },
@@ -743,7 +810,8 @@ function DashboardPage() {
                     from={from}
                     to={to}
                     bucketSeconds={bucket}
-                    isPending={throughputPending}
+                    isPending={throughputLoad.pending}
+                    error={throughputLoad.error}
                   />
                 </GuidedChart>
               ),
@@ -795,7 +863,8 @@ function DashboardPage() {
                       from={from}
                       to={to}
                       bucketSeconds={bucket}
-                      isPending={seriesPending}
+                      isPending={seriesLoad.pending}
+                      error={seriesLoad.error}
                     />
                   </GuidedChart>
                 ),
@@ -810,7 +879,8 @@ function DashboardPage() {
                     <TransitionTimeline
                       events={events?.events ?? []}
                       linkSamplingSince={events?.linkSamplingSince ?? null}
-                      isPending={eventsPending}
+                      isPending={eventsLoad.pending}
+                      error={eventsLoad.error}
                     />
                   </Card>
                 ),

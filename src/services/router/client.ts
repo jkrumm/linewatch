@@ -39,8 +39,10 @@ import { redactRow, type RouterRow } from './redact.js'
  *    returned all eight. Callers pass the operation explicitly and cross-check
  *    the row count against a count field where the firmware offers one.
  *
- * Read-only by construction: `read` is the whole surface, and the write
- * operations of this protocol (`so`/`ao`/`do`/`op`) are not implemented at all.
+ * Reads go through `read`. The one write path is `sendAction`, which takes an
+ * intent from a four-member union (never an OID) and puts the `op` verb on the
+ * wire; the other write verbs of this protocol (`so`/`ao`/`do`) are not
+ * implemented at all.
  */
 
 export type RouterOperation = 'go' | 'gl' | 'gs'
@@ -149,7 +151,7 @@ interface Session {
   reads: number
 }
 
-/** The session was lost (evicted, expired, or never valid). Recoverable after a backoff. */
+/** The session was lost (evicted, expired, or never valid). The next poll logs in fresh. */
 export class RouterSessionLostError extends Error {
   constructor(detail: string) {
     super(`router session lost: ${detail}`)
@@ -186,8 +188,8 @@ export class RouterBusyError extends RouterReadError {
 
 /**
  * The router did not answer at all. Distinct from a lost session on purpose: a
- * device that is not answering has no session to be polite about, so this does
- * not start the eviction backoff and the next poll simply tries again.
+ * device that is not answering has no session to drop, so the next poll simply
+ * tries again.
  */
 export class RouterUnreachableError extends Error {
   constructor(detail: string) {
@@ -530,13 +532,13 @@ export class RouterClient {
    * with a status or an error page — it closes the socket, and every subsequent
    * request on that session does the same. An unclassified transport error would
    * therefore leave the client believing it still holds a session it lost, and
-   * hammering the device forever instead of backing off.
+   * keep reusing it instead of dropping it.
    *
    * So the client asks the one question that separates the two causes: is the
    * router answering anyone at all? If it is, this session is the thing that
-   * died — back off before reclaiming the single admin slot from whoever took
-   * it. If it is not, the device is down or the network is, and there is no
-   * session to be polite about.
+   * died — drop it, and the next poll logs in fresh rather than this one
+   * reclaiming the single admin slot mid-poll. If it is not, the device is down or the network is, and there is no
+   * session to drop.
    */
   private async classifyTransportFailure(error: unknown, oid: string): Promise<Error> {
     const detail = error instanceof Error ? error.message : String(error)

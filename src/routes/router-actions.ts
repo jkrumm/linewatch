@@ -1,12 +1,16 @@
 import { Elysia } from 'elysia'
 import { z } from 'zod'
-import { desc } from 'drizzle-orm'
 import { db } from '../db/client.js'
-import { event, routerLineSample } from '../db/schema.js'
+import { event } from '../db/schema.js'
 import { hasValidBearer } from '../lib/auth.js'
-import { routerConfig } from '../services/router/config.js'
 import type { ActionResult } from '../services/router/actions.js'
-import { getRouterExecutor, getRouterPoller, pollOnDemand } from '../services/router/scheduler.js'
+import {
+  getRouterExecutor,
+  getRouterPoller,
+  pollOnDemand,
+  secondsSincePollAttempt,
+} from '../services/router/scheduler.js'
+import { routerConfig } from '../services/router/config.js'
 
 /**
  * The three routes that reach the router rather than its record.
@@ -17,8 +21,10 @@ import { getRouterExecutor, getRouterPoller, pollOnDemand } from '../services/ro
  * line itself. `grep -rn hasValidBearer src/` is the source of truth for that
  * list and `AGENTS.md` follows it, not the other way round.
  *
- * The second gate is `LINEWATCH_ROUTER_WRITE`, unset by default, which turns the
- * executor into a `NullExecutor` for the whole process. It exists because the
+ * The second gate is `LINEWATCH_ROUTER_WRITE`, unset by default, which keeps the
+ * executor a `NullExecutor` for the whole process. The route gate reads the
+ * executor's actual capability, not the env: with the poller off the executor is
+ * a `NullExecutor` whatever the env says. It exists because the
  * two failure modes are different: the bearer stops someone else acting, and the
  * capability switch stops *us* acting — including a watchdog that has gone
  * wrong, a bad deploy, or a test pointed at the wrong host. It is the switch
@@ -38,20 +44,13 @@ import { getRouterExecutor, getRouterPoller, pollOnDemand } from '../services/ro
  */
 const POLL_MIN_INTERVAL_S = 60
 
-/**
- * Measured against the newest stored row rather than an in-process timer, the
- * same pattern as the speed-test limit and for the same reason: restarting the
- * container must not reset the budget.
- */
-function secondsSinceLastPoll(now: number): number | null {
-  const row = db
-    .select({ ts: routerLineSample.ts })
-    .from(routerLineSample)
-    .orderBy(desc(routerLineSample.ts))
-    .limit(1)
-    .get()
-  return row === undefined ? null : Math.floor((now - row.ts) / 1000)
-}
+const writesEnabled = () => getRouterExecutor().capability === 'live'
+
+const PollFailureSchema = z.object({
+  ok: z.literal(false),
+  outcome: z.enum(['skipped', 'login_failed', 'failed', 'unconfigured']),
+  error: z.string(),
+})
 
 const ActionResultSchema = z.object({
   ok: z.boolean(),
@@ -75,25 +74,55 @@ const ActionResultSchema = z.object({
 })
 
 /**
- * Write the attempt down, then answer. Shared by both actions so they cannot
- * drift in how they record — the reboot is the one whose evidence matters most
- * and the one most likely to be added carelessly later.
- *
- * `intervention` only when something actually reached the line. `unknown` counts:
- * the device stopped answering because it was rebooting, so the line was
- * touched even though the acknowledgement never came, and recording that as a
- * `note` would leave a reboot invisible in the attribution the table exists for.
- * A refusal or a suppressed write reached nothing and stays a `note`.
- *
- * An action attempted and not recorded is exactly the failure
+ * Run an action and write the attempt down, whatever it does. The record is
+ * written in a `finally`, so an executor that throws still leaves a row — an
+ * action attempted and not recorded is exactly the failure
  * `POST /api/interventions` was built to prevent, and it has already happened
  * once to a human: the router reboot that ended the 21.5-minute outage on
  * 2026-08-01 was never written down, so the record shows an outage that ended
- * on its own.
+ * on its own. Shared by both actions so they cannot drift in how they record.
+ *
+ * `intervention` only when something may have reached the line. `executed`,
+ * `unknown` (the device stopped answering because it was rebooting) and a
+ * reconnect `failed` (it can die between disconnect and connect) all count. A
+ * refusal, a suppressed write, a thrown error before anything was sent, and a
+ * reboot the device explicitly rejected (`failed`: nothing rebooted) reached
+ * nothing and stay a `note`.
  */
-function recordAndAnswer(action: 'router_reconnect' | 'router_reboot', result: ActionResult) {
+async function runAndRecord(
+  action: 'router_reconnect' | 'router_reboot',
+  run: () => Promise<ActionResult>,
+) {
+  let result: ActionResult | null = null
+  let thrown: unknown = null
+  try {
+    result = await run()
+  } catch (error) {
+    thrown = error
+    throw error
+  } finally {
+    writeRecord(action, result, thrown)
+  }
+
+  return {
+    ok: result.ok,
+    capability: result.capability,
+    outcome: result.outcome,
+    detail: result.detail,
+    steps: result.steps,
+  }
+}
+
+function writeRecord(
+  action: 'router_reconnect' | 'router_reboot',
+  result: ActionResult | null,
+  thrown: unknown,
+) {
   const touchedTheLine =
-    result.outcome === 'executed' || result.outcome === 'failed' || result.outcome === 'unknown'
+    result !== null &&
+    (result.outcome === 'executed' ||
+      result.outcome === 'unknown' ||
+      (result.outcome === 'failed' && action === 'router_reconnect'))
   db.insert(event)
     .values({
       ts: Date.now(),
@@ -101,14 +130,14 @@ function recordAndAnswer(action: 'router_reconnect' | 'router_reboot', result: A
       detail: JSON.stringify({
         source: 'api',
         action,
-        outcome: result.outcome,
-        capability: result.capability,
-        steps: result.steps,
+        outcome: result?.outcome ?? 'error',
+        capability: result?.capability ?? null,
+        steps: result?.steps ?? [],
         // The pre-action snapshot. A reboot resets showtime, zeroes every byte
         // counter and empties the host table, so this is the only surviving
         // description of what it was done to.
         before:
-          result.before === null
+          result?.before == null
             ? null
             : {
                 connType: result.before.connType,
@@ -118,18 +147,12 @@ function recordAndAnswer(action: 'router_reconnect' | 'router_reboot', result: A
                 uptimeV6S: result.before.uptimeV6S,
                 lastConnError: result.before.lastConnError,
               },
-        note: result.detail,
+        note:
+          result?.detail ??
+          `the executor threw before reporting: ${thrown instanceof Error ? thrown.message : String(thrown)}`,
       }),
     })
     .run()
-
-  return {
-    ok: result.ok,
-    capability: result.capability,
-    outcome: result.outcome,
-    detail: result.detail,
-    steps: result.steps,
-  }
 }
 
 export const routerActionRoutes = new Elysia()
@@ -144,7 +167,7 @@ export const routerActionRoutes = new Elysia()
         })
       }
 
-      const since = secondsSinceLastPoll(Date.now())
+      const since = secondsSincePollAttempt(Date.now())
       if (since !== null && since < POLL_MIN_INTERVAL_S) {
         return status(429, {
           error: 'polled too recently',
@@ -152,13 +175,27 @@ export const routerActionRoutes = new Elysia()
         })
       }
 
-      await pollOnDemand()
-      return { ok: true as const }
+      const outcome = await pollOnDemand()
+      if (outcome === 'complete' || outcome === 'partial') return { ok: true as const, outcome }
+      if (outcome === 'skipped') {
+        return status(409, {
+          ok: false as const,
+          outcome,
+          error: 'a poll or an action is already in progress',
+        })
+      }
+      return status(502, {
+        ok: false as const,
+        outcome,
+        error: `the poll did not complete (${outcome})`,
+      })
     },
     {
       response: {
-        200: z.object({ ok: z.literal(true) }),
+        200: z.object({ ok: z.literal(true), outcome: z.enum(['complete', 'partial']) }),
         401: z.string(),
+        409: PollFailureSchema,
+        502: PollFailureSchema,
         429: z.object({ error: z.string(), secondsUntilNext: z.number().int() }),
         503: z.object({ error: z.string(), disabledReason: z.string().nullable() }),
       },
@@ -166,7 +203,7 @@ export const routerActionRoutes = new Elysia()
         tags: ['Router'],
         summary: 'Poll the router now',
         description:
-          'Runs one read-only poll immediately, serialised against the scheduled one. Exists because the carrier-side view is unavailable exactly when it matters: on 2026-08-01 the 10:20 poll failed 11 minutes into an outage and the next reading landed two minutes after the router had already been rebooted by hand. Rate-limited to one per 60s, measured against the newest stored sample so a container restart cannot reset the budget.',
+          'Runs one read-only poll immediately, serialised against the scheduled one. Exists because the carrier-side view is unavailable exactly when it matters: on 2026-08-01 the 10:20 poll failed 11 minutes into an outage and the next reading landed two minutes after the router had already been rebooted by hand. Rate-limited to one per 60s of poll attempts (an in-memory timestamp, so a failed poll counts and the limit holds mid-outage). Answers with the real outcome of the poll: 200 for complete or partial, 409 when another poll or an action holds the router session, 502 when the login failed or the poll threw; a failed login is also written as a `note` event with reason `login_failed`.',
         security: [{ BearerAuth: [] }],
       },
     },
@@ -178,14 +215,14 @@ export const routerActionRoutes = new Elysia()
       // Checked here as well as inside the executor. The executor being a
       // NullExecutor is what makes this safe; this check is what makes it
       // *legible* — a 403 naming the switch beats a 200 saying nothing happened.
-      if (!routerConfig.writeEnabled) {
+      if (!writesEnabled()) {
         return status(403, {
           error: 'router writes are disabled',
           hint: 'set LINEWATCH_ROUTER_WRITE=1 to enable; it is off by default and independent of the poller',
         })
       }
 
-      return recordAndAnswer('router_reconnect', await getRouterExecutor().reconnect())
+      return runAndRecord('router_reconnect', () => getRouterExecutor().reconnect())
     },
     {
       response: {
@@ -206,14 +243,14 @@ export const routerActionRoutes = new Elysia()
     '/api/router/actions/reboot',
     async ({ headers, status }) => {
       if (!hasValidBearer(headers)) return status(401, 'Unauthorized')
-      if (!routerConfig.writeEnabled) {
+      if (!writesEnabled()) {
         return status(403, {
           error: 'router writes are disabled',
           hint: 'set LINEWATCH_ROUTER_WRITE=1 to enable; it is off by default and independent of the poller',
         })
       }
 
-      return recordAndAnswer('router_reboot', await getRouterExecutor().reboot())
+      return runAndRecord('router_reboot', () => getRouterExecutor().reboot())
     },
     {
       response: {
@@ -225,7 +262,7 @@ export const routerActionRoutes = new Elysia()
         tags: ['Router'],
         summary: 'Reboot the router',
         description:
-          'The destructive rung. Snapshots DEV2_ADT_WAN first — a reboot resets showtime, zeroes every byte counter and empties the host table, which is exactly the evidence that diagnosed the 2026-08-01 incident — then sends the reboot against the device stack `0,0,0,0,0,0`. **This takes the whole LAN down for roughly two minutes**, Tailscale included, so the machine issuing it loses its own route back. The outcome is deliberately three-valued: `executed` when the device acknowledged, `failed` when it rejected the operation (nothing rebooted), and `unknown` when the transport died — which is the expected signature of success and is settled only by the probe record over the following minutes, never by this reply.',
+          'The destructive rung. Snapshots DEV2_ADT_WAN first — a reboot resets showtime, zeroes every byte counter and empties the host table, which is exactly the evidence that diagnosed the 2026-08-01 incident — then sends the reboot against the device stack `0,0,0,0,0,0`. **This takes the whole LAN down for roughly two minutes**, Tailscale included, so the machine issuing it loses its own route back. The outcome is deliberately three-valued: `executed` when the device acknowledged, `failed` only when the device explicitly rejected the operation (nothing rebooted, recorded as a `note`), and `unknown` when the transport died or the answer carried no readable errorcode — the expected signature of success, settled only by the probe record over the following minutes, never by this reply.',
         security: [{ BearerAuth: [] }],
       },
     },

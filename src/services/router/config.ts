@@ -55,6 +55,10 @@ export interface RouterConfig {
    * routes answer 403 and the executor is the one that sends nothing, so a bug
    * anywhere upstream still cannot reach the device.
    *
+   * This is the *request*. Whether the process can write is the executor's
+   * capability (`getRouterExecutor().capability`), which stays `null` when the
+   * poller is off even with this set; routes and `GET /api/router` read that.
+   *
    * A second switch rather than a mode of `enabled` on purpose — the poller
    * being on is not consent to write, and the two are turned on by different
    * people at different times for different reasons.

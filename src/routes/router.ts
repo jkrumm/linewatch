@@ -9,6 +9,7 @@ import {
   resolveRange,
 } from '../services/router/range.js'
 import { routerConfig } from '../services/router/config.js'
+import { getRouterExecutor } from '../services/router/scheduler.js'
 
 /**
  * Router reads. Open like every other read route.
@@ -239,7 +240,7 @@ export const routerRoutes = new Elysia()
       })
       return {
         pollerEnabled: routerConfig.enabled,
-        writeEnabled: routerConfig.writeEnabled,
+        writeEnabled: getRouterExecutor().capability === 'live',
         disabledReason: routerConfig.disabledReason,
         configWarning: routerConfig.configWarning,
         collectorHostIp: routerConfig.collectorHostIp,
@@ -260,7 +261,7 @@ export const routerRoutes = new Elysia()
         writeEnabled: z
           .boolean()
           .describe(
-            'Whether `LINEWATCH_ROUTER_WRITE=1` *and* a password are both present, i.e. whether the two action routes would do anything. Exposed so an automated caller can report "would reconnect, suppressed" truthfully rather than inferring the container\'s capability from its own environment — the watchdog runs natively under launchd and the executor lives in Docker, so the two configurations are genuinely separate.',
+            'Whether this process\'s executor is live, i.e. `LINEWATCH_ROUTER_WRITE=1`, a password *and* a running poller — whether the two action routes would do anything. Exposed so an automated caller can report "would reconnect, suppressed" truthfully rather than inferring the container\'s capability from its own environment — the watchdog runs natively under launchd and the executor lives in Docker, so the two configurations are genuinely separate.',
           ),
         disabledReason: z.string().nullable(),
         configWarning: z.string().nullable(),

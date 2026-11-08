@@ -1,4 +1,10 @@
-import { RouterClient, RouterUnreachableError, type RouterActionIntent } from './client.js'
+import {
+  RouterClient,
+  RouterSessionLostError,
+  RouterUnreachableError,
+  type RouterActionIntent,
+} from './client.js'
+import { runExclusive } from './lock.js'
 import { parseLiveWan, type LiveWan } from './parse.js'
 
 /**
@@ -64,7 +70,12 @@ export interface ActionResult {
    */
   outcome: 'executed' | 'failed' | 'not_executed' | 'refused' | 'unknown'
   /** The operations sent, in order, with what the router answered. */
-  steps: Array<{ oid: string; ok: boolean; errorcode: string | null; httpStatus: number | null }>
+  steps: Array<{
+    oid: string
+    ok: boolean
+    errorcode: string | null
+    httpStatus: number | null
+  }>
   /** The connection state read immediately before acting — the pre-action snapshot. */
   before: LiveWan | null
   detail: string
@@ -140,7 +151,16 @@ export class LiveExecutor implements RouterActionExecutor {
     private readonly sleep: (ms: number) => Promise<void> = (ms) => Bun.sleep(ms),
   ) {}
 
-  async reconnect(): Promise<ActionResult> {
+  /** Serialised against the poller: both log in, and a login evicts the other's session. */
+  reconnect(): Promise<ActionResult> {
+    return runExclusive(() => this.doReconnect())
+  }
+
+  reboot(): Promise<ActionResult> {
+    return runExclusive(() => this.doReboot())
+  }
+
+  private async doReconnect(): Promise<ActionResult> {
     await this.client.startSession()
 
     // The pre-action snapshot is a precondition, not a nicety. It supplies the
@@ -175,7 +195,23 @@ export class LiveExecutor implements RouterActionExecutor {
     const steps: ActionResult['steps'] = []
     for (const [index, intent] of plan.entries()) {
       if (index > 0) await this.sleep(STEP_SPACING_MS)
-      const response = await this.client.sendAction({ intent, stack: wan.stack })
+      let response
+      try {
+        response = await this.client.sendAction({ intent, stack: wan.stack })
+      } catch (error) {
+        // Partial steps are the record: the disconnect may have gone out and the
+        // connect never did, which is a state someone must be able to see. The
+        // failed step has no answer to record, so the detail carries it.
+        const message = error instanceof Error ? error.message : String(error)
+        return {
+          ok: false,
+          capability: 'live',
+          outcome: 'failed',
+          steps,
+          before: wan,
+          detail: `reconnect interrupted at ${intent} after ${steps.length} of ${plan.length} steps (${message})${steps.length > 0 ? ' — the line may be left disconnected' : ''}`,
+        }
+      }
       steps.push({
         oid: response.oid,
         ok: response.ok,
@@ -226,10 +262,13 @@ export class LiveExecutor implements RouterActionExecutor {
    * Those are opposite observations, so:
    *
    * - `errorcode 0` → `executed`, the device acknowledged before going down.
-   * - `errorcode 1` (or any non-zero) → `failed`. Nothing rebooted.
-   * - the transport dying → `unknown`, which is the honest answer and the
-   *   expected signature of success. What actually happened is settled by the
-   *   probe record over the settle window, never by this reply.
+   * - an explicit rejection (HTTP 200 with a non-zero errorcode, e.g. 1) →
+   *   `failed`. Nothing rebooted.
+   * - the transport dying (unreachable, or the session lost under the request),
+   *   or an answer with no readable errorcode or a non-200 status → `unknown`,
+   *   which is the honest answer and the expected signature of success. What
+   *   actually happened is settled by the probe record over the settle window,
+   *   never by this reply.
    *
    * ## Why the stack is a constant here and read fresh in `reconnect`
    *
@@ -245,11 +284,18 @@ export class LiveExecutor implements RouterActionExecutor {
    * byte counter and empties the host table — precisely the evidence that
    * diagnosed the 2026-08-01 incident. Failing to read it means failing to act.
    */
-  async reboot(): Promise<ActionResult> {
+  private async doReboot(): Promise<ActionResult> {
     await this.client.startSession()
 
     const rows = await this.client.read('DEV2_ADT_WAN', 'gl')
-    const wan = parseLiveWan(rows)
+    // Unlike `reconnect`, this needs no stack from the read — the device stack is
+    // a constant — only the snapshot. A read that returned rows succeeded, and
+    // every instance reporting disconnected is the wedged signature this action
+    // exists for, so it must not refuse there: fall back to the first instance.
+    const firstName = rows[0]?.['name']
+    const wan =
+      parseLiveWan(rows) ??
+      (typeof firstName === 'string' ? parseLiveWan(rows, { previousName: firstName }) : null)
     if (wan === null) {
       return this.refused(
         'reboot',
@@ -260,11 +306,14 @@ export class LiveExecutor implements RouterActionExecutor {
 
     let response
     try {
-      response = await this.client.sendAction({ intent: 'reboot', stack: DEVICE_STACK })
+      response = await this.client.sendAction({
+        intent: 'reboot',
+        stack: DEVICE_STACK,
+      })
     } catch (error) {
       // The device stopped answering. For every other operation that is a
       // failure; for this one it is what success looks like from the outside.
-      if (error instanceof RouterUnreachableError) {
+      if (error instanceof RouterUnreachableError || error instanceof RouterSessionLostError) {
         return {
           ok: true,
           capability: 'live',
@@ -281,10 +330,14 @@ export class LiveExecutor implements RouterActionExecutor {
       throw error
     }
 
+    // `failed` is an explicit device rejection only. A missing errorcode or a
+    // non-200 answer says nothing about whether the reboot went through.
+    const rejected = !response.ok && response.httpStatus === 200 && response.errorcode !== null
+    const outcome = response.ok ? 'executed' : rejected ? 'failed' : 'unknown'
     return {
-      ok: response.ok,
+      ok: response.ok || outcome === 'unknown',
       capability: 'live',
-      outcome: response.ok ? 'executed' : 'failed',
+      outcome,
       steps: [
         {
           oid: response.oid,
@@ -296,12 +349,21 @@ export class LiveExecutor implements RouterActionExecutor {
       before: wan,
       detail: response.ok
         ? 'reboot acknowledged (errorcode 0) — the device is going down; expect ~130s before it answers again'
-        : `reboot was rejected by the device (errorcode ${response.errorcode ?? 'none'}, HTTP ${response.httpStatus ?? 'none'}) — nothing rebooted`,
+        : rejected
+          ? `reboot was rejected by the device (errorcode ${response.errorcode}, HTTP 200) — nothing rebooted`
+          : `reboot sent but the answer is unreadable (errorcode ${response.errorcode ?? 'none'}, HTTP ${response.httpStatus ?? 'none'}) — only the probe record can say whether it happened`,
     }
   }
 
   private refused(kind: ActionKind, before: LiveWan | null, detail: string): ActionResult {
     console.warn(`[router] ${kind} refused — ${detail}`)
-    return { ok: false, capability: 'live', outcome: 'refused', steps: [], before, detail }
+    return {
+      ok: false,
+      capability: 'live',
+      outcome: 'refused',
+      steps: [],
+      before,
+      detail,
+    }
   }
 }

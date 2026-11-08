@@ -3,7 +3,8 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { LiveExecutor, NullExecutor } from './actions.js'
-import { RouterUnreachableError } from './client.js'
+import { RouterSessionLostError, RouterUnreachableError } from './client.js'
+import { isRouterBusy, runExclusive } from './lock.js'
 import type { RouterActionIntent, RouterActionResponse } from './client.js'
 import { ADT_WAN_ROWS } from './fixtures.js'
 import { redactRow } from './redact.js'
@@ -51,6 +52,29 @@ const asClient = (fake: FakeClient) =>
   fake as unknown as ConstructorParameters<typeof LiveExecutor>[0]
 const executor = (fake: FakeClient) => new LiveExecutor(asClient(fake), () => Promise.resolve())
 
+const DESTRUCTIVE = /ACT[A-Z_]*(FACTORY|RESET|RESTORE|DEFAULT|UPGRADE|FIRMWARE)/i
+
+/** Blanks comments, keeping line numbers. Naive on purpose: `//` inside a string only hides the rest of that line. */
+function stripComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, (match) => match.replace(/[^\n]/g, ' '))
+    .split('\n')
+    .map((line) => line.replace(/(^|\s)\/\/.*$/, ''))
+    .join('\n')
+}
+
+function destructiveNameOffenders(name: string, source: string): string[] {
+  const quoted = new RegExp(`['"\`]\\s*${DESTRUCTIVE.source}`, 'i')
+  const rawLines = source.split('\n')
+  const offenders: string[] = []
+  for (const [index, code] of stripComments(source).split('\n').entries()) {
+    if (quoted.test(rawLines[index] ?? '') || DESTRUCTIVE.test(code)) {
+      offenders.push(`${name}:${index + 1}: ${(rawLines[index] ?? '').trim()}`)
+    }
+  }
+  return offenders
+}
+
 describe('the write whitelist', () => {
   /**
    * The rule this enforces is not a style preference. `/js/gdprProxy.js` routes
@@ -62,20 +86,30 @@ describe('the write whitelist', () => {
    * ones in the router's own JavaScript — one careless paste away.
    */
   it('contains no destructive operation name anywhere in the router module', () => {
-    // Quoted forms only. An unquoted identifier in prose cannot be sent — and
-    // this file's own commentary names the dangerous constants deliberately, so
-    // a regex over bare words would fail on the documentation that explains why
-    // the regex exists. What can be sent is a string literal.
-    const dangerous = /['"`]ACT[A-Z_]*(FACTORY|RESET|RESTORE|DEFAULT|UPGRADE|FIRMWARE)/i
+    // Two nets. Any single-, double- or backtick-quoted literal (whitespace after
+    // the quote included) is caught anywhere, comments too, because this module's
+    // own commentary deliberately names the constants unquoted. And the names are
+    // caught bare once comments are stripped, so concatenation, an object key or
+    // a template fragment cannot slip through the quote rule.
     const offenders: string[] = []
     for (const name of readdirSync(moduleDir)) {
       if (!name.endsWith('.ts') || name === THIS_FILE) continue
       const source = readFileSync(join(moduleDir, name), 'utf-8')
-      for (const [index, line] of source.split('\n').entries()) {
-        if (dangerous.test(line)) offenders.push(`${name}:${index + 1}: ${line.trim()}`)
-      }
+      offenders.push(...destructiveNameOffenders(name, source))
     }
     expect(offenders).toEqual([])
+  })
+
+  it('the destructive-name check catches every literal form', () => {
+    const catches = (code: string) => destructiveNameOffenders('probe.ts', code).length > 0
+    expect(catches("const a = 'ACT_FACTORY_RESET'")).toBe(true)
+    expect(catches('const a = "ACT_FACTORY_RESET"')).toBe(true)
+    expect(catches('const a = `ACT_FACTORY_RESET`')).toBe(true)
+    expect(catches('const a = `${x}ACT_RESET_ALL`')).toBe(true)
+    expect(catches("const a = 'ACT_' + 'FACTORY'")).toBe(false)
+    expect(catches('const k = { ACT_OP_FACTORY_RESET: 1 }')).toBe(true)
+    expect(catches('// the constant ACT_OP_FACTORY_RESET is named in prose')).toBe(false)
+    expect(catches("const a = 'ACT_REBOOT'")).toBe(false)
   })
 
   /**
@@ -85,7 +119,11 @@ describe('the write whitelist', () => {
    */
   it('sends exactly four operations, and they are these four', () => {
     const source = readFileSync(join(moduleDir, 'client.ts'), 'utf-8')
-    const found = new Set(source.match(/'ACT_[A-Z_]+'/g)?.map((match) => match.slice(1, -1)) ?? [])
+    const found = new Set(
+      stripComments(source)
+        .match(/['"`]ACT_[A-Z_]+['"`]/g)
+        ?.map((match) => match.slice(1, -1)) ?? [],
+    )
     // Wire values, not the firmware's identifier names for them: the device's
     // own gdprProxy.js declares `var ACT_OP_PPP_CONN = "ACT_PPP_CONN"`, and
     // sending the identifier gets HTTP 200 with errorcode 1.
@@ -236,6 +274,39 @@ describe('LiveExecutor.reboot', () => {
     expect(fake.sent).toEqual([])
   })
 
+  it('reboots when every WAN instance reports disconnected — the wedged signature', async () => {
+    const wedged = ADT_WAN_ROWS.map((row) => ({
+      ...row,
+      connStatusV4: 'Disconnected',
+      connStatusV6: 'Disconnected',
+    }))
+    const fake = new FakeClient(wedged)
+    const result = await executor(fake).reboot()
+    expect(result.outcome).toBe('executed')
+    expect(result.before).not.toBeNull()
+    expect(fake.sent).toEqual([{ intent: 'reboot', stack: '0,0,0,0,0,0' }])
+  })
+
+  it('reads a transport that died as a lost session as unknown, not failed', async () => {
+    const fake = new FakeClient(ADT_WAN_ROWS, () => {
+      throw new RouterSessionLostError('socket closed under the request')
+    })
+    const result = await executor(fake).reboot()
+    expect(result.outcome).toBe('unknown')
+  })
+
+  it('reads an answer with no errorcode as unknown, not failed', async () => {
+    const fake = new FakeClient(ADT_WAN_ROWS, () => ({
+      ok: false,
+      errorcode: null,
+      httpStatus: 200,
+      oid: 'X',
+    }))
+    const result = await executor(fake).reboot()
+    expect(result.outcome).toBe('unknown')
+    expect(result.steps).toHaveLength(1)
+  })
+
   it('reads a rejected operation as a failure, because nothing rebooted', async () => {
     // The wrong-name signature, and the reason this is shippable: the device
     // validates the operation before acting on it.
@@ -271,5 +342,59 @@ describe('LiveExecutor.reboot', () => {
       throw new Error('TLS handshake failed')
     })
     await expect(executor(fake).reboot()).rejects.toThrow('TLS handshake')
+  })
+})
+
+describe('LiveExecutor.reconnect partial failure', () => {
+  it('returns the steps already sent when the connect throws', async () => {
+    let calls = 0
+    const fake = new FakeClient(ADT_WAN_ROWS, (intent) => {
+      calls += 1
+      if (calls === 2) throw new RouterUnreachableError('socket closed')
+      return { ok: true, errorcode: '0', httpStatus: 200, oid: `OID_FOR_${intent}` }
+    })
+    const result = await executor(fake).reconnect()
+    expect(result.outcome).toBe('failed')
+    expect(result.steps).toHaveLength(1)
+    expect(result.steps[0]?.ok).toBe(true)
+    expect(result.detail).toContain('left disconnected')
+  })
+})
+
+describe('the router lock', () => {
+  it('keeps an action and a poll from interleaving', async () => {
+    const order: string[] = []
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const fake = new FakeClient(ADT_WAN_ROWS, (intent) => {
+      order.push(`send:${intent}`)
+      return { ok: true, errorcode: '0', httpStatus: 200, oid: 'X' }
+    })
+    const slow = {
+      startSession: async () => {
+        order.push('action:start')
+        await gate
+      },
+      read: fake.read.bind(fake),
+      sendAction: async (input: { intent: RouterActionIntent; stack: string }) => {
+        const response = await fake.sendAction(input)
+        order.push('action:end')
+        return response
+      },
+    }
+    const action = executor(slow as unknown as FakeClient).reconnect()
+    const poll = runExclusive(async () => {
+      order.push('poll')
+    })
+    await Bun.sleep(5)
+    expect(isRouterBusy()).toBe(true)
+    expect(order).toEqual(['action:start'])
+    release()
+    await Promise.all([action, poll])
+    expect(order.at(-1)).toBe('poll')
+    expect(order.indexOf('action:end')).toBeLessThan(order.indexOf('poll'))
+    expect(isRouterBusy()).toBe(false)
   })
 })

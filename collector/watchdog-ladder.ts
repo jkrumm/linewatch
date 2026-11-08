@@ -460,7 +460,11 @@ export function classify(input: LadderInput): OutageClass {
       return 'carrier_down'
     }
     const health = v6Health(input)
-    if (self?.v6 != null && (self.v6.received ?? 0) > 0) return 'v4_only_down'
+    // A v6 anchor that was probed but produced no summary is unmeasured, not
+    // down: it must not promote the class to full_wan_down.
+    const v6Received = self?.v6?.received
+    if (self?.v6 != null && v6Received === null) return 'wan_down_v6_unknown'
+    if (v6Received != null && v6Received > 0) return 'v4_only_down'
     if (health !== 'usable') return 'wan_down_v6_unknown'
     return 'full_wan_down'
   }

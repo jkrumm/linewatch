@@ -146,6 +146,15 @@ describe('classify', () => {
     expect(classify(input)).toBe('wan_down_v6_unknown')
   })
 
+  test('an unmeasured v6 anchor is unknown, not a v6 outage', () => {
+    const now = T0 + 250_000
+    const input = armedInput({
+      self: self({ wanAnchors: ALL_WAN_DOWN, v6: { target: 'v6', received: null } }),
+      ledger: ledger({ v6: { lastUpTs: now - 60_000, lastCheckedTs: now } }),
+    })
+    expect(classify(input)).toBe('wan_down_v6_unknown')
+  })
+
   test('a v6 baseline older than a day is no longer a baseline', () => {
     const now = T0 + 250_000
     const input = armedInput({

@@ -122,6 +122,36 @@ describe('spool', () => {
     expect(p.seen).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
   })
 
+  test('submit goes live on an empty spool without posting anything', async () => {
+    const p = poster(() => ({ ok: true }))
+    const spool = createSpool<Entry>({ path, post: p.post })
+    expect(await spool.submit({ ts: 1 })).toBe('live')
+    expect(p.seen).toEqual([])
+    expect(lines(path)).toEqual([])
+  })
+
+  test('submit queues the fresh entry behind a backlog the cap left on disk', async () => {
+    const p = poster(() => ({ ok: true }))
+    const spool = createSpool<Entry>({ path, post: p.post, replayCap: 3 })
+    for (let ts = 1; ts <= 8; ts++) spool.append({ ts })
+    expect(await spool.submit({ ts: 9 })).toBe('replay_backlog')
+    expect(p.seen).toEqual([1, 2, 3])
+    expect(lines(path).map((l) => (JSON.parse(l) as Entry).ts)).toEqual([4, 5, 6, 7, 8, 9])
+    // The backlog drains in order and the entry is only live once it is gone.
+    expect(await spool.submit({ ts: 10 })).toBe('replay_backlog')
+    expect(await spool.submit({ ts: 11 })).toBe('replay_backlog')
+    expect(await spool.submit({ ts: 12 })).toBe('live')
+    expect(p.seen).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
+  })
+
+  test('submit spools the entry when the replay fails', async () => {
+    const p = poster(() => ({ ok: false, status: 503 }))
+    const spool = createSpool<Entry>({ path, post: p.post })
+    spool.append({ ts: 1 })
+    expect(await spool.submit({ ts: 2 })).toBe('replay_failed')
+    expect(lines(path)).toEqual(['{"ts":1}', '{"ts":2}'])
+  })
+
   test('the default cap is ~200', () => {
     expect(REPLAY_PER_CYCLE).toBe(200)
   })

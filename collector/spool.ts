@@ -75,7 +75,17 @@ export interface Spool<T> {
   append(entry: T): boolean
   replay(): Promise<ReplayResult>
   depth(): number
+  /**
+   * Route a fresh entry relative to the backlog. Replays first; the entry may go
+   * out live only when nothing older is left on disk. Otherwise it is appended
+   * behind the backlog, because the API's outage detector skips any cycle at or
+   * before an open outage's last ts — posting the newest cycle ahead of older
+   * ones would drop them and start the outage late.
+   */
+  submit(entry: T): Promise<SubmitRoute>
 }
+
+export type SubmitRoute = 'live' | 'replay_failed' | 'replay_backlog'
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -130,8 +140,22 @@ export function createSpool<T>(options: SpoolOptions<T>): Spool<T> {
     appendFileSync(rejectedPath, lines.map((line) => `${line}\n`).join(''))
   }
 
-  return {
+  const self: Spool<T> = {
     depth: () => lineCount,
+
+    async submit(entry) {
+      if (lineCount === 0) return 'live'
+      const replay = await self.replay()
+      if (replay.failed) {
+        self.append(entry)
+        return 'replay_failed'
+      }
+      if (lineCount > 0) {
+        self.append(entry)
+        return 'replay_backlog'
+      }
+      return 'live'
+    },
 
     append(entry) {
       if (lineCount >= maxLines) {
@@ -188,4 +212,5 @@ export function createSpool<T>(options: SpoolOptions<T>): Spool<T> {
       return { failed, replayed, quarantined: quarantined.length, remaining: lineCount }
     },
   }
+  return self
 }

@@ -478,21 +478,18 @@ async function processCycle(batch: Batch): Promise<void> {
     return
   }
 
-  // Bounded and tolerant (collector/spool.ts): a capped replay that did not
-  // fail is not a reason to spool this cycle — the rest drains on later ones.
-  if (spool.depth() > 0) {
-    const replay = await spool.replay()
-    if (replay.failed) {
-      spool.append(batch)
-      log('cycle', {
-        ts: batch.ts,
-        status: 'spooled',
-        reason: 'replay_failed',
-        spoolDepth: spool.depth(),
-        ...vantageFields(batch),
-      })
-      return
-    }
+  // Bounded and tolerant (collector/spool.ts): the cycle goes out live only when
+  // no older cycle is left on disk, so the API always sees them in order.
+  const route = await spool.submit(batch)
+  if (route !== 'live') {
+    log('cycle', {
+      ts: batch.ts,
+      status: 'spooled',
+      reason: route,
+      spoolDepth: spool.depth(),
+      ...vantageFields(batch),
+    })
+    return
   }
 
   const posted = await postBatch(batch)

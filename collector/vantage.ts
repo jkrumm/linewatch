@@ -511,6 +511,12 @@ export interface CaptureVantageOptions {
   timeoutMs?: number
   /** Structured logging hook (probe.ts passes its own `log`). */
   report?: (event: string, fields?: Record<string, unknown>) => void
+  /**
+   * Command runner: argv in, stdout out (`''` on failure). Defaults to a timed
+   * `Bun.spawn`; tests inject a fake so they depend on neither the host's
+   * network state, its PATH, nor executing a script from the tmpdir.
+   */
+  run?: (args: string[]) => Promise<string>
 }
 
 /** Every field unknown. The shape a cycle reports when it looked and found no path. */
@@ -551,7 +557,8 @@ const NO_PATH: Vantage = {
 export async function captureVantage(options: CaptureVantageOptions): Promise<Vantage> {
   const timeoutMs = options.timeoutMs ?? 2000
   const report = options.report ?? (() => {})
-  const run = (args: string[]): Promise<string> => runCommand(args, timeoutMs, report)
+  const run =
+    options.run ?? ((args: string[]): Promise<string> => runCommand(args, timeoutMs, report))
 
   const route = parseDefaultRoute(await run(['route', '-n', 'get', 'default']))
   if (route.iface === null) {

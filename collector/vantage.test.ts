@@ -1,8 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import {
+  captureVantage,
   classifyHardwarePort,
   classifyPath,
   deriveOnHomeLine,
@@ -704,55 +702,27 @@ describe('deriveOnHomeLine', () => {
 
 describe('captureVantage', () => {
   /**
-   * Runs the real `captureVantage` in a child process whose PATH puts a stub
-   * `route` ahead of `/sbin/route`. `captureVantage` shells out, so the
-   * link-down branch cannot be reached by feeding it a fixture — the only
-   * honest exercise is to make `route` behave the way it does when the host has
-   * no default route.
-   *
-   * A child process rather than mutating this one's PATH, because Bun.spawn
-   * resolves the binary against the PATH it captured at startup and ignores a
-   * later `process.env['PATH'] = …` unless `env` is passed explicitly (measured
-   * — the in-process version of this test silently ran `/sbin/route` and
-   * "passed" against live network state). The production code is therefore run
-   * untouched, with a PATH that genuinely contains the stub.
+   * Runs the real `captureVantage` with an injected command runner that answers
+   * `route` with the canned output, `networksetup` with the fixture service
+   * order and everything else with nothing. The link-down branch cannot be reached by feeding a parser a fixture, and
+   * shadowing `/sbin/route` through PATH made the test depend on `bun` being on
+   * PATH and on executing a script from the tmpdir — neither holds in a sandboxed
+   * sweep, where the real `route` then answered instead of the stub.
    */
   async function withStubbedRoute(stdout: string, exitCode: number): Promise<Vantage> {
-    const dir = mkdtempSync(join(tmpdir(), 'linewatch-vantage-'))
-    try {
-      // The canned output goes in a file the stub cats, rather than inline in
-      // the script: `printf '%s'` does not expand the `\n` escapes that come
-      // back from JSON.stringify, which collapsed these multi-line fixtures onto
-      // one line and made the stub look like a host with no default route.
-      writeFileSync(join(dir, 'route.out'), stdout)
-      writeFileSync(
-        join(dir, 'route'),
-        `#!/bin/sh\ncat ${JSON.stringify(join(dir, 'route.out'))}\nexit ${exitCode}\n`,
-      )
-      chmodSync(join(dir, 'route'), 0o755)
-      const script = join(dir, 'capture.ts')
-      writeFileSync(
-        script,
-        `import { captureVantage } from ${JSON.stringify(join(import.meta.dir, 'vantage.ts'))}\n` +
-          `console.log(JSON.stringify(await captureVantage({ expectedGateway: '192.168.1.1', timeoutMs: 5000 })))\n`,
-      )
-      const proc = Bun.spawn(['bun', 'run', script], {
-        stdout: 'pipe',
-        stderr: 'ignore',
-        env: { ...process.env, PATH: `${dir}:${process.env['PATH'] ?? ''}` },
-      })
-      const out = await new Response(proc.stdout).text()
-      await proc.exited
-      return JSON.parse(out) as Vantage
-    } finally {
-      rmSync(dir, { recursive: true, force: true })
-    }
+    return captureVantage({
+      expectedGateway: '192.168.1.1',
+      run: async (args) => {
+        if (args[0] === 'route') return exitCode === 0 ? stdout : ''
+        return args[0] === 'networksetup' ? SERVICE_ORDER : ''
+      },
+    })
   }
 
-  test('the stub really does shadow the system route', async () => {
-    // Guards the guard. If PATH injection stopped working, every assertion
-    // below would quietly measure this host's live network instead, and the
-    // link-down test would fail for the right reason only by accident.
+  test('the injected runner replaces the system route', async () => {
+    // Guards the guard. If the runner were ignored, every assertion below would
+    // quietly measure this host's live network instead, and the link-down test
+    // would pass for the wrong reason.
     const vantage = await withStubbedRoute(ROUTE_DEFAULT.replace('192.168.1.1', '198.51.100.1'), 0)
     expect(vantage.gatewayAddr).toBe('198.51.100.1')
     expect(vantage.onHomeLine).toBe(0)

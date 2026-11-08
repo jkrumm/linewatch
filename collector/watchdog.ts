@@ -11,9 +11,12 @@
  * 1. **The write-ahead is durable before the action leaves the process.**
  *    `decide()` returns the ledger with a `pending` entry already in it; that
  *    is fsynced, *then* the executor is called, *then* `recordOutcome` closes
- *    it. A crash in the middle is reconciled on the next boot as having fired.
- *    The deliberate inverse of the probe spool: a probe batch is idempotent, a
- *    router reboot is not.
+ *    it. A crash in the middle leaves `pending` on disk; `decide()` holds the
+ *    ladder in `settling` while it is inside its settle window and, once the
+ *    window has passed, folds it into the history as `unknown` (counted as
+ *    fired for the latch, never read as success or failure). The deliberate
+ *    inverse of the probe spool: a probe batch is idempotent, a router reboot
+ *    is not.
  *
  * 2. **Two spools, because they drain over different networks.** Events go to
  *    localhost, which is usually up during a WAN outage. Notifications go to
@@ -268,20 +271,29 @@ async function ping(addr: string, name: string, v6: boolean): Promise<AnchorStat
     String(config.pingCount),
     '-i',
     String(config.pingIntervalSeconds),
+    // Without `-W`, macOS `ping` waits its 10 s MAXWAIT on total loss, which
+    // stretches the tick during exactly the outage being confirmed. `ping6`
+    // takes `-W` as a bare flag (no argument), so it is v4 only.
+    ...(v6 ? [] : ['-W', '1000']),
     addr,
   ]
   try {
     const { stdout, timedOut } = await spawnBounded(args, config.pingTimeoutMs)
-    // A killed ping is a failed probe, not a partial reading.
+    // A killed ping produced no summary: unmeasured, not loss.
     if (timedOut) {
       log('ping.timeout', { target: name, timeoutMs: config.pingTimeoutMs })
-      return { target: name, received: 0 }
+      return { target: name, received: null }
     }
-    // 100% loss exits non-zero and prints no round-trip summary. That is a
-    // valid measurement, not an error, so the exit code is never consulted.
+    // 100% loss exits non-zero and prints no round-trip line but does print the
+    // packets summary. That is a valid measurement, not an error, so the exit
+    // code is never consulted. Only "no summary at all" is unmeasured.
     return { target: name, received: parsePingOutput(stdout).received }
-  } catch {
-    return { target: name, received: 0 }
+  } catch (error) {
+    log('ping.unmeasured', {
+      target: name,
+      error: error instanceof Error ? error.message : String(error),
+    })
+    return { target: name, received: null }
   }
 }
 
@@ -424,10 +436,18 @@ function appendSpool(path: string, line: unknown, maxLines: number): boolean {
 
 function readSpool<T>(path: string): T[] {
   if (!existsSync(path)) return []
-  return readFileSync(path, 'utf-8')
-    .split('\n')
-    .filter((line) => line.trim() !== '')
-    .map((line) => JSON.parse(line) as T)
+  const entries: T[] = []
+  let skipped = 0
+  for (const line of readFileSync(path, 'utf-8').split('\n')) {
+    if (line.trim() === '') continue
+    try {
+      entries.push(JSON.parse(line) as T)
+    } catch {
+      skipped += 1
+    }
+  }
+  if (skipped > 0) log('spool.unparseable', { path, skipped })
+  return entries
 }
 
 function rewriteSpool(path: string, lines: unknown[]): void {
@@ -698,6 +718,7 @@ async function tick(): Promise<void> {
     self,
     carrier: router.carrier,
     ledger: loaded.ledger,
+    trusted: loaded.trusted,
     processStartedAt,
     disarmed: isDisarmed(config.disarmPath),
     // The capability the *executor* actually has, read from the container
@@ -729,7 +750,9 @@ async function tick(): Promise<void> {
 
   // Write-ahead: on the disk, fsynced, before anything can be performed.
   let ledger = outcome.ledger
-  writeLedger(ledger, config.ledgerPath)
+  // An untrusted ledger is never overwritten: the empty placeholder would read
+  // as a trusted, full-budget ledger on the next tick.
+  if (outcome.persist) writeLedger(ledger, config.ledgerPath)
 
   if (outcome.action === 'reconnect' || outcome.action === 'reboot') {
     const answer = await perform(outcome.action)
@@ -764,7 +787,12 @@ async function tick(): Promise<void> {
   }
 
   reportIfChanged(outcome, now)
-  await notify(outcome, ledger, now, outcome.action === 'escalate' || outcome.state === 'latched')
+  await notify(
+    outcome,
+    ledger,
+    now,
+    outcome.action === 'escalate' || outcome.state === 'latched' || outcome.state === 'untrusted',
+  )
   await drainEvents()
 }
 
@@ -882,6 +910,7 @@ async function main(): Promise<void> {
   }
 
   for (;;) {
+    const tickStartedAt = Date.now()
     const deadline = setTimeout(() => void abandonHungTick(), config.tickDeadlineMs)
     try {
       await tick()
@@ -892,7 +921,7 @@ async function main(): Promise<void> {
     } finally {
       clearTimeout(deadline)
     }
-    await Bun.sleep(policy.tickMs)
+    await Bun.sleep(Math.max(0, policy.tickMs - (Date.now() - tickStartedAt)))
   }
 }
 

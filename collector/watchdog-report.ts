@@ -89,15 +89,20 @@ export interface NotificationSubject {
  *
  * Down means **the watchdog has stopped being able to help**, not that the line
  * is bad — the line has its own monitor, and that one is silence-means-down.
- * Only two things qualify: it has latched itself out of service, or it has run
- * out of ladder and is asking for a human. A blocked rung is normal operation
+ * Only three things qualify: it has latched itself out of service, its ledger is
+ * unreadable (so it has stood itself down), or it has run out of ladder and is
+ * asking for a human. A blocked rung is normal operation
  * and stays up; so does every shadow-mode evaluation, or two weeks of shadow
  * running would page continuously.
  */
 export function notificationStatus(
   subject: Pick<NotificationSubject, 'state' | 'action'>,
 ): 'up' | 'down' {
-  return subject.state === 'latched' || subject.action === 'escalate' ? 'down' : 'up'
+  return subject.state === 'latched' ||
+    subject.state === 'untrusted' ||
+    subject.action === 'escalate'
+    ? 'down'
+    : 'up'
 }
 
 /** Kuma truncates long messages, so the state and the class lead and the prose follows. */

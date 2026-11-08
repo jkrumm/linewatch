@@ -101,6 +101,7 @@ function armedInput(over: Partial<LadderInput> = {}): LadderInput {
     self: self({ probeTs: now, wanAnchors: ALL_WAN_DOWN, v6: { target: 'v6', received: 0 } }),
     carrier: null,
     ledger: ledger({ v6: { lastUpTs: now - 60_000, lastCheckedTs: now } }),
+    trusted: true,
     processStartedAt: now - 3_600_000,
     disarmed: false,
     capability: 'live',
@@ -310,7 +311,9 @@ describe('decide', () => {
   test('a pending action is treated as having fired', () => {
     const decision = decide(
       armedInput({
-        ledger: ledger({ pending: { ts: T0, kind: 'reconnect', outageKey: 'wan:1' } }),
+        ledger: ledger({
+          pending: { ts: T0 + 240_000, kind: 'reconnect', outageKey: 'wan:1' },
+        }),
       }),
     )
     expect(decision.state).toBe('settling')
@@ -889,6 +892,83 @@ describe('the ledger the decision writes', () => {
     expect(out.ledger.pending).toEqual(pending)
     expect(out.ledger.consecutiveActions).toBe(1)
     expect(out.ledger.ladder.t0).toBeNull()
+  })
+
+  test('an untrusted ledger is never acted on or written, and reports down', () => {
+    const out = decide(armedInput({ trusted: false, heldTicks: 8, ledger: ledger() }))
+    expect(out.state).toBe('untrusted')
+    expect(out.action).toBe('none')
+    expect(out.blockedBy).toEqual(['ledger_untrusted'])
+    expect(out.persist).toBe(false)
+    expect(out.ledger.pending).toBeNull()
+  })
+
+  test('a trusted ledger is persisted', () => {
+    expect(decide(armedInput()).persist).toBe(true)
+  })
+
+  test('a pending action inside its settle window is still settling', () => {
+    const now = T0 + 250_000
+    const pending = {
+      ts: now - 10_000,
+      kind: 'reconnect' as const,
+      outageKey: `wan:${T0}`,
+    }
+    const out = decide(armedInput({ now, ledger: ledger({ pending, consecutiveActions: 1 }) }))
+    expect(out.state).toBe('settling')
+    expect(out.ledger.pending).toEqual(pending)
+  })
+
+  test('a pending action past its settle window is folded in as unknown', () => {
+    const now = T0 + 250_000
+    const pending = {
+      ts: now - 3_600_000,
+      kind: 'reboot' as const,
+      outageKey: `wan:${T0}`,
+    }
+    const out = decide(
+      armedInput({
+        now,
+        heldTicks: 1,
+        ledger: ledger({ pending, consecutiveActions: 1 }),
+      }),
+    )
+    expect(out.state).toBe('suspect')
+    expect(out.blockedBy).not.toContain('action_pending')
+    expect(out.ledger.pending).toBeNull()
+    expect(out.ledger.actions).toContainEqual({
+      ...pending,
+      outcome: 'unknown',
+    })
+    // Counted at the attempt already; folding must not give it back or add one.
+    expect(out.ledger.consecutiveActions).toBe(1)
+  })
+
+  test('an unmeasured self probe is unknown, never loss and never a recovery', () => {
+    const unmeasured = [
+      { target: 'cloudflare', received: null },
+      { target: 'google', received: null },
+      { target: 'quad9', received: null },
+    ]
+    const input = armedInput({
+      record: null,
+      self: self({
+        wanAnchors: unmeasured,
+        v6: { target: 'v6', received: null },
+      }),
+    })
+    expect(classify(input)).toBe('no_evidence')
+    expect(decide(input).action).toBe('none')
+
+    const gatewayUnmeasured = armedInput({
+      self: self({
+        gateway: { target: 'gateway', received: null },
+        wanAnchors: ALL_WAN_DOWN,
+      }),
+    })
+    expect(classify(gatewayUnmeasured)).not.toBe('local_link_down')
+    expect(decide(gatewayUnmeasured).blockedBy).toContain('self_unmeasured')
+    expect(decide(gatewayUnmeasured).action).toBe('none')
   })
 
   test('the v6 baseline is folded in after classification, never before', () => {

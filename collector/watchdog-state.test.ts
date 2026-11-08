@@ -90,7 +90,7 @@ describe('the ledger on disk', () => {
     expect(readLedger(path).trusted).toBe(false)
   })
 
-  test('a valid ledger survives being written over an untrusted one', () => {
+  test("writeLedger replaces whatever is at the path; skipping the write is decide()'s job", () => {
     const path = join(scratch(), 'state.json')
     writeFileSync(path, 'garbage')
     writeLedger({ ...emptyLedger(), consecutiveActions: 1 }, path)

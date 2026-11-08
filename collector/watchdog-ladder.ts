@@ -77,6 +77,8 @@ export type WatchdogState =
   | 'recovering'
   | 'recovered'
   | 'latched'
+  /** The ledger could not be read: budgets unknown, nothing may be acted on or written. */
+  | 'untrusted'
 
 export type ActionKind = 'none' | 'reconnect' | 'reboot' | 'announce' | 'escalate'
 
@@ -210,8 +212,12 @@ export type V6Health = 'usable' | 'unusable' | 'unconfigured'
 
 export interface AnchorState {
   target: string
-  /** Replies received. 0 is down; the count is kept because partial loss is not an outage. */
-  received: number
+  /**
+   * Replies received. 0 is down; the count is kept because partial loss is not an outage.
+   * Null is **unmeasured** — `ping` produced no summary at all (spawn error, killed,
+   * missing binary). It is neither up nor down and never reads as loss.
+   */
+  received: number | null
 }
 
 /**
@@ -286,7 +292,11 @@ export interface Ledger {
     announcedAt: number | null
   }
   actions: LedgerAction[]
-  pending: { ts: number; kind: 'reconnect' | 'reboot'; outageKey: string } | null
+  pending: {
+    ts: number
+    kind: 'reconnect' | 'reboot'
+    outageKey: string
+  } | null
   v6: { lastUpTs: number | null; lastCheckedTs: number | null }
   postActionCooldownUntil: number | null
   lastEscalationTs: number | null
@@ -303,6 +313,12 @@ export interface LadderInput {
   self: SelfEvidence | null
   carrier: CarrierEvidence | null
   ledger: Ledger
+  /**
+   * False when the ledger file existed and could not be understood. `ledger` is then
+   * a placeholder: its budgets are unknown, not empty, so `decide()` takes no action
+   * and returns a ledger the runner must not persist.
+   */
+  trusted: boolean
   /** When this process started. Nothing may be acted on from before it was watching. */
   processStartedAt: number
   /** `~/.config/linewatch/watchdog-disarmed` exists. */
@@ -335,6 +351,8 @@ export interface LadderInput {
  */
 export interface LadderOutcome extends LadderDecision {
   ledger: Ledger
+  /** False when `ledger` must not be written — an untrusted ledger is never overwritten. */
+  persist: boolean
 }
 
 export interface LadderDecision {
@@ -360,6 +378,19 @@ export interface LadderDecision {
 
 const DAY_MS = 86_400_000
 
+/**
+ * The watchdog's own probe with every unmeasured anchor removed from play. A self
+ * reading with any hole in it is not evidence of anything, so it is dropped whole
+ * and the classification falls back to the record (or to `no_evidence`) rather than
+ * reading a broken `ping` binary as an outage — or as a recovery.
+ */
+function measuredSelf(self: SelfEvidence | null): SelfEvidence | null {
+  if (self === null) return null
+  if (self.gateway.received === null) return null
+  if (self.wanAnchors.some((anchor) => anchor.received === null)) return null
+  return self
+}
+
 function anchorsAllDown(anchors: readonly AnchorState[]): boolean {
   return anchors.length > 0 && anchors.every((anchor) => anchor.received === 0)
 }
@@ -384,7 +415,8 @@ export function v6Health(input: Pick<LadderInput, 'now' | 'policy' | 'self' | 'l
  * anchor with it and naming the WAN would point at the wrong hop.
  */
 export function classify(input: LadderInput): OutageClass {
-  const { record, self, policy, now } = input
+  const { record, policy, now } = input
+  const self = measuredSelf(input.self)
 
   const recordFresh = record !== null && now - record.newestSampleTs <= policy.staleSampleS * 1000
   const usableRecord = recordFresh ? record : null
@@ -428,7 +460,7 @@ export function classify(input: LadderInput): OutageClass {
       return 'carrier_down'
     }
     const health = v6Health(input)
-    if (self?.v6 != null && self.v6.received > 0) return 'v4_only_down'
+    if (self?.v6 != null && (self.v6.received ?? 0) > 0) return 'v4_only_down'
     if (health !== 'usable') return 'wan_down_v6_unknown'
     return 'full_wan_down'
   }
@@ -516,13 +548,15 @@ function lastActionTs(ledger: Ledger, kind: 'reconnect' | 'reboot'): number | nu
  * demand, and the fresh-poll requirement on the reboot rung.
  */
 function sharedBlockers(input: LadderInput, outageClass: OutageClass): string[] {
-  const { policy, ledger, now, record, self } = input
+  const { policy, ledger, now, record } = input
+  const self = measuredSelf(input.self)
   const blocked: string[] = []
 
   if (input.disarmed) blocked.push('disarmed_file')
   if (!policy.armed) blocked.push('not_armed')
   if (ledger.consecutiveActions >= policy.latchAfterActions) blocked.push('latched')
 
+  if (input.self !== null && self === null) blocked.push('self_unmeasured')
   if (self === null || self.onHomeLine !== 1) blocked.push('off_home_line')
   if (record !== null && record.onHomeLine !== true) blocked.push('off_home_line_record')
   if (self !== null && self.gateway.received === 0) blocked.push('gateway_down')
@@ -969,7 +1003,7 @@ function advance(input: LadderInput, decision: LadderDecision): Ledger {
   // reads `lastUpTs` to tell "IPv6 is down" from "IPv6 was never deployed here",
   // and folding this tick's reading in first would let a v6 anchor vouch for
   // itself.
-  if (input.self?.v6 != null) {
+  if (input.self?.v6 != null && input.self.v6.received !== null) {
     next.v6.lastCheckedTs = input.self.probeTs
     if (input.self.v6.received > 0) next.v6.lastUpTs = input.self.probeTs
   }
@@ -1057,10 +1091,61 @@ function advance(input: LadderInput, decision: LadderDecision): Ledger {
  * The judgement and the ledger it implies, together. Total, deterministic, and
  * it never throws.
  */
-export function decide(input: LadderInput): LadderOutcome {
+export function decide(rawInput: LadderInput): LadderOutcome {
+  if (!rawInput.trusted) return untrustedOutcome(rawInput)
+  const input = foldStalePending(rawInput)
   const outageClass = classify(input)
   const decision = evaluate(input, outageClass)
-  return { ...decision, ledger: advance(input, decision) }
+  return { ...decision, ledger: advance(input, decision), persist: true }
+}
+
+/**
+ * An unreadable ledger has unknown budgets and an unknown latch, so nothing may
+ * be acted on *and* nothing may be written: the empty placeholder, once on disk,
+ * reads as a trusted ledger with a full reboot budget and no latch on the next
+ * tick. `down` reaches the watchdog's own monitor via `notificationStatus`.
+ */
+function untrustedOutcome(input: LadderInput): LadderOutcome {
+  return {
+    state: 'untrusted',
+    outageClass: classify(input),
+    action: 'none',
+    shadow: false,
+    blockedBy: ['ledger_untrusted'],
+    t0: null,
+    outageKey: null,
+    rung: 'observe',
+    nextEvaluationAt: input.now + input.policy.tickMs,
+    note: 'ledger unreadable — budgets and latch unknown, standing down until a human looks',
+    ledger: input.ledger,
+    persist: false,
+  }
+}
+
+/**
+ * A write-ahead `pending` entry is normally closed by `recordOutcome` in the
+ * runner. If the process died between the write-ahead and that call, nothing
+ * would ever clear it and the watchdog would sit in `settling` for good. Once
+ * the settle window has passed the entry is folded into history as `unknown` —
+ * never success, never failure: a verb may or may not have reached the line.
+ * `consecutiveActions` already counted it at the attempt, so the latch is
+ * untouched.
+ */
+function foldStalePending(input: LadderInput): LadderInput {
+  const { ledger, policy, now } = input
+  const pending = ledger.pending
+  if (pending === null) return input
+
+  const settleS = pending.kind === 'reboot' ? policy.rebootSettleS : policy.reconnectSettleS
+  const settledAt = Math.max(pending.ts + settleS * 1000, ledger.ladder.settleUntil ?? 0)
+  if (now < settledAt) return input
+
+  const folded: Ledger = {
+    ...ledger,
+    pending: null,
+    actions: [...ledger.actions, { ...pending, outcome: 'unknown' }],
+  }
+  return { ...input, ledger: folded }
 }
 
 /**

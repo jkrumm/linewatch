@@ -73,6 +73,7 @@ describe('what turns the watchdog monitor red', () => {
 
   test('a latched watchdog is down — it has taken itself out of service', () => {
     expect(notificationStatus({ ...subject, state: 'latched' })).toBe('down')
+    expect(notificationStatus({ ...subject, state: 'untrusted' })).toBe('down')
   })
 
   test('an escalation is down — it has run out of ladder and wants a human', () => {

@@ -418,7 +418,7 @@ in-process timer, so restarting the container cannot reset the budget.
 | `GET /api/router` | latest line sample, WAN/LAN throughput, the collector host's presence and medium, LAN ports |
 | `GET /api/router/line?from&to&limit` | carrier line history: sync rates, noise margin in real dB, attenuation, showtime |
 | `GET /api/router/throughput?from&to&role&limit` | per-interface rates, `role=wan` for the live internet-facing one |
-| `POST /api/router/poll` | run one read-only poll now (bearer; 429 within 60 s of the newest stored sample) |
+| `POST /api/router/poll` | run one read-only poll now (bearer; 429 within 60 s of the last poll attempt, in-process; answers the poll's real outcome) |
 | `POST /api/router/actions/reconnect` | re-dial the WAN (bearer **and** `LINEWATCH_ROUTER_WRITE=1`; 403 without it) |
 | `POST /api/router/actions/reboot` | snapshot WAN state, then reboot the router (bearer **and** `LINEWATCH_ROUTER_WRITE=1`; 403 without it). Outcome is `executed`, `failed` or `unknown` |
 | `GET /api/wifi?from&to&bucket` | radio history, bucketed in SQL: signal/noise, SNR derived on read, PHY rate (not throughput), interface-bound RTT |

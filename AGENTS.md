@@ -28,7 +28,9 @@ Throughput through the VM is unaffected, so speed tests belong in the container.
 The collector POSTs batches with a bearer token and **spools to
 `collector/spool.jsonl` on failure**, replaying on the next successful cycle. Do
 not "simplify" the spool away — without it every redeploy writes a fake outage
-into the record.
+into the record. The logic lives in `collector/spool.ts` (pure, tested): torn lines
+and non-retryable 4xx batches (all but 401/408/429) go to `spool.rejected.jsonl`
+instead of blocking the queue, and replay is capped at 200 entries per cycle.
 
 **Alerting is a missed heartbeat, and that is the design.** Uptime Kuma runs on
 the homelab, on a different WAN, and the Tailscale ACL has no `tag:homelab →
@@ -59,7 +61,8 @@ The ledger lives at `~/.local/state/linewatch/watchdog-state.json`, **never
 beside `spool.jsonl`** — a `git clean` that reset the reboot budget and the
 latch is the single failure that turns this into a reboot loop. An unreadable
 ledger disarms rather than resets: an empty one has a full budget and no latch,
-which is exactly the wrong reading after a crash. Every state transition lives
+which is exactly the wrong reading after a crash. `decide()` takes `trusted` as
+input; untrusted means no action, no ledger write, and a `down` push every tick. Every state transition lives
 in `decide()`, not the runner, because the runner executes for real about once a
 month and the tests are the only thing that exercises this monthly code daily.
 
@@ -206,8 +209,11 @@ say they disagreed; the guards below exist so that cannot happen silently again.
   `failed` when it rejected the operation (HTTP 200, `errorcode: 1` — the
   firmware validates the operation before acting, which is what makes a wrong
   name distinguishable from a successful reboot), and `unknown` when the
-  transport died, which is the expected signature of success and is settled only
-  by the probe record. Never read `unknown` as either. That
+  transport died or the answer carried no readable errorcode, which is the
+  expected signature of success and is settled only by the probe record. Never
+  read `unknown` as either. Polls and both actions share one lock
+  (`services/router/lock.ts`), and a failed reboot is a `note`, not an
+  intervention. That
   module is the only thing in this repo that can write to the device, and its
   surface is deliberately tiny. The reason is not style: `/js/gdprProxy.js`
   routes every verb — `go`/`gl`/`gs`/`so`/`ao`/`do`/`op`/`cgi` — to the same

@@ -18,21 +18,16 @@
  * success. Never gate on ping's exit code — 100% loss is a valid measurement
  * (exit 2 on macOS), not a fault.
  */
-import {
-  appendFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  writeFileSync,
-} from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { median, stddev } from '../src/lib/stats.js'
+import { positiveNumberFromEnv } from './env.js'
 import { createLinkSampler, type LinkSampler, type LinkTransition } from './link-sampler.js'
 import { DEFAULT_LOG_MAX_BYTES, inspectRotation, rotateLogIfNeeded } from './log-rotate.js'
 import { parsePingOutput, type PingResult } from './ping-parser.js'
+import { createSpool, SPOOL_MAX_LINES, type PostResult } from './spool.js'
 import { captureVantage, type Vantage } from './vantage.js'
 import { captureWifi, type WifiSampleInput } from './wifi.js'
 
@@ -99,11 +94,11 @@ const config = {
   apiUrl: process.env['LINEWATCH_API_URL'] ?? 'http://localhost:7731',
   token: resolveToken(),
   targets: parseTargets(process.env['LINEWATCH_TARGETS']),
-  probeCycleSeconds: Number(process.env['LINEWATCH_PROBE_CYCLE_S'] ?? 30),
-  pingCount: Number(process.env['LINEWATCH_PING_COUNT'] ?? 20),
-  pingIntervalSeconds: Number(process.env['LINEWATCH_PING_INTERVAL_S'] ?? 0.2),
+  probeCycleSeconds: positiveNumberFromEnv('LINEWATCH_PROBE_CYCLE_S', 30),
+  pingCount: positiveNumberFromEnv('LINEWATCH_PING_COUNT', 20),
+  pingIntervalSeconds: positiveNumberFromEnv('LINEWATCH_PING_INTERVAL_S', 0.2),
   spoolPath: process.env['LINEWATCH_SPOOL_PATH'] ?? join(moduleDir, 'spool.jsonl'),
-  spoolMaxLines: 50_000,
+  spoolMaxLines: SPOOL_MAX_LINES,
   /**
    * Which interface the link sampler watches until the default route names one.
    * Only a fallback: `pathIf` from the routing table wins the moment a cycle
@@ -112,7 +107,7 @@ const config = {
    * link state is the whole question.
    */
   linkIface: process.env['LINEWATCH_LINK_IFACE'] ?? 'en0',
-  linkSampleIntervalMs: Number(process.env['LINEWATCH_LINK_SAMPLE_MS'] ?? 1000),
+  linkSampleIntervalMs: positiveNumberFromEnv('LINEWATCH_LINK_SAMPLE_MS', 1000),
   /** The Wi-Fi interface sampled by collector/wifi.ts — an alternate radio path currently attached. */
   wifiIface: process.env['LINEWATCH_WIFI_IFACE'] ?? 'en1',
   /**
@@ -121,7 +116,7 @@ const config = {
    * SPAirPortDataType` costs 4.8 s median on this host, so sampling every cycle
    * would put a 5 s command inside a 30 s loop for a value that moves slowly.
    */
-  wifiSampleEveryNCycles: Math.max(1, Number(process.env['LINEWATCH_WIFI_EVERY_N_CYCLES'] ?? 10)),
+  wifiSampleEveryNCycles: Math.max(1, positiveNumberFromEnv('LINEWATCH_WIFI_EVERY_N_CYCLES', 10)),
   /** Per-command wall clock for the Wi-Fi sample. ~4.8 s of it is `system_profiler` alone. */
   wifiTimeoutMs: 8000,
   /**
@@ -136,7 +131,7 @@ const config = {
   logPath:
     process.env['LINEWATCH_LOG_PATH'] ??
     join(homedir(), 'Library', 'Logs', 'linewatch-collector.log'),
-  logMaxBytes: Number(process.env['LINEWATCH_LOG_MAX_BYTES'] ?? DEFAULT_LOG_MAX_BYTES),
+  logMaxBytes: positiveNumberFromEnv('LINEWATCH_LOG_MAX_BYTES', DEFAULT_LOG_MAX_BYTES),
 }
 
 /**
@@ -283,7 +278,13 @@ function log(event: string, fields: Record<string, unknown> = {}): void {
   console.log(JSON.stringify({ ts: new Date().toISOString(), event, ...fields }))
 }
 
-async function pingTarget(target: Target): Promise<TargetSample> {
+/**
+ * `null` = unmeasured: ping printed no summary line (spawn error, binary
+ * missing, killed). That is not a 100 % loss — a genuine total loss still
+ * prints its packets summary — so the target is left out of the batch rather
+ * than recorded as a value nobody observed.
+ */
+async function pingTarget(target: Target): Promise<TargetSample | null> {
   const args = [
     'ping',
     '-c',
@@ -314,16 +315,8 @@ async function pingTarget(target: Target): Promise<TargetSample> {
   try {
     parsed = parsePingOutput(stdout)
   } catch {
-    // No usable output at all (binary missing, DNS failure, etc.) — record
-    // it as a full-loss cycle rather than silently dropping the target.
-    parsed = {
-      sent: config.pingCount,
-      received: 0,
-      lossPct: 100,
-      rtts: [],
-      duplicates: 0,
-      outOfWaitTime: 0,
-    }
+    log('ping.unmeasured', { target: target.name })
+    return null
   }
 
   const rtts = parsed.rtts
@@ -360,7 +353,7 @@ async function runCycle(): Promise<Batch> {
   // actually went out over, and so it adds nothing to the cycle's wall clock.
   // `captureVantage` is written not to throw; the catch is the second belt —
   // the vantage must never be able to cost us the uptime record.
-  const [samples, vantage, wifi] = await Promise.all([
+  const [measured, vantage, wifi] = await Promise.all([
     Promise.all(config.targets.map((target) => pingTarget(target))),
     captureVantage({ expectedGateway, report: log }).catch((err: unknown) => {
       log('vantage.error', { error: err instanceof Error ? err.message : String(err) })
@@ -388,6 +381,8 @@ async function runCycle(): Promise<Batch> {
   // MAC by construction (collector/wifi.ts), which is why those columns do not
   // exist.
   if (wifi !== null) log('wifi', { ...wifi })
+
+  const samples = measured.filter((sample): sample is TargetSample => sample !== null)
 
   // Drained after the pings and *before* the retarget below, so the seconds it
   // reports belong to the interface that actually carried this cycle rather
@@ -434,8 +429,7 @@ function vantageFields(batch: Batch): Record<string, unknown> {
  * exist to detect, so "did not say" must stay distinguishable from "said false"
  * and never be coalesced.
  */
-interface PostOutcome {
-  ok: boolean
+interface PostOutcome extends PostResult {
   skipped?: boolean | undefined
   cycleStored?: boolean | undefined
 }
@@ -451,7 +445,7 @@ async function postBatch(batch: Batch): Promise<PostOutcome> {
       body: JSON.stringify(batch),
       signal: AbortSignal.timeout(10_000),
     })
-    if (!response.ok) return { ok: false }
+    if (!response.ok) return { ok: false, status: response.status }
     // A body that will not parse does not undo an accepted batch: the samples
     // are stored either way, and re-sending them would duplicate work the
     // server already did. The outcome is simply unknown.
@@ -469,81 +463,32 @@ async function postBatch(batch: Batch): Promise<PostOutcome> {
   }
 }
 
-// Tracked in-process rather than re-counted from disk on every cycle (cheap
-// to maintain, avoids re-reading a potentially large file every 30s while the
-// spool has content) — initialized once at startup from the file on disk.
-let spoolLineCount = countExistingSpoolLines()
-
-function countExistingSpoolLines(): number {
-  if (!existsSync(config.spoolPath)) return 0
-  const content = readFileSync(config.spoolPath, 'utf-8')
-  return content.length === 0 ? 0 : content.split('\n').filter((line) => line.length > 0).length
-}
-
-function appendToSpool(batch: Batch): void {
-  if (spoolLineCount >= config.spoolMaxLines) {
-    log('spool.full', { path: config.spoolPath, maxLines: config.spoolMaxLines })
-    return
-  }
-  mkdirSync(dirname(config.spoolPath), { recursive: true })
-  appendFileSync(config.spoolPath, `${JSON.stringify(batch)}\n`)
-  spoolLineCount += 1
-}
-
-function readSpool(): Batch[] {
-  if (!existsSync(config.spoolPath)) return []
-  const content = readFileSync(config.spoolPath, 'utf-8')
-  return content
-    .split('\n')
-    .filter((line) => line.length > 0)
-    .map((line) => JSON.parse(line) as Batch)
-}
-
-function truncateSpool(): void {
-  if (existsSync(config.spoolPath)) {
-    writeFileSync(config.spoolPath, '')
-  }
-  spoolLineCount = 0
-}
-
-/**
- * Replay every spooled batch in order. On the first failure, rewrite the
- * spool to hold only the not-yet-replayed remainder (never drop what
- * couldn't be sent) and report failure so the caller spools the current
- * cycle too.
- */
-async function replaySpool(batches: Batch[]): Promise<boolean> {
-  for (let i = 0; i < batches.length; i++) {
-    const batch = batches[i]
-    if (!batch) continue
-    const { ok } = await postBatch(batch)
-    if (!ok) {
-      const remaining = batches.slice(i)
-      const tmpPath = `${config.spoolPath}.tmp`
-      writeFileSync(
-        tmpPath,
-        remaining.map((b) => JSON.stringify(b)).join('\n') + (remaining.length > 0 ? '\n' : ''),
-      )
-      renameSync(tmpPath, config.spoolPath)
-      spoolLineCount = remaining.length
-      return false
-    }
-  }
-  truncateSpool()
-  return true
-}
+const spool = createSpool<Batch>({
+  path: config.spoolPath,
+  post: postBatch,
+  report: log,
+  maxLines: config.spoolMaxLines,
+})
 
 async function processCycle(batch: Batch): Promise<void> {
-  const spooled = readSpool()
-  if (spooled.length > 0) {
-    const drained = await replaySpool(spooled)
-    if (!drained) {
-      appendToSpool(batch)
+  // Every target unmeasured (no ping at all): the API requires at least one
+  // sample, so there is nothing postable. Said loudly; never invented.
+  if (batch.samples.length === 0) {
+    log('cycle', { ts: batch.ts, status: 'unmeasured', ...vantageFields(batch) })
+    return
+  }
+
+  // Bounded and tolerant (collector/spool.ts): a capped replay that did not
+  // fail is not a reason to spool this cycle — the rest drains on later ones.
+  if (spool.depth() > 0) {
+    const replay = await spool.replay()
+    if (replay.failed) {
+      spool.append(batch)
       log('cycle', {
         ts: batch.ts,
         status: 'spooled',
         reason: 'replay_failed',
-        spoolDepth: spoolLineCount,
+        spoolDepth: spool.depth(),
         ...vantageFields(batch),
       })
       return
@@ -571,12 +516,12 @@ async function processCycle(batch: Batch): Promise<void> {
     return
   }
 
-  appendToSpool(batch)
+  spool.append(batch)
   log('cycle', {
     ts: batch.ts,
     status: 'spooled',
     reason: 'post_failed',
-    spoolDepth: spoolLineCount,
+    spoolDepth: spool.depth(),
     ...vantageFields(batch),
   })
 }
@@ -652,8 +597,17 @@ async function main(): Promise<void> {
     // to, and doing it here means it can never land between the two halves of a
     // line. One `stat` per 30 s is not worth measuring.
     rotateLogIfNeeded({ logPath: config.logPath, maxBytes: config.logMaxBytes, report: log })
-    const batch = await runCycle()
-    await processCycle(batch)
+    // An unexpected throw costs this cycle, never the process: under launchd
+    // KeepAlive a crash here would restart-loop on the same poisoned input.
+    try {
+      const batch = await runCycle()
+      await processCycle(batch)
+    } catch (err) {
+      log('cycle.error', {
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      })
+    }
 
     if (shutdown.signal.aborted) break
     const elapsed = Date.now() - cycleStart

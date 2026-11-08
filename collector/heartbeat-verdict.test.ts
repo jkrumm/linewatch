@@ -22,6 +22,7 @@ import {
 const NOW = 1_785_600_000_000
 
 const HOME_VANTAGE: StatusVantage = {
+  ts: NOW - 10_000,
   onHomeLine: true,
   pathIf: 'en0',
   pathClass: 'ethernet',
@@ -112,7 +113,13 @@ describe('decideHeartbeat', () => {
   test('measuring some other uplink skips the push, neither up nor down', () => {
     const verdict = decide({
       status: snapshot({
-        vantage: { onHomeLine: false, pathIf: 'en1', pathClass: 'wifi', linkMedia: 'autoselect' },
+        vantage: {
+          ...HOME_VANTAGE,
+          onHomeLine: false,
+          pathIf: 'en1',
+          pathClass: 'wifi',
+          linkMedia: 'autoselect',
+        },
       }),
     })
     expect(verdict.status).toBe('skip')
@@ -124,7 +131,13 @@ describe('decideHeartbeat', () => {
   test('an unknown home-line verdict is not treated as a yes and pushes nothing', () => {
     const verdict = decide({
       status: snapshot({
-        vantage: { onHomeLine: null, pathIf: null, pathClass: null, linkMedia: null },
+        vantage: {
+          ...HOME_VANTAGE,
+          onHomeLine: null,
+          pathIf: null,
+          pathClass: null,
+          linkMedia: null,
+        },
       }),
     })
     expect(verdict.status).toBe('skip')
@@ -136,6 +149,21 @@ describe('decideHeartbeat', () => {
     const verdict = decide({ status: snapshot({ vantage: null }) })
     expect(verdict.status).toBe('skip')
     expect(verdict.reason).toBe('vantage_unknown')
+  })
+
+  test('a vantage older than the stale bound pushes nothing even with fresh samples', () => {
+    const verdict = decide({
+      status: snapshot({ vantage: { ...HOME_VANTAGE, ts: NOW - 91_000 } }),
+    })
+    expect(verdict.status).toBe('skip')
+    expect(verdict.reason).toBe('vantage_unknown')
+  })
+
+  test('a vantage exactly at the stale bound still counts', () => {
+    const verdict = decide({
+      status: snapshot({ vantage: { ...HOME_VANTAGE, ts: NOW - 90_000 } }),
+    })
+    expect(verdict.status).toBe('up')
   })
 
   test('an ongoing WAN outage names its evidence and its duration', () => {

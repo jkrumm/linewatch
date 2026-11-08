@@ -45,6 +45,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { DEFAULT_LOG_MAX_BYTES, rotateLogIfNeeded } from './log-rotate.js'
+import { positiveNumberFromEnv } from './env.js'
 import { decideHeartbeat, type StatusSnapshot } from './heartbeat-verdict.js'
 
 const config = {
@@ -54,10 +55,10 @@ const config = {
     process.env['LINEWATCH_KUMA_PUSH_URL_FILE'] ??
     join(homedir(), '.config', 'uptime-kuma', 'linewatch-push-url'),
   /** Three probe cycles. Two missed cycles are a hiccup; three are a collector that is not running. */
-  staleSampleMs: Number(process.env['LINEWATCH_HEARTBEAT_STALE_MS'] ?? 90_000),
-  degradedLossPct: Number(process.env['LINEWATCH_DEGRADED_LOSS_PCT'] ?? 20),
+  staleSampleMs: positiveNumberFromEnv('LINEWATCH_HEARTBEAT_STALE_MS', 90_000),
+  degradedLossPct: positiveNumberFromEnv('LINEWATCH_DEGRADED_LOSS_PCT', 20),
   /** Local call — generous enough for a loaded container, short enough to stay well inside the run budget. */
-  apiTimeoutMs: Number(process.env['LINEWATCH_HEARTBEAT_API_TIMEOUT_MS'] ?? 5_000),
+  apiTimeoutMs: positiveNumberFromEnv('LINEWATCH_HEARTBEAT_API_TIMEOUT_MS', 5_000),
   /**
    * The push crosses the WAN this monitor is about, so during an outage it does
    * not fail fast — it hangs until this fires. Kept well under the 60 s
@@ -67,12 +68,12 @@ const config = {
    * second instance of a running job, so one hung run would otherwise silence
    * the monitor for good.
    */
-  pushTimeoutMs: Number(process.env['LINEWATCH_HEARTBEAT_PUSH_TIMEOUT_MS'] ?? 15_000),
+  pushTimeoutMs: positiveNumberFromEnv('LINEWATCH_HEARTBEAT_PUSH_TIMEOUT_MS', 15_000),
   /** Must equal the plist's StandardOutPath — launchd opens it once, O_APPEND, and never reopens it. */
   logPath:
     process.env['LINEWATCH_HEARTBEAT_LOG_PATH'] ??
     join(homedir(), 'Library', 'Logs', 'linewatch-heartbeat.log'),
-  logMaxBytes: Number(process.env['LINEWATCH_HEARTBEAT_LOG_MAX_BYTES'] ?? DEFAULT_LOG_MAX_BYTES),
+  logMaxBytes: positiveNumberFromEnv('LINEWATCH_HEARTBEAT_LOG_MAX_BYTES', DEFAULT_LOG_MAX_BYTES),
   /** Set by the plist: jobrun owns launchd's log descriptor, so fd 1 here is a pipe. */
   logViaJobrun: process.env['LINEWATCH_HEARTBEAT_LOG_VIA_JOBRUN'] === '1',
   /**

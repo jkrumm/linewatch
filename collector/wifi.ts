@@ -292,7 +292,7 @@ export async function captureWifi(options: CaptureWifiOptions): Promise<WifiSamp
     // sampling, a twentieth of what a probe target gets — this is a spot check
     // on an alternate path, not a second uptime record.
     runCommand(
-      ['ping', '-c', '5', '-i', '0.2', '-b', options.iface, options.pingTarget],
+      ['ping', '-c', '5', '-i', '0.2', '-W', '1000', '-b', options.iface, options.pingTarget],
       timeoutMs,
       report,
     ),

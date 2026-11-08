@@ -66,6 +66,8 @@ export interface StatusOutage {
 }
 
 export interface StatusVantage {
+  /** When the cycle that produced this vantage ran (unix ms) — `currentVantage` returns the newest row however old. */
+  ts: number
   /** Three-state, and never coalesced: null means the collector did not report. */
   onHomeLine: boolean | null
   pathIf: string | null
@@ -187,6 +189,17 @@ export function decideHeartbeat(input: HeartbeatInput): HeartbeatVerdict {
       status: 'skip',
       reason: 'vantage_unknown',
       msg: 'no cycle vantage on record — cannot show these samples measured the home line',
+    }
+  }
+  // A vantage as old as the stale-sample bound describes a cycle nobody is
+  // running any more, so it cannot vouch for samples that are fresh by some
+  // other route. Same bound as the samples; push nothing.
+  const vantageAge = now - status.vantage.ts
+  if (vantageAge > staleSampleMs) {
+    return {
+      status: 'skip',
+      reason: 'vantage_unknown',
+      msg: `cycle vantage is ${humanDuration(vantageAge)} old — cannot show these samples measured the home line`,
     }
   }
   if (status.vantage.onHomeLine !== true) {

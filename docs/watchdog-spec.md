@@ -184,11 +184,15 @@ naming rule. So:
    explains the danger has to be able to name it.
 5. **`so`/`ao`/`do` are never implemented.** They rewrite WAN credentials,
    DS-Lite config and firewall rules, and they buy a watchdog nothing.
-6. **`reboot` is implemented as a refusal.** The name is now known, but a reboot
-   is the one action whose transport error the firmware deliberately swallows —
-   the device dies before answering — so a wrong request and a successful one are
-   the same observation from here. It stays a refusal until it is verified some
-   other way.
+6. **`reboot` is implemented.** It reads `DEV2_ADT_WAN` first and refuses only if
+   that snapshot cannot be read — a reboot destroys the evidence, so no snapshot
+   means no action. It then sends `ACT_REBOOT` and returns a three-valued outcome:
+   `executed` (`errorcode 0`, acknowledged before the device went down), `failed`
+   (non-zero errorcode — the firmware rejects an unknown OID with HTTP 200 and
+   `errorcode 1`, so a wrong name is distinguishable from success), or `unknown`
+   (the transport died after the send). `unknown` is the expected signature of a
+   reboot that worked, because the device dies before answering; the probe record
+   over the settle window decides, never the reply.
 
 ### Would a reconnect have helped on 08-01?
 
@@ -322,10 +326,9 @@ specification did not catch.
   is when it is needed.
 - Shadow mode has produced `would_*` notes whose triggers a human agrees with.
 - The mini's LAN address is pinned by DHCP reservation.
-- `reboot` stays refused until its success can be distinguished from its
-  failure. **This one is now settled** — see §3 — but the rung stays behind
-  `LINEWATCH_WATCHDOG_REBOOT` regardless, because distinguishable is not the
-  same as warranted.
+- The reboot rung stays behind `LINEWATCH_WATCHDOG_REBOOT`. The action itself is
+  implemented and its failure is distinguishable from its success (§3 item 6),
+  but distinguishable is not the same as warranted.
 
 ---
 

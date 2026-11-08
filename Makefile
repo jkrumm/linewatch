@@ -1,4 +1,4 @@
-.PHONY: help env up deploy down rebuild logs logs-follow verify collector-setup collector-teardown collector-logs check \
+.PHONY: help env up deploy down rebuild guard-deploy logs logs-follow verify collector-setup collector-teardown collector-logs check \
 	heartbeat-setup heartbeat-teardown heartbeat-status heartbeat-logs router-reconnect router-reboot \
 	watchdog-setup watchdog-teardown watchdog-status watchdog-logs watchdog-arm watchdog-disarm \
 	watchdog-readiness watchdog-state \
@@ -43,6 +43,9 @@ DB            := /app/data/linewatch.db
 # Compose derives its project name from the directory. `up` asserts that the
 # fixed `container_name: linewatch` belongs to *this* project before starting.
 COMPOSE_PROJECT := $(notdir $(REPO_DIR))
+# What the deploy fingerprint covers (scripts/codesum.ts). The Dockerfile's
+# `fingerprint` stage must COPY and hash exactly this list.
+FINGERPRINT_PATHS := src web/src drizzle package.json bun.lock Dockerfile web/package.json web/bun.lock
 BACKUP_DIR    := $(REPO_DIR)/backups
 HOST_DATA_DIR := $(REPO_DIR)/data
 MARKER        := $(HOST_DATA_DIR)/MOVED-TO-DOCKER-VOLUME
@@ -208,7 +211,7 @@ env: ## Ensure the bearer token, the router password (if any) and .env exist (id
 	mv .env.tmp .env; \
 	chmod 600 .env
 
-up: env marker ## THE deploy: token + .env + volume, build (API and dashboard), recreate, wait for health, prove the container is your working tree. Safe to re-run any time.
+up: guard-deploy env marker ## THE deploy: token + .env + volume, build (API and dashboard), recreate, wait for health, prove the container is your working tree. Safe to re-run any time.
 	@# `container_name: linewatch` is a fixed name, so a container started by a
 	@# *different* compose project — a sibling worktree, a renamed directory, an
 	@# interrupted run — holds that name without being tracked here. Compose then
@@ -249,7 +252,7 @@ up: env marker ## THE deploy: token + .env + volume, build (API and dashboard), 
 	@# the image's baked-in fingerprint against the working tree's
 	@# (scripts/codesum.ts) and catches staleness from any cause in ~1s.
 	@printf "  verifying the container is your working tree… "
-	@HOST=$$(bun scripts/codesum.ts src web/src 2>/dev/null); \
+	@HOST=$$(bun scripts/codesum.ts $(FINGERPRINT_PATHS) 2>/dev/null); \
 	CONT=$$(docker exec linewatch cat /app/.codesum 2>/dev/null); \
 	if [ -z "$$HOST" ]; then \
 		echo "FAILED"; echo "  ✗ could not fingerprint the working tree — is bun on PATH?"; exit 1; \
@@ -288,7 +291,21 @@ deploy: ## Report how master ships: `make up` on the mini from an up-to-date mas
 	@# from an up-to-date master checkout on the mini.
 	@echo "  · no CD — ship with: git checkout master && git pull && make up (on the mini)"
 
-rebuild: ## Refresh pinned base images (docker compose build --pull), then same as `up`
+guard-deploy: ## (internal) Refuse to deploy from a non-master checkout or with tracked modifications; override with ALLOW_DIRTY_DEPLOY=1
+	@if [ -n "$(ALLOW_DIRTY_DEPLOY)" ]; then \
+		echo "  ! ALLOW_DIRTY_DEPLOY set — skipping the master/clean-tree guard"; exit 0; \
+	fi; \
+	BRANCH=$$(git rev-parse --abbrev-ref HEAD); \
+	if [ "$$BRANCH" != "master" ]; then \
+		echo "  ✗ refusing to deploy from '$$BRANCH' — deploys come from master. Emergency override: make up ALLOW_DIRTY_DEPLOY=1"; exit 1; \
+	fi; \
+	if [ -n "$$(git status --porcelain --untracked-files=no)" ]; then \
+		echo "  ✗ refusing to deploy with uncommitted changes to tracked files:"; \
+		git status --porcelain --untracked-files=no | sed 's/^/      /'; \
+		echo "    Commit them first. Emergency override: make up ALLOW_DIRTY_DEPLOY=1"; exit 1; \
+	fi
+
+rebuild: guard-deploy ## Refresh pinned base images (docker compose build --pull), then same as `up`
 	docker compose build --pull
 	$(MAKE) up
 

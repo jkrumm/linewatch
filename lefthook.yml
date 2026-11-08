@@ -15,10 +15,16 @@
 pre-commit:
   parallel: true
   commands:
+    # Root package (API, collector, scripts): both finish in ~1 s, so they run on every commit.
+    root-format:
+      run: bun run format:check
+    root-lint:
+      run: bun run lint
+
     dashboard-lint:
       root: 'web/'
       glob: '*.{ts,tsx}'
-      run: bunx oxlint {staged_files}
+      run: ./node_modules/.bin/oxlint {staged_files}
 
     # NO glob, deliberately — basalt's own preset makes this argument and it is worth keeping. This
     # command scans the configured `basalt.roots`; it never reads {staged_files}, so a glob here is a

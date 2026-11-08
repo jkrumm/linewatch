@@ -2,9 +2,11 @@
  * Content fingerprint of a source tree — used by `make up` to PROVE the running
  * container holds the code that is in the working tree.
  *
- * The same command runs on both sides:
+ * The same command runs on both sides (the path list is `FINGERPRINT_PATHS` in
+ * the Makefile and the `fingerprint` stage of the Dockerfile — keep all three in
+ * sync, and COPY whatever is hashed):
  *
- *     bun scripts/codesum.ts src web/src        # host
+ *     bun scripts/codesum.ts src web/src drizzle ...    # host
  *     docker exec linewatch cat /app/.codesum   # baked in at image build time
  *
  * Different hashes mean the container is serving something other than what you
@@ -22,7 +24,7 @@
  */
 
 import { createHash } from 'node:crypto'
-import { readdirSync, readFileSync } from 'node:fs'
+import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 function walk(dir: string, digests: string[]): void {
@@ -40,12 +42,15 @@ function walk(dir: string, digests: string[]): void {
 
 const roots = process.argv.slice(2)
 if (roots.length === 0) {
-  console.error('usage: bun scripts/codesum.ts <dir> [<dir>...]')
+  console.error('usage: bun scripts/codesum.ts <dir|file> [<dir|file>...]')
   process.exit(1)
 }
 
 const digests: string[] = []
-for (const root of roots) walk(root, digests)
+for (const root of roots) {
+  if (statSync(root).isDirectory()) walk(root, digests)
+  else digests.push(createHash('md5').update(readFileSync(root)).digest('hex'))
+}
 digests.sort()
 
 console.log(createHash('md5').update(digests.join('')).digest('hex'))

@@ -21,6 +21,10 @@ on:
   push:
     branches: [master]
 
+concurrency:
+  group: check-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   # macOS, not ubuntu. This is not a preference — AGENTS.md's first line is "Mac mini only", and
   # the collector shells out to `route -n get default`, `ifconfig -m`, `netstat`, `networksetup`
@@ -30,8 +34,9 @@ jobs:
   # the first CI run, which is the point of having one.
   api:
     runs-on: macos-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.3
@@ -50,11 +55,12 @@ jobs:
   # the faster runner.
   dashboard:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: web
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.3
@@ -63,3 +69,5 @@ jobs:
       - run: ./node_modules/.bin/basalt-ui sync --check
       - run: bun run typecheck
       - run: bun test
+      # The first vite build failure would otherwise surface in the Docker build during `make up`.
+      - run: bun run build

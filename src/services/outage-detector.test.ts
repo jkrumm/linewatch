@@ -176,4 +176,21 @@ describe('OutageDetector', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0]?.cycles).toBe(2)
   })
+
+  test("a cycle with no results for a scope is unknown: it never closes that scope's open outage", () => {
+    const db = createTestDb()
+    const detector = new OutageDetector(db)
+    detector.ingest(T0, cycle({ cloudflare: true, google: true, quad9: true, gateway: true }))
+
+    // Only the gateway reported; the WAN scope is empty, not "up".
+    detector.ingest(T0 + CYCLE_MS, [{ target: 'gateway', scope: 'gateway', down: false }])
+    // Nothing reported at all.
+    detector.ingest(T0 + 2 * CYCLE_MS, [])
+
+    const rows = db.select().from(outage).all()
+    const wan = rows.find((r) => r.scope === 'wan')
+    const gateway = rows.find((r) => r.scope === 'gateway')
+    expect(wan?.endedAt).toBeNull()
+    expect(gateway?.endedAt).toBe(T0 + CYCLE_MS)
+  })
 })

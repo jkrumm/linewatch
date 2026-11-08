@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { Elysia } from 'elysia'
 
 /**
@@ -17,6 +17,11 @@ process.env['LINEWATCH_TOKEN'] = 'test-token-not-the-real-one'
 
 const { outagesRoutes } = await import('./outages.js')
 const { db } = await import('../db/client.js')
+const { resetSharedDb } = await import('../db/test-reset.js')
+
+// Files share one process-global database: start and leave it empty.
+beforeAll(resetSharedDb)
+afterAll(resetSharedDb)
 const { outage, probeSample } = await import('../db/schema.js')
 
 const app = new Elysia().use(outagesRoutes)
@@ -202,5 +207,16 @@ describe('GET /api/outages — the range filter is an overlap, not a containment
     const id = seedOutage(to + 60 * 60 * 1000, to + 2 * 60 * 60 * 1000)
 
     expect(await outageIds(from, to)).not.toContain(id)
+  })
+})
+
+describe('GET /api/outages — bounded lists', () => {
+  test('from > to is 422, and limit is validated', async () => {
+    const inverted = await app.handle(new Request('http://localhost/api/outages?from=10&to=5'))
+    expect(inverted.status).toBe(422)
+    const huge = await app.handle(new Request('http://localhost/api/outages?limit=100000000'))
+    expect(huge.status).toBe(422)
+    const ok = await app.handle(new Request('http://localhost/api/outages?limit=5'))
+    expect(ok.status).toBe(200)
   })
 })

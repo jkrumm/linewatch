@@ -4,6 +4,7 @@ import { and, desc, eq, gte, lte, type SQL } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { speedTest } from '../db/schema.js'
 import { percentile } from '../lib/stats.js'
+import { limitQuery, windowProblem } from '../lib/query-limits.js'
 import { config } from '../config.js'
 import { triggerSpeedtestNow } from '../services/speedtest-runner.js'
 
@@ -41,21 +42,30 @@ const DirectionSummarySchema = z.object({
 export const speedtestsRoutes = new Elysia()
   .get(
     '/api/speedtests',
-    ({ query }) => {
+    ({ query, status }) => {
+      const problem = windowProblem(query)
+      if (problem) return status(422, problem)
       const conditions: SQL[] = []
       if (query.from !== undefined) conditions.push(gte(speedTest.ts, query.from))
       if (query.to !== undefined) conditions.push(lte(speedTest.ts, query.to))
       const where = conditions.length > 0 ? and(...conditions) : undefined
 
-      const rows = db.select().from(speedTest).where(where).orderBy(desc(speedTest.ts)).all()
+      const rows = db
+        .select()
+        .from(speedTest)
+        .where(where)
+        .orderBy(desc(speedTest.ts))
+        .limit(query.limit)
+        .all()
       return { speedTests: rows }
     },
     {
       query: z.object({
         from: z.coerce.number().int().optional(),
         to: z.coerce.number().int().optional(),
+        limit: limitQuery,
       }),
-      response: z.object({ speedTests: z.array(SpeedTestSchema) }),
+      response: { 200: z.object({ speedTests: z.array(SpeedTestSchema) }), 422: z.string() },
       detail: {
         tags: ['Speed Tests'],
         summary: 'List speed tests',

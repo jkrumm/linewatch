@@ -117,7 +117,9 @@ export function rangeSummary(
   // every one of them was hurting. One anchor deprioritising ICMP is not a line
   // problem — that is exactly why three of them sit on three networks. Cycles
   // already inside a materialised outage are excluded so a real outage is not
-  // double-counted as degradation.
+  // double-counted as degradation. `ended_at` is the FIRST UP cycle (the detector
+  // stamps it on the recovering cycle), so that cycle is outside the outage and a
+  // lossy recovery still counts as degradation.
   const targetFilter = wanTargets
     ? sql`AND target IN (${sql.join(
         wanTargets.map((name) => sql`${name}`),
@@ -134,7 +136,7 @@ export function rangeSummary(
     ) AS d
     WHERE NOT EXISTS (
       SELECT 1 FROM outage AS o
-      WHERE o.started_at <= d.ts AND (o.ended_at IS NULL OR o.ended_at >= d.ts)
+      WHERE o.started_at <= d.ts AND (o.ended_at IS NULL OR o.ended_at > d.ts)
     )
   `)
 

@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { Elysia } from 'elysia'
 
 /**
@@ -18,9 +18,15 @@ import { Elysia } from 'elysia'
  */
 
 process.env['LINEWATCH_DB'] = ':memory:'
+process.env['LINEWATCH_TOKEN'] ??= 'test-token-not-the-real-one'
 
 const { statusRoute } = await import('./status.js')
 const { db } = await import('../db/client.js')
+const { resetSharedDb } = await import('../db/test-reset.js')
+
+// Files share one process-global database: start and leave it empty.
+beforeAll(resetSharedDb)
+afterAll(resetSharedDb)
 const { probeSample, probeCycle } = await import('../db/schema.js')
 
 const app = new Elysia().use(statusRoute)

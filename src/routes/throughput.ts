@@ -1,6 +1,7 @@
 import { Elysia } from 'elysia'
 import { z } from 'zod'
 import { db } from '../db/client.js'
+import { rangeProblem } from '../lib/query-limits.js'
 import { MAX_INTERVAL_MS, bucketThroughput } from '../db/bucket-throughput.js'
 
 /**
@@ -47,13 +48,21 @@ const ThroughputBucketSchema = z.object({
 
 export const throughputRoutes = new Elysia().get(
   '/api/throughput',
-  ({ query }) => ({
-    from: query.from,
-    to: query.to,
-    bucketSeconds: query.bucket,
-    maxIntervalMs: MAX_INTERVAL_MS,
-    buckets: bucketThroughput(db, { from: query.from, to: query.to, bucketSeconds: query.bucket }),
-  }),
+  ({ query, status }) => {
+    const problem = rangeProblem({ from: query.from, to: query.to, bucket: query.bucket })
+    if (problem) return status(422, problem)
+    return {
+      from: query.from,
+      to: query.to,
+      bucketSeconds: query.bucket,
+      maxIntervalMs: MAX_INTERVAL_MS,
+      buckets: bucketThroughput(db, {
+        from: query.from,
+        to: query.to,
+        bucketSeconds: query.bucket,
+      }),
+    }
+  },
   {
     query: z.object({
       from: z.coerce.number().int(),
@@ -65,18 +74,21 @@ export const throughputRoutes = new Elysia().get(
         .default(3600)
         .describe('Bucket width in seconds (default 3600 = hourly)'),
     }),
-    response: z.object({
-      from: z.number().int(),
-      to: z.number().int(),
-      bucketSeconds: z.number().int(),
-      maxIntervalMs: z
-        .number()
-        .int()
-        .describe(
-          'Longest cycle-to-cycle gap whose bytes are still attributed to a point in time; longer intervals count toward `skipped`.',
-        ),
-      buckets: z.array(ThroughputBucketSchema),
-    }),
+    response: {
+      200: z.object({
+        from: z.number().int(),
+        to: z.number().int(),
+        bucketSeconds: z.number().int(),
+        maxIntervalMs: z
+          .number()
+          .int()
+          .describe(
+            'Longest cycle-to-cycle gap whose bytes are still attributed to a point in time; longer intervals count toward `skipped`.',
+          ),
+        buckets: z.array(ThroughputBucketSchema),
+      }),
+      422: z.string(),
+    },
     detail: {
       tags: ['Probes'],
       summary: 'Volume actually carried, bucketed',

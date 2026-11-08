@@ -5,6 +5,7 @@ import { db } from '../db/client.js'
 import { outage } from '../db/schema.js'
 import { config } from '../config.js'
 import { rangeSummary } from '../db/range-summary.js'
+import { limitQuery, windowProblem } from '../lib/query-limits.js'
 
 const RangeSummarySchema = z.object({
   from: z.number().int(),
@@ -53,7 +54,9 @@ const OutageSchema = z.object({
 
 export const outagesRoutes = new Elysia().get(
   '/api/outages',
-  ({ query }) => {
+  ({ query, status }) => {
+    const problem = windowProblem(query)
+    if (problem) return status(422, problem)
     const conditions: SQL[] = []
     // True overlap, not containment of the start instant. `startedAt >= from`
     // dropped an outage that began 30 min before a 24 h window and ran three
@@ -70,7 +73,13 @@ export const outagesRoutes = new Elysia().get(
     }
     const where = conditions.length > 0 ? and(...conditions) : undefined
 
-    const rows = db.select().from(outage).where(where).orderBy(desc(outage.startedAt)).all()
+    const rows = db
+      .select()
+      .from(outage)
+      .where(where)
+      .orderBy(desc(outage.startedAt))
+      .limit(query.limit)
+      .all()
 
     // Only computable for an explicit range: "how much of the window was
     // actually measured" is meaningless without a window. The dashboard's
@@ -114,13 +123,17 @@ export const outagesRoutes = new Elysia().get(
         .int()
         .optional()
         .describe('Seconds — filters closed outages; ongoing outages always show'),
+      limit: limitQuery,
     }),
-    response: z.object({
-      outages: z.array(OutageSchema),
-      summary: RangeSummarySchema.nullable().describe(
-        'Coverage, degradation and vantage over the requested range; null when `from`/`to` were not both given',
-      ),
-    }),
+    response: {
+      200: z.object({
+        outages: z.array(OutageSchema),
+        summary: RangeSummarySchema.nullable().describe(
+          'Coverage, degradation and vantage over the requested range; null when `from`/`to` were not both given',
+        ),
+      }),
+      422: z.string(),
+    },
     detail: {
       tags: ['Outages'],
       summary: 'List outages',

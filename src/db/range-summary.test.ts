@@ -244,6 +244,26 @@ describe('rangeSummary — degraded cycles', () => {
     expect(summary.degradedCycles).toBe(1)
   })
 
+  test('the recovery cycle (ended_at, the first up cycle) is outside the outage', () => {
+    const db = createTestDb()
+    seed(db, [
+      cycle(T0, { gateway: 100, cloudflare: 100, google: 100, quad9: 100 }),
+      cycle(T0 + CYCLE_MS, { cloudflare: 60, google: 60, quad9: 60 }),
+    ])
+    db.insert(outage)
+      .values({
+        scope: 'wan',
+        startedAt: T0,
+        endedAt: T0 + CYCLE_MS,
+        durationS: 30,
+        cycles: 1,
+        evidence: '[]',
+      })
+      .run()
+
+    expect(rangeSummary(db, { ...PARAMS, from: T0, to: T0 + HOUR_MS }).degradedCycles).toBe(1)
+  })
+
   test('an ongoing outage (ended_at null) still covers its cycles', () => {
     const db = createTestDb()
     seed(db, [cycle(T0, { gateway: 100, cloudflare: 100, google: 100, quad9: 100 })])

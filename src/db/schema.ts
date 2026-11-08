@@ -178,7 +178,7 @@ export const wifiSample = sqliteTable(
     rttMedMs: real('rtt_med_ms'),
     lossPct: real('loss_pct'),
   },
-  (t) => [uniqueIndex('wifi_sample_ts').on(t.ts), index('wifi_ts').on(t.ts)],
+  (t) => [uniqueIndex('wifi_sample_ts').on(t.ts)],
 )
 
 /**

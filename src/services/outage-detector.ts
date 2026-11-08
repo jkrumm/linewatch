@@ -68,15 +68,21 @@ export class OutageDetector {
   ingest(ts: number, results: TargetCycleResult[]): void {
     if (!this.loaded) this.load()
 
+    // An empty scope is *unknown*, never up: with no gateway result (or no WAN
+    // result) in the batch there is nothing to say, and evaluating it as "not
+    // down" would close an open outage on a cycle that never measured it.
     const gatewayResult = results.find((r) => r.scope === 'gateway')
-    const gatewayDown = gatewayResult?.down ?? false
-    const gatewayEvidence = gatewayDown && gatewayResult ? [gatewayResult.target] : []
-    this.evaluateScope('gateway', ts, gatewayDown, gatewayEvidence)
+    if (gatewayResult) {
+      const evidence = gatewayResult.down ? [gatewayResult.target] : []
+      this.evaluateScope('gateway', ts, gatewayResult.down, evidence)
+    }
 
     const wanResults = results.filter((r) => r.scope === 'wan')
-    const wanDown = wanResults.length > 0 && wanResults.every((r) => r.down)
-    const wanEvidence = wanResults.filter((r) => r.down).map((r) => r.target)
-    this.evaluateScope('wan', ts, wanDown, wanEvidence)
+    if (wanResults.length > 0) {
+      const wanDown = wanResults.every((r) => r.down)
+      const wanEvidence = wanResults.filter((r) => r.down).map((r) => r.target)
+      this.evaluateScope('wan', ts, wanDown, wanEvidence)
+    }
   }
 
   private evaluateScope(scope: Scope, ts: number, down: boolean, evidence: string[]): void {

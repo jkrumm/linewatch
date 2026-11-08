@@ -55,9 +55,9 @@ export const app = new Elysia()
             'Historical record of one internet connection: uptime, outage duration, and throughput. ' +
             '30-second ping cycles feed an outage state machine; hourly Ookla runs measure throughput ' +
             'and loaded (bufferbloat) latency. Reads are open on the tailnet. `Authorization: Bearer ' +
-            '<token>` is required by the two routes that write to the historical record from outside — ' +
-            '`POST /api/probes`, `POST /api/interventions`, `POST /api/router/poll` and ' +
-            '`POST /api/router/actions/reconnect` — the last of which also needs ' +
+            '<token>` is required by the five routes that write to the historical record or act on the line — ' +
+            '`POST /api/probes`, `POST /api/interventions`, `POST /api/router/poll`, ' +
+            '`POST /api/router/actions/reconnect` and `POST /api/router/actions/reboot` — the last two of which also need ' +
             '`LINEWATCH_ROUTER_WRITE=1`, an independent switch that is off by default. ' +
             '`POST /api/speedtests/run` is **not** ' +
             'one of them: it is a dashboard button with no token to present, so it is rate-limited ' +

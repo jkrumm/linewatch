@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { and, desc, eq, gt, gte, lte, min, type SQL } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { event, probeCycle } from '../db/schema.js'
+import { limitQuery, windowProblem } from '../lib/query-limits.js'
 
 const EventKindSchema = z.enum(['intervention', 'link_change', 'config_change', 'note'])
 
@@ -62,14 +63,22 @@ function readSource(detail: unknown): string | null {
 
 export const eventsRoutes = new Elysia().get(
   '/api/events',
-  ({ query }) => {
+  ({ query, status }) => {
+    const problem = windowProblem(query)
+    if (problem) return status(422, problem)
     const conditions: SQL[] = []
     if (query.from !== undefined) conditions.push(gte(event.ts, query.from))
     if (query.to !== undefined) conditions.push(lte(event.ts, query.to))
     if (query.kind !== undefined) conditions.push(eq(event.kind, query.kind))
     const where = conditions.length > 0 ? and(...conditions) : undefined
 
-    const rows = db.select().from(event).where(where).orderBy(desc(event.ts)).all()
+    const rows = db
+      .select()
+      .from(event)
+      .where(where)
+      .orderBy(desc(event.ts))
+      .limit(query.limit)
+      .all()
     return {
       events: rows.map((row) => {
         const detail = JSON.parse(row.detail) as unknown
@@ -89,22 +98,26 @@ export const eventsRoutes = new Elysia().get(
       from: z.coerce.number().int().optional(),
       to: z.coerce.number().int().optional(),
       kind: EventKindSchema.optional(),
+      limit: limitQuery,
     }),
-    response: z.object({
-      events: z.array(EventSchema),
-      linkSamplingSince: z
-        .number()
-        .int()
-        .nullable()
-        .describe(
-          'Earliest cycle in this window that actually watched the link (`probe_cycle.link_watch_s > 0`), or null when none did — a cycle reporting 0 watched seconds is the sampler saying it observed nothing, not coverage. Read it before reading an empty `events` array: with a value, no transition longer than the ~1 s sampling resolution was observed after it; with null, nothing was watching and the empty array says nothing about the link.',
-        ),
-    }),
+    response: {
+      200: z.object({
+        events: z.array(EventSchema),
+        linkSamplingSince: z
+          .number()
+          .int()
+          .nullable()
+          .describe(
+            'Earliest cycle in this window that actually watched the link (`probe_cycle.link_watch_s > 0`), or null when none did — a cycle reporting 0 watched seconds is the sampler saying it observed nothing, not coverage. Read it before reading an empty `events` array: with a value, no transition longer than the ~1 s sampling resolution was observed after it; with null, nothing was watching and the empty array says nothing about the link.',
+          ),
+      }),
+      422: z.string(),
+    },
     detail: {
       tags: ['Events'],
       summary: 'List timeline events',
       description:
-        'The dashboard timeline overlay (docs/DESIGN.md "event" — the extension point). Read-only: every kind is materialised on write elsewhere. `link_change` has three writers — `services/cycle-vantage.ts` when the 30 s vantage diff moves (`source: vantage-diff`), the router poller from the carrier side (`router-poller`), and the collector\'s 1 Hz link sampler for transitions shorter than a cycle (`link-sampler`) — and `source` is what tells them apart, because they observe the same kind of fact at 30 s, 5 min and 1 s precision respectively. `intervention` is written by `POST /api/interventions`; `config_change` and `note` are still unwritten. Absence of a `link_change` in a range never means the link was stable there: it means no transition longer than the sampling resolution was observed, and `linkSamplingSince` is what says whether anything was watching at all.',
+        'The dashboard timeline overlay (docs/DESIGN.md "event" — the extension point). Read-only: every kind is materialised on write elsewhere. `link_change` has three writers — `services/cycle-vantage.ts` when the 30 s vantage diff moves (`source: vantage-diff`), the router poller from the carrier side (`router-poller`), and the collector\'s 1 Hz link sampler for transitions shorter than a cycle (`link-sampler`) — and `source` is what tells them apart, because they observe the same kind of fact at 30 s, 5 min and 1 s precision respectively. `intervention` is written by `POST /api/interventions`; `config_change` is written at process start (`services/service-start.ts`); `note` by `POST /api/interventions` (a blocked or suppressed action) and the router scheduler (a non-clean poll) Newest first, capped at `limit` (default 10000, max 50000). Absence of a `link_change` in a range never means the link was stable there: it means no transition longer than the sampling resolution was observed, and `linkSamplingSince` is what says whether anything was watching at all.',
     },
   },
 )

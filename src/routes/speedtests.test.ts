@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { Elysia } from 'elysia'
 
 /**
@@ -24,6 +24,11 @@ process.env['LINEWATCH_SPEEDTEST_MIN_INTERVAL_S'] = '300'
 
 const { speedtestsRoutes } = await import('./speedtests.js')
 const { db } = await import('../db/client.js')
+const { resetSharedDb } = await import('../db/test-reset.js')
+
+// Files share one process-global database: start and leave it empty.
+beforeAll(resetSharedDb)
+afterAll(resetSharedDb)
 const { speedTest } = await import('../db/schema.js')
 
 const app = new Elysia().use(speedtestsRoutes)
@@ -100,5 +105,16 @@ describe('POST /api/speedtests/run', () => {
     expect(rows).toHaveLength(1)
     expect(rows[0]?.ok).toBe(false)
     expect(rows[0]?.error).not.toBeNull()
+  })
+})
+
+describe('GET /api/speedtests — bounded lists', () => {
+  test('from > to is 422, and limit is validated', async () => {
+    const inverted = await app.handle(new Request('http://localhost/api/speedtests?from=10&to=5'))
+    expect(inverted.status).toBe(422)
+    const huge = await app.handle(new Request('http://localhost/api/speedtests?limit=100000000'))
+    expect(huge.status).toBe(422)
+    const ok = await app.handle(new Request('http://localhost/api/speedtests?limit=5'))
+    expect(ok.status).toBe(200)
   })
 })

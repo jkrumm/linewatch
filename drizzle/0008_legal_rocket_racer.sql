@@ -1,0 +1,1 @@
+DROP INDEX `wifi_ts`;

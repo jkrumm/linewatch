@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { Elysia } from 'elysia'
 
 /**
@@ -13,6 +13,11 @@ process.env['LINEWATCH_TOKEN'] = 'test-token-not-the-real-one'
 
 const { verdictRoutes } = await import('./verdict.js')
 const { db } = await import('../db/client.js')
+const { resetSharedDb } = await import('../db/test-reset.js')
+
+// Files share one process-global database: start and leave it empty.
+beforeAll(resetSharedDb)
+afterAll(resetSharedDb)
 const { probeSample } = await import('../db/schema.js')
 
 const app = new Elysia().use(verdictRoutes)

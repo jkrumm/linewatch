@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test'
+import { sql } from 'drizzle-orm'
 import { createTestDb } from '../db/test-db.js'
 import {
   event,
@@ -317,5 +318,25 @@ describe('the whole layer over a seeded window', () => {
     expect(verdicts.find((v) => v.id === 'carrier_resync_dated')?.conclusion).not.toContain(
       'was the line',
     )
+  })
+})
+
+describe('collectVerdictInput — stalls beyond the bound-parameter limit', () => {
+  test('40 000 stalled cycles read back whole, with no parameter per cycle', () => {
+    const db = createTestDb()
+    const cycles = 40_000 // SQLite's default bound-variable limit is 32 766
+    db.run(sql`
+      WITH RECURSIVE k(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM k WHERE n < ${cycles - 1}),
+      t(target) AS (VALUES ('gateway'), ('cloudflare'), ('google'), ('quad9'))
+      INSERT INTO probe_sample (ts, target, addr, sent, received, loss_pct, min_ms, med_ms, max_ms, avg_ms)
+      SELECT ${T0} + k.n * ${CYCLE_MS}, t.target, '0.0.0.0', 20, 20, 0, 4, 4, 60, 4 FROM k, t
+    `)
+
+    const wide = { ...PARAMS, to: T0 + cycles * CYCLE_MS, now: T0 + cycles * CYCLE_MS }
+    const input = collectVerdictInput(db, wide)
+
+    expect(input.pathStalls).toHaveLength(cycles)
+    expect(input.pathStalls[0]?.perTarget).toHaveLength(4)
+    expect(input.pathStalls[0]?.linkWatchS).toBeNull()
   })
 })

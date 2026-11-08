@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 import { Elysia } from 'elysia'
 import type { WifiSampleInput } from '../../collector/wifi.js'
 
@@ -23,6 +23,11 @@ process.env['LINEWATCH_TOKEN'] ??= 'test-token-not-the-real-one'
 
 const { wifiRoutes } = await import('./wifi.js')
 const { db } = await import('../db/client.js')
+const { resetSharedDb } = await import('../db/test-reset.js')
+
+// Files share one process-global database: start and leave it empty.
+beforeAll(resetSharedDb)
+afterAll(resetSharedDb)
 const { wifiSample } = await import('../db/schema.js')
 
 const app = new Elysia().use(wifiRoutes)
@@ -171,5 +176,14 @@ describe('GET /api/wifi', () => {
     const { buckets } = await get(`from=${BASE}&to=${BASE + thirtyDays}&bucket=86400`)
     expect(buckets.length).toBeLessThanOrEqual(31)
     expect(buckets.reduce((total, b) => total + b.samples, 0)).toBe(288)
+  })
+})
+
+describe('GET /api/wifi — bounded ranges', () => {
+  test('rejects a bucket under the probe cycle, from > to, and too many buckets', async () => {
+    const url = (q: string) => app.handle(new Request(`http://localhost/api/wifi?${q}`))
+    expect((await url('from=0&to=1000000&bucket=1')).status).toBe(422)
+    expect((await url('from=2000&to=1000&bucket=300')).status).toBe(422)
+    expect((await url(`from=0&to=${10_001 * 300_000}&bucket=300`)).status).toBe(422)
   })
 })

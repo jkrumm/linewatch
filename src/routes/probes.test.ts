@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
+import { sql } from 'drizzle-orm'
 import { Elysia } from 'elysia'
 import { parsePingOutput } from '../../collector/ping-parser.js'
 import type { LinkTransition } from '../../collector/link-sampler.js'
@@ -32,7 +33,12 @@ process.env['LINEWATCH_HOME_GATEWAY'] = HOME_GW
 
 const { probesRoutes } = await import('./probes.js')
 const { db } = await import('../db/client.js')
-const { event, probeCycle, probeSample, wifiSample } = await import('../db/schema.js')
+const { resetSharedDb } = await import('../db/test-reset.js')
+
+// Files share one process-global database: start and leave it empty.
+beforeAll(resetSharedDb)
+afterAll(resetSharedDb)
+const { event, outage, probeCycle, probeSample, wifiSample } = await import('../db/schema.js')
 
 const app = new Elysia().use(probesRoutes)
 
@@ -636,5 +642,162 @@ describe('GET /api/probes — the vantage reaches the read path', () => {
     }
     expect(body.vantage[0]?.onHomeLine).toBe('none')
     expect(body.vantage[0]?.offHomeLineCycles).toBe(1)
+  })
+})
+
+/** Every target of a cycle with zero replies — the shape that opens an outage. */
+function downSamples() {
+  return samples().map((s) => ({
+    ...s,
+    received: 0,
+    lossPct: 100,
+    minMs: null,
+    medMs: null,
+    maxMs: null,
+    avgMs: null,
+    jitterMs: null,
+    samples: null,
+  }))
+}
+
+describe('POST /api/probes — one transaction per cycle', () => {
+  test('a failure mid-ingest leaves nothing behind, and the retry stores everything', async () => {
+    const ts = freshTs()
+    const body = {
+      ...batch(ts, ETHERNET, [{ ts: ts + 5_000, state: 'down' as const }]),
+      samples: downSamples(),
+      wifi: { iface: 'en1', status: 'Connected' },
+    }
+
+    // The Wi-Fi insert is the last write before the outage machine: failing it
+    // strands every earlier write unless they roll back together.
+    db.run(
+      sql`CREATE TRIGGER fail_wifi BEFORE INSERT ON wifi_sample BEGIN SELECT RAISE(ABORT, 'boom'); END`,
+    )
+    let failed: Response
+    try {
+      failed = await post(body)
+    } finally {
+      db.run(sql`DROP TRIGGER fail_wifi`)
+    }
+    expect(failed.status).toBe(500)
+    expect(samplesAt(ts)).toHaveLength(0)
+    expect(cycleRow(ts)).toBeUndefined()
+    expect(
+      db
+        .select()
+        .from(event)
+        .all()
+        .filter((e) => e.ts === ts + 5_000),
+    ).toHaveLength(0)
+    expect(
+      db
+        .select()
+        .from(outage)
+        .all()
+        .filter((o) => o.startedAt === ts),
+    ).toHaveLength(0)
+
+    const retry = await post(body)
+    expect(retry.status).toBe(200)
+    expect(await retry.json()).toMatchObject({ inserted: 4, skipped: false, cycleStored: true })
+    expect(samplesAt(ts)).toHaveLength(4)
+    expect(cycleRow(ts)).toBeDefined()
+    expect(
+      db
+        .select()
+        .from(wifiSample)
+        .all()
+        .filter((w) => w.ts === ts),
+    ).toHaveLength(1)
+    expect(
+      db
+        .select()
+        .from(event)
+        .all()
+        .filter((e) => e.ts === ts + 5_000),
+    ).toHaveLength(1)
+    // The detector's in-memory state was rebuilt on rollback, so the retry
+    // opens exactly one outage per scope instead of extending a phantom one.
+    const outages = db
+      .select()
+      .from(outage)
+      .all()
+      .filter((o) => o.startedAt === ts)
+    expect(outages.map((o) => o.scope).sort()).toEqual(['gateway', 'wan'])
+    expect(outages.every((o) => o.cycles === 1)).toBe(true)
+  })
+})
+
+describe('POST /api/probes — unknown targets', () => {
+  test('a target the server does not know never votes on the outage state', async () => {
+    const ts = freshTs()
+    // Both known scopes are up; the only down result is a typo'd name with an
+    // address nobody configured. It used to default to `wan` and vote.
+    const stray = { ...downSamples()[1]!, target: 'cloudflair', addr: '203.0.113.99' }
+    const res = await post({ ...batch(ts, ETHERNET), samples: [...samples(), stray] })
+
+    expect(res.status).toBe(200)
+    expect(samplesAt(ts)).toHaveLength(5)
+    expect(
+      db
+        .select()
+        .from(outage)
+        .all()
+        .filter((o) => o.startedAt === ts),
+    ).toHaveLength(0)
+  })
+
+  test('a renamed target is still recognised by its address', async () => {
+    const ts = freshTs()
+    const renamed = downSamples().map((s) =>
+      s.target === 'gateway' ? s : { ...s, target: `${s.target}-renamed` },
+    )
+    await post({ ...batch(ts, ETHERNET), samples: renamed })
+
+    const wan = db
+      .select()
+      .from(outage)
+      .all()
+      .filter((o) => o.startedAt === ts && o.scope === 'wan')
+    expect(wan).toHaveLength(1)
+  })
+
+  test('a batch of unknown targets does not close an open outage', async () => {
+    const ts = freshTs()
+    await post({ ...batch(ts, ETHERNET), samples: downSamples() })
+    const openBefore = db
+      .select()
+      .from(outage)
+      .all()
+      .filter((o) => o.endedAt === null)
+    expect(openBefore.length).toBeGreaterThan(0)
+
+    const strays = samples().map((s) => ({ ...s, target: `x-${s.target}`, addr: '203.0.113.1' }))
+    await post({ ...batch(ts + 30_000, ETHERNET), samples: strays })
+
+    const openAfter = db
+      .select()
+      .from(outage)
+      .all()
+      .filter((o) => o.endedAt === null)
+    expect(openAfter).toHaveLength(openBefore.length)
+  })
+})
+
+describe('GET /api/probes — bounded ranges', () => {
+  const get = (query: string) => app.handle(new Request(`http://localhost/api/probes?${query}`))
+
+  test('rejects bucket=1 (below the probe cycle), from > to, and a span of too many buckets', async () => {
+    expect((await get('from=0&to=1000000&bucket=1')).status).toBe(422)
+    expect((await get('from=2000&to=1000&bucket=60')).status).toBe(422)
+    expect((await get(`from=0&to=${10_001 * 60_000}&bucket=60`)).status).toBe(422)
+  })
+
+  test("accepts the dashboard's widest windows", async () => {
+    const day = 86_400_000
+    expect((await get(`from=${-30 * day}&to=0&bucket=14400`)).status).toBe(200)
+    expect((await get(`from=${-365 * day}&to=0&bucket=86400`)).status).toBe(200)
+    expect((await get(`from=${-day}&to=0&bucket=300`)).status).toBe(200)
   })
 })

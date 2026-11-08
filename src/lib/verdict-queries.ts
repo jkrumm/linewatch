@@ -245,23 +245,37 @@ function resyncClusters(
     current.push(row.up_at)
   }
 
+  if (groups.length === 0) return []
+
+  // One query for every cluster rather than one per cluster: all WAN outages
+  // that could touch any cluster's attribution window, matched in memory.
+  const window = VERDICT_THRESHOLDS.resyncOutageWindowMs
+  const firstUpAt = groups[0]?.[0] ?? 0
+  const lastUpAt = Math.max(...groups.map((g) => g[0] ?? 0))
+  const candidates = db.all<{
+    id: number
+    started_at: number
+    ended_at: number | null
+    duration_s: number | null
+  }>(sql`
+    SELECT id, started_at, ended_at, duration_s FROM outage
+    WHERE scope = 'wan' AND started_at <= ${lastUpAt + window}
+      AND (ended_at IS NULL OR ended_at >= ${firstUpAt - window})
+    ORDER BY started_at DESC
+  `)
+
   return groups.map((instants) => {
     const first = instants[0] ?? 0
     const last = instants[instants.length - 1] ?? first
     // The cluster's own midpoint would smooth the disagreement away; the
     // earliest instant is the one a counter carried forward unchanged.
     const upAt = first
-    const window = VERDICT_THRESHOLDS.resyncOutageWindowMs
-    const outage = one(
-      db.all<{ id: number; ended_at: number | null; duration_s: number | null }>(sql`
-        SELECT id, ended_at, duration_s FROM outage
-        WHERE scope = 'wan' AND started_at <= ${upAt + window}
-          AND (ended_at IS NULL OR ended_at >= ${upAt - window})
-        ORDER BY started_at DESC LIMIT 1
-      `),
+    // Newest-first, so `find` returns the latest-starting overlapping outage.
+    const outage = candidates.find(
+      (o) => o.started_at <= upAt + window && (o.ended_at === null || o.ended_at >= upAt - window),
     )
     const matched: ResyncOutage | null =
-      outage === null
+      outage === undefined
         ? null
         : { id: outage.id, endedAt: outage.ended_at, durationS: outage.duration_s }
     return {
@@ -290,7 +304,10 @@ function pathStalls(
   to: number,
   expectedTargetCount: number,
 ): PathStall[] {
-  const rows = db.all<{ ts: number; min_ratio: number; max_loss: number }>(sql`
+  // The qualifying cycles stay a CTE joined against, never a list of bound
+  // `ts` values: a long window can stall thousands of cycles and one parameter
+  // per cycle overruns SQLite's bound-variable limit.
+  const stalls = sql`
     WITH c AS (
       SELECT ts,
         COUNT(*) AS n,
@@ -299,36 +316,40 @@ function pathStalls(
       FROM probe_sample
       WHERE ts >= ${from} AND ts <= ${to} AND med_ms IS NOT NULL AND max_ms IS NOT NULL
       GROUP BY ts
+    ), stall AS (
+      SELECT ts, min_ratio, max_loss
+      FROM c
+      WHERE n = ${expectedTargetCount} AND min_ratio >= ${VERDICT_THRESHOLDS.pathStallMinRatio} AND max_loss = 0
     )
-    SELECT ts, min_ratio, max_loss
-    FROM c
-    WHERE n = ${expectedTargetCount} AND min_ratio >= ${VERDICT_THRESHOLDS.pathStallMinRatio} AND max_loss = 0
-    ORDER BY ts
+  `
+  const rows = db.all<{ ts: number; min_ratio: number; max_loss: number }>(sql`
+    ${stalls}
+    SELECT ts, min_ratio, max_loss FROM stall ORDER BY ts
   `)
   if (rows.length === 0) return []
 
-  const stallTs = rows.map((row) => row.ts)
   const detail = db.all<{ ts: number; target: string; med_ms: number; max_ms: number }>(sql`
-    SELECT ts, target, med_ms, max_ms FROM probe_sample
-    WHERE ts IN (${sql.join(
-      stallTs.map((ts) => sql`${ts}`),
-      sql`, `,
-    )}) AND med_ms IS NOT NULL AND max_ms IS NOT NULL
-    ORDER BY ts, target
+    ${stalls}
+    SELECT p.ts, p.target, p.med_ms, p.max_ms FROM probe_sample p
+    JOIN stall ON stall.ts = p.ts
+    WHERE p.med_ms IS NOT NULL AND p.max_ms IS NOT NULL
+    ORDER BY p.ts, p.target
   `)
   const watch = db.all<{ ts: number; link_watch_s: number | null }>(sql`
-    SELECT ts, link_watch_s FROM probe_cycle
-    WHERE ts IN (${sql.join(
-      stallTs.map((ts) => sql`${ts}`),
-      sql`, `,
-    )})
+    ${stalls}
+    SELECT pc.ts, pc.link_watch_s FROM probe_cycle pc JOIN stall ON stall.ts = pc.ts
   `)
   const watchByTs = new Map(watch.map((row) => [row.ts, row.link_watch_s]))
 
+  const detailByTs = new Map<number, { target: string; medMs: number; maxMs: number }[]>()
+  for (const d of detail) {
+    const list = detailByTs.get(d.ts) ?? []
+    list.push({ target: d.target, medMs: d.med_ms, maxMs: d.max_ms })
+    detailByTs.set(d.ts, list)
+  }
+
   return rows.map((row) => {
-    const perTarget = detail
-      .filter((d) => d.ts === row.ts)
-      .map((d) => ({ target: d.target, medMs: d.med_ms, maxMs: d.max_ms }))
+    const perTarget = detailByTs.get(row.ts) ?? []
     return {
       ts: row.ts,
       targetCount: perTarget.length,
@@ -380,30 +401,50 @@ function gatewayOutages(
     ORDER BY o.started_at
   `)
 
-  return rows.map((row) => {
-    const anchors = db
-      .all<{ target: string; received: number; sent: number; med_ms: number | null }>(sql`
-        SELECT target, received, sent, med_ms FROM probe_sample
-        WHERE ts = ${row.started_at} AND target IN (${inTargets(wanTargets)})
-        ORDER BY target
-      `)
-      .map((a): AnchorReply => ({
-        target: a.target,
-        received: a.received,
-        sent: a.sent,
-        medMs: a.med_ms,
-      }))
+  if (rows.length === 0) return []
 
-    const cycle = one(
-      db.all<{ on_home_line: number | null; gateway_addr: string | null }>(sql`
-        SELECT on_home_line, gateway_addr FROM probe_cycle WHERE ts = ${row.started_at}
-      `),
-    )
-    const previous = one(
-      db.all<{ gateway_addr: string | null }>(sql`
-        SELECT gateway_addr FROM probe_cycle WHERE ts < ${row.started_at} ORDER BY ts DESC LIMIT 1
-      `),
-    )
+  // Anchors, vantage and the previous cycle's gateway for every gateway outage
+  // in the range, in one query each instead of three per outage.
+  const anchorRows = db.all<{
+    outage_id: number
+    target: string
+    received: number
+    sent: number
+    med_ms: number | null
+  }>(sql`
+    SELECT o.id AS outage_id, p.target, p.received, p.sent, p.med_ms
+    FROM outage o
+    JOIN probe_sample p ON p.ts = o.started_at
+    WHERE o.scope = 'gateway' AND o.started_at >= ${from} AND o.started_at <= ${to}
+      AND p.target IN (${inTargets(wanTargets)})
+    ORDER BY o.id, p.target
+  `)
+  const anchorsByOutage = new Map<number, AnchorReply[]>()
+  for (const a of anchorRows) {
+    const list = anchorsByOutage.get(a.outage_id) ?? []
+    list.push({ target: a.target, received: a.received, sent: a.sent, medMs: a.med_ms })
+    anchorsByOutage.set(a.outage_id, list)
+  }
+
+  const vantageRows = db.all<{
+    outage_id: number
+    on_home_line: number | null
+    gateway_addr: string | null
+    previous_gateway_addr: string | null
+  }>(sql`
+    SELECT o.id AS outage_id, pc.on_home_line, pc.gateway_addr,
+      (SELECT prev.gateway_addr FROM probe_cycle prev
+        WHERE prev.ts < o.started_at ORDER BY prev.ts DESC LIMIT 1) AS previous_gateway_addr
+    FROM outage o
+    LEFT JOIN probe_cycle pc ON pc.ts = o.started_at
+    WHERE o.scope = 'gateway' AND o.started_at >= ${from} AND o.started_at <= ${to}
+  `)
+  const vantageByOutage = new Map(vantageRows.map((v) => [v.outage_id, v]))
+
+  return rows.map((row) => {
+    const anchors = anchorsByOutage.get(row.id) ?? []
+    const cycle = vantageByOutage.get(row.id)
+    const previous = cycle ? { gateway_addr: cycle.previous_gateway_addr } : null
 
     return {
       outageId: row.id,

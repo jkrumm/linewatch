@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from 'bun:test'
+import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'bun:test'
 import { Elysia } from 'elysia'
 
 /**
@@ -19,6 +19,11 @@ process.env['LINEWATCH_TOKEN'] ??= 'test-token-not-the-real-one'
 
 const { eventsRoutes } = await import('./events.js')
 const { db } = await import('../db/client.js')
+const { resetSharedDb } = await import('../db/test-reset.js')
+
+// Files share one process-global database: start and leave it empty.
+beforeAll(resetSharedDb)
+afterAll(resetSharedDb)
 const { event, probeCycle } = await import('../db/schema.js')
 
 const app = new Elysia().use(eventsRoutes)
@@ -141,5 +146,21 @@ describe('GET /api/events', () => {
 
     const { linkSamplingSince } = await get(`from=${BASE + 300_000}&to=${BASE + 900_000}`)
     expect(linkSamplingSince).toBe(BASE + 600_000)
+  })
+})
+
+describe('GET /api/events — bounded lists', () => {
+  test('limit caps the rows, newest first; from > to and an oversized limit are 422', async () => {
+    db.insert(event)
+      .values([0, 1, 2].map((i) => ({ ts: BASE + i, kind: 'note' as const, detail: '{}' })))
+      .run()
+
+    const { events } = await get('limit=2')
+    expect(events.map((e) => e.ts)).toEqual([BASE + 2, BASE + 1])
+
+    const inverted = await app.handle(new Request('http://localhost/api/events?from=10&to=5'))
+    expect(inverted.status).toBe(422)
+    const huge = await app.handle(new Request('http://localhost/api/events?limit=100000000'))
+    expect(huge.status).toBe(422)
   })
 })

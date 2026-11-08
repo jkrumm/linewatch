@@ -1,10 +1,12 @@
 import { config } from '../config.js'
 
 /**
- * Per-route bearer check (docs/DESIGN.md API table). Applied individually to
- * `POST /api/probes` — the one route that writes to the historical record, and
- * the one an attacker could use to forge it — rather than as a global guard;
- * every other route is intentionally open on the tailnet.
+ * Per-route bearer check (docs/DESIGN.md API table). Applied individually to the
+ * five routes that write to the historical record or act on the line from
+ * outside — `POST /api/probes`, `POST /api/interventions`, `POST /api/router/poll`,
+ * `POST /api/router/actions/reconnect` and `POST /api/router/actions/reboot` —
+ * rather than as a global guard; every other route is intentionally open on the
+ * tailnet.
  *
  * `POST /api/speedtests/run` deliberately does *not* use this: it is a dashboard
  * button with no token to present, it writes only a measurement it takes itself,

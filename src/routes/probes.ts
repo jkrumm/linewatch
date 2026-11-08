@@ -6,6 +6,7 @@ import { db } from '../db/client.js'
 import { event, probeSample, wifiSample } from '../db/schema.js'
 import { config } from '../config.js'
 import { hasValidBearer } from '../lib/auth.js'
+import { rangeProblem } from '../lib/query-limits.js'
 import { outageDetector } from '../services/outage-detector-instance.js'
 import type { TargetCycleResult } from '../services/outage-detector.js'
 import { recordCycleVantage } from '../services/cycle-vantage.js'
@@ -246,90 +247,124 @@ function recordWifiSample(ts: number, wifi: z.infer<typeof WifiInput>): void {
     .run()
 }
 
+type IngestBodyT = z.infer<typeof IngestBody>
+
+/**
+ * Which scope a sample's target belongs to, or null for a target this server
+ * does not know. Name first, then address: the name is what the collector is
+ * configured with, the address survives a rename. An unknown target is stored
+ * as a sample but never fed to the outage machine — defaulting it to `wan`
+ * once let a typo'd target vote on whether the line was down.
+ */
+function scopeOf(sample: { target: string; addr: string }): TargetCycleResult['scope'] | null {
+  const known =
+    config.targets.find((t) => t.name === sample.target) ??
+    config.targets.find((t) => t.addr === sample.addr)
+  return known?.scope ?? null
+}
+
+/** The whole write path of one cycle; the caller owns the transaction. */
+function ingestCycle(body: IngestBodyT) {
+  // Idempotency: a spool replay resends an already-ingested cycle
+  // verbatim. One POST is always exactly one cycle (one `ts`, every
+  // target) — see collector/probe.ts — so "a row for this ts already
+  // exists" means the whole batch was already recorded (the transaction
+  // guarantees the rest of it is there too).
+  const existing = db
+    .select({ id: probeSample.id })
+    .from(probeSample)
+    .where(eq(probeSample.ts, body.ts))
+    .limit(1)
+    .all()
+  if (existing.length > 0) {
+    // `cycleStored: false` with `skipped: true` is the correct outcome, not
+    // a warning: the vantage for this ts was stored the first time round.
+    return {
+      ok: true as const,
+      inserted: 0,
+      skipped: true,
+      linkChange: false,
+      cycleStored: false,
+    }
+  }
+
+  db.insert(probeSample)
+    .values(
+      body.samples.map((sample) => ({
+        ts: body.ts,
+        target: sample.target,
+        addr: sample.addr,
+        sent: sample.sent,
+        received: sample.received,
+        lossPct: sample.lossPct,
+        minMs: sample.minMs,
+        medMs: sample.medMs,
+        maxMs: sample.maxMs,
+        avgMs: sample.avgMs,
+        jitterMs: sample.jitterMs,
+        samples: sample.samples ? JSON.stringify(sample.samples) : null,
+        duplicates: sample.duplicates ?? null,
+        outOfWaitTime: sample.outOfWaitTime ?? null,
+      })),
+    )
+    .run()
+
+  // Written before the outage machine runs so that if a link_change and an
+  // outage land on the same cycle, the timeline already carries the cause.
+  const cycle = body.cycle
+    ? recordCycleVantage(db, {
+        ts: body.ts,
+        vantage: body.cycle,
+        homeGatewayAddr: config.homeGatewayAddr,
+      })
+    : { inserted: false, linkChangeEventId: null }
+
+  // Same reasoning as the vantage above: written before the outage machine
+  // runs, so a link transition inside an outage is already on the timeline
+  // when the outage lands. Nothing here is reached on a replay — the
+  // `skipped: true` branch returned long before.
+  const linkEventsWritten = body.linkEvents
+    ? recordLinkTransitions(body.linkEvents, body.cycle?.pathIf ?? null)
+    : 0
+
+  // One cycle in ten carries this; the rest carry nothing and that is not a
+  // gap in the radio's history, it is the sampling cadence.
+  if (body.wifi) recordWifiSample(body.ts, body.wifi)
+
+  const cycleResults: TargetCycleResult[] = body.samples.flatMap((sample) => {
+    const scope = scopeOf(sample)
+    return scope ? [{ target: sample.target, scope, down: sample.received === 0 }] : []
+  })
+  outageDetector.ingest(body.ts, cycleResults)
+
+  return {
+    ok: true as const,
+    inserted: body.samples.length,
+    skipped: false,
+    linkChange: cycle.linkChangeEventId !== null || linkEventsWritten > 0,
+    cycleStored: cycle.inserted,
+  }
+}
+
 export const probesRoutes = new Elysia()
   .post(
     '/api/probes',
     ({ body, headers, status }) => {
       if (!hasValidBearer(headers)) return status(401, 'Unauthorized')
 
-      // Idempotency: a spool replay resends an already-ingested cycle
-      // verbatim. One POST is always exactly one cycle (one `ts`, every
-      // target) — see collector/probe.ts — so "a row for this ts already
-      // exists" means the whole batch was already recorded.
-      const existing = db
-        .select({ id: probeSample.id })
-        .from(probeSample)
-        .where(eq(probeSample.ts, body.ts))
-        .limit(1)
-        .all()
-      if (existing.length > 0) {
-        // `cycleStored: false` with `skipped: true` is the correct outcome, not
-        // a warning: the vantage for this ts was stored the first time round.
-        return {
-          ok: true as const,
-          inserted: 0,
-          skipped: true,
-          linkChange: false,
-          cycleStored: false,
-        }
-      }
-
-      db.insert(probeSample)
-        .values(
-          body.samples.map((sample) => ({
-            ts: body.ts,
-            target: sample.target,
-            addr: sample.addr,
-            sent: sample.sent,
-            received: sample.received,
-            lossPct: sample.lossPct,
-            minMs: sample.minMs,
-            medMs: sample.medMs,
-            maxMs: sample.maxMs,
-            avgMs: sample.avgMs,
-            jitterMs: sample.jitterMs,
-            samples: sample.samples ? JSON.stringify(sample.samples) : null,
-            duplicates: sample.duplicates ?? null,
-            outOfWaitTime: sample.outOfWaitTime ?? null,
-          })),
-        )
-        .run()
-
-      // Written before the outage machine runs so that if a link_change and an
-      // outage land on the same cycle, the timeline already carries the cause.
-      const cycle = body.cycle
-        ? recordCycleVantage(db, {
-            ts: body.ts,
-            vantage: body.cycle,
-            homeGatewayAddr: config.homeGatewayAddr,
-          })
-        : { inserted: false, linkChangeEventId: null }
-
-      // Same reasoning as the vantage above: written before the outage machine
-      // runs, so a link transition inside an outage is already on the timeline
-      // when the outage lands. Nothing here is reached on a replay — the
-      // `skipped: true` branch returned long before.
-      const linkEventsWritten = body.linkEvents
-        ? recordLinkTransitions(body.linkEvents, body.cycle?.pathIf ?? null)
-        : 0
-
-      // One cycle in ten carries this; the rest carry nothing and that is not a
-      // gap in the radio's history, it is the sampling cadence.
-      if (body.wifi) recordWifiSample(body.ts, body.wifi)
-
-      const cycleResults: TargetCycleResult[] = body.samples.map((sample) => ({
-        target: sample.target,
-        scope: config.targets.find((t) => t.name === sample.target)?.scope ?? 'wan',
-        down: sample.received === 0,
-      }))
-      outageDetector.ingest(body.ts, cycleResults)
-
-      return {
-        ok: true as const,
-        inserted: body.samples.length,
-        skipped: false,
-        linkChange: cycle.linkChangeEventId !== null || linkEventsWritten > 0,
-        cycleStored: cycle.inserted,
+      // One transaction for the whole cycle. Without it a failure after the
+      // sample insert left the samples committed, so the collector's replay hit
+      // the `existing` check and returned `skipped` — the vantage, link
+      // events, Wi-Fi sample and outage transition were lost for good. Every
+      // writer here shares the one SQLite connection, so the detector's own
+      // writes join this transaction.
+      try {
+        return db.transaction(() => ingestCycle(body))
+      } catch (err) {
+        // The detector's in-memory `open` map was advanced by writes that just
+        // rolled back; rebuild it from what is actually committed.
+        outageDetector.load()
+        throw err
       }
     },
     {
@@ -363,7 +398,9 @@ export const probesRoutes = new Elysia()
   )
   .get(
     '/api/probes',
-    ({ query }) => {
+    ({ query, status }) => {
+      const problem = rangeProblem({ from: query.from, to: query.to, bucket: query.bucket })
+      if (problem) return status(422, problem)
       const params = {
         from: query.from,
         to: query.to,
@@ -384,10 +421,13 @@ export const probesRoutes = new Elysia()
         target: z.string().optional(),
         bucket: z.coerce.number().int().min(1).default(3600),
       }),
-      response: z.object({
-        buckets: z.array(ProbeBucketSchema),
-        vantage: z.array(VantageBucketSchema),
-      }),
+      response: {
+        200: z.object({
+          buckets: z.array(ProbeBucketSchema),
+          vantage: z.array(VantageBucketSchema),
+        }),
+        422: z.string(),
+      },
       detail: {
         tags: ['Probes'],
         summary: 'Server-bucketed probe timeseries',

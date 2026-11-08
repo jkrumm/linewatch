@@ -2,6 +2,7 @@ import { Elysia } from 'elysia'
 import { sql } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '../db/client.js'
+import { rangeProblem } from '../lib/query-limits.js'
 
 /**
  * The Wi-Fi radio history: **an alternate radio path currently attached**,
@@ -118,7 +119,9 @@ function roundOrNull(value: number | null, places: number): number | null {
 
 export const wifiRoutes = new Elysia().get(
   '/api/wifi',
-  ({ query }) => {
+  ({ query, status }) => {
+    const problem = rangeProblem({ from: query.from, to: query.to, bucket: query.bucket })
+    if (problem) return status(422, problem)
     const bucketMs = Math.max(1, Math.round(query.bucket * 1000))
 
     const rows = db.all<WifiBucketRow>(sql`
@@ -189,12 +192,15 @@ export const wifiRoutes = new Elysia().get(
         .default(300)
         .describe('Bucket width in seconds (default 300 = the sampling cadence)'),
     }),
-    response: z.object({
-      from: z.number().int(),
-      to: z.number().int(),
-      bucketSeconds: z.number().int(),
-      buckets: z.array(WifiBucketSchema),
-    }),
+    response: {
+      200: z.object({
+        from: z.number().int(),
+        to: z.number().int(),
+        bucketSeconds: z.number().int(),
+        buckets: z.array(WifiBucketSchema),
+      }),
+      422: z.string(),
+    },
     detail: {
       tags: ['Status'],
       summary: 'Wi-Fi radio history',

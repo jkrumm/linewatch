@@ -475,7 +475,7 @@ describe('sub_cycle_path_stall', () => {
     const [v] = subCyclePathStall(baseInput({ pathStalls: [{ ...stall, linkWatchS: 30 }] }))
     expect(v?.uncertainty).toBeNull()
     expect(v?.action).toBe(
-      'No link transition longer than the 1 s sampling resolution was observed; check host load at that instant.',
+      'No link transition longer than the ~2 s sampling resolution was observed; check host load at that instant.',
     )
   })
 

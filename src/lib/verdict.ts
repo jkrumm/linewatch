@@ -758,7 +758,7 @@ export function subCyclePathStall(input: VerdictInput): Verdict[] {
       const action = !sampled
         ? 'The link sampler was not running here — enable it so the next one is attributed.'
         : input.linkState.transitions === 0
-          ? 'No link transition longer than the 1 s sampling resolution was observed; check host load at that instant.'
+          ? 'No link transition longer than the ~2 s sampling resolution was observed; check host load at that instant.'
           : 'A host link transition was recorded in this window — check `GET /api/events` for the `link_change` nearest this instant.'
 
       return verdict({

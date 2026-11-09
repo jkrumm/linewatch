@@ -108,7 +108,7 @@ export const eventsRoutes = new Elysia().get(
           .int()
           .nullable()
           .describe(
-            'Earliest cycle in this window that actually watched the link (`probe_cycle.link_watch_s > 0`), or null when none did — a cycle reporting 0 watched seconds is the sampler saying it observed nothing, not coverage. Read it before reading an empty `events` array: with a value, no transition longer than the ~1 s sampling resolution was observed after it; with null, nothing was watching and the empty array says nothing about the link.',
+            'Earliest cycle in this window that actually watched the link (`probe_cycle.link_watch_s > 0`), or null when none did — a cycle reporting 0 watched seconds is the sampler saying it observed nothing, not coverage. Read it before reading an empty `events` array: with a value, no transition longer than the ~2 s sampling resolution was observed after it; with null, nothing was watching and the empty array says nothing about the link.',
           ),
       }),
       422: z.string(),

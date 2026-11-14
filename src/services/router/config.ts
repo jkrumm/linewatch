@@ -139,7 +139,7 @@ export function buildRouterConfig(env: NodeJS.ProcessEnv): RouterConfig {
   const cron = resolvePollCron(env['LINEWATCH_ROUTER_CRON'] ?? DEFAULT_CRON)
   return {
     enabled: password !== null && !switchedOff,
-    baseUrl: env['LINEWATCH_ROUTER_URL'] ?? 'http://192.168.1.1',
+    baseUrl: env['LINEWATCH_ROUTER_URL'] ?? 'https://192.168.1.1',
     // Not "admin": this firmware's login payload and MD5 hash both use "user".
     user: env['LINEWATCH_ROUTER_USER'] ?? 'user',
     password,

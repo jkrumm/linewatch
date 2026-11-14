@@ -50,3 +50,32 @@ describe('heartbeat.ts with a hung API', () => {
     expect(pushes[0]?.searchParams.get('msg')).toContain('linewatch API unreachable')
   })
 })
+
+describe('heartbeat.ts when the push is not delivered', () => {
+  async function exitCodeWithKuma(kumaFetch: () => Response | Promise<Response>): Promise<number> {
+    const hung = Bun.serve({ port: 0, fetch: () => new Promise<Response>(() => {}) })
+    const kuma = Bun.serve({ port: 0, fetch: kumaFetch })
+    servers.push(hung, kuma)
+    const proc = Bun.spawn(['bun', 'run', SCRIPT], {
+      stdout: 'pipe',
+      stderr: 'pipe',
+      env: {
+        ...process.env,
+        LINEWATCH_API_URL: `http://127.0.0.1:${hung.port}`,
+        LINEWATCH_KUMA_PUSH_URL: `http://127.0.0.1:${kuma.port}/api/push/token`,
+        LINEWATCH_HEARTBEAT_API_TIMEOUT_MS: '200',
+        LINEWATCH_HEARTBEAT_PUSH_TIMEOUT_MS: '400',
+        LINEWATCH_HEARTBEAT_LOG_PATH: join(import.meta.dir, '.nonexistent-heartbeat.log'),
+      },
+    })
+    return proc.exited
+  }
+
+  test('exits 75 (EX_TEMPFAIL) when Kuma answers 502', async () => {
+    expect(await exitCodeWithKuma(() => new Response('bad gateway', { status: 502 }))).toBe(75)
+  })
+
+  test('exits 75 when the push times out', async () => {
+    expect(await exitCodeWithKuma(() => new Promise<Response>(() => {}))).toBe(75)
+  })
+})

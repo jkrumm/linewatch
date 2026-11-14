@@ -48,6 +48,9 @@ import { DEFAULT_LOG_MAX_BYTES, rotateLogIfNeeded } from './log-rotate.js'
 import { positiveNumberFromEnv } from './env.js'
 import { decideHeartbeat, type StatusSnapshot } from './heartbeat-verdict.js'
 
+/** EX_TEMPFAIL: the check ran, the push to Uptime Kuma was not delivered. */
+const EXIT_PUSH_UNDELIVERED = 75
+
 const config = {
   apiUrl: process.env['LINEWATCH_API_URL'] ?? 'http://localhost:7731',
   pushUrl: process.env['LINEWATCH_KUMA_PUSH_URL'] ?? null,
@@ -187,10 +190,13 @@ async function main(): Promise<void> {
   const delivered = await push(pushUrl, verdict.status, verdict.msg)
   log('heartbeat', { status: verdict.status, reason: verdict.reason, delivered, msg: verdict.msg })
 
-  // A push that did not land is not a heartbeat. Non-zero so launchd records it
-  // and `make heartbeat-logs` shows it — though the authoritative consequence is
-  // the one nobody here controls: Kuma stops hearing from us and says so.
-  if (!delivered) process.exit(2)
+  // A push that did not land is not a heartbeat. Exit 75 (EX_TEMPFAIL) rather
+  // than a generic code: dotfiles' `jobs-grade` reads 75 from a jobrun-wrapped
+  // heartbeat as "the check ran, the push to Kuma was not delivered" and grades
+  // it `undelivered`, not the job failing. Every other non-zero stays this
+  // job's own fault (no push URL, a crash). The authoritative consequence is the
+  // one nobody here controls: Kuma stops hearing from us and says so.
+  if (!delivered) process.exit(EXIT_PUSH_UNDELIVERED)
 }
 
 await main()

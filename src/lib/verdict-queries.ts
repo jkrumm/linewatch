@@ -113,43 +113,46 @@ function throughputCandidates(
   from: number,
   to: number,
 ): ThroughputCandidate[] {
+  // Two statements, never `FROM t, v`: SQLite re-ran the `probe_cycle`
+  // aggregate once per speed-test row on that join (~720 tests × a 30-day scan —
+  // 18 s measured on the live record, 2026-11-14), and a synchronous handler
+  // that long stops the whole single-threaded server answering anything, the
+  // collector's POSTs and the heartbeat's read included.
+  const link = one(
+    db.all<{ max_link: number | null; n: number }>(sql`
+      SELECT MAX(link_mbit) AS max_link, COUNT(*) AS n
+      FROM probe_cycle WHERE link_mbit IS NOT NULL AND ts >= ${from} AND ts <= ${to}
+    `),
+  )
+
+  // A range with no link speed on record has nothing to contradict, so there is
+  // no verdict — not a comparison against an assumed rate.
+  if (link === null || link.max_link === null || link.n === 0) return []
+  const { max_link: maxLink, n: vantageCycles } = link
+
   const rows = db.all<{
     id: number
     ts: number
     bytes_down: number
     duration_s: number
     wire_mbps: number
-    max_link: number | null
-    n: number
   }>(sql`
-    WITH t AS (
-      SELECT id, ts, bytes_down, duration_s, bytes_down * 8.0 / 1e6 / duration_s AS wire_mbps
-      FROM speed_test
-      WHERE ok = 1 AND bytes_down IS NOT NULL AND duration_s IS NOT NULL AND duration_s > 0
-        AND ts >= ${from} AND ts <= ${to}
-    ),
-    v AS (
-      SELECT MAX(link_mbit) AS max_link, COUNT(*) AS n
-      FROM probe_cycle WHERE link_mbit IS NOT NULL AND ts >= ${from} AND ts <= ${to}
-    )
-    SELECT t.id, t.ts, t.bytes_down, t.duration_s, t.wire_mbps, v.max_link, v.n
-    FROM t, v
-    ORDER BY t.ts
+    SELECT id, ts, bytes_down, duration_s, bytes_down * 8.0 / 1e6 / duration_s AS wire_mbps
+    FROM speed_test
+    WHERE ok = 1 AND bytes_down IS NOT NULL AND duration_s IS NOT NULL AND duration_s > 0
+      AND ts >= ${from} AND ts <= ${to}
+    ORDER BY ts
   `)
 
-  // A range with no link speed on record has nothing to contradict, so there is
-  // no verdict — not a comparison against an assumed rate.
-  return rows
-    .filter((row): row is typeof row & { max_link: number } => row.max_link !== null && row.n > 0)
-    .map((row) => ({
-      speedTestId: row.id,
-      ts: row.ts,
-      bytesDown: row.bytes_down,
-      durationS: row.duration_s,
-      wireMbps: row.wire_mbps,
-      maxLinkMbit: row.max_link,
-      vantageCycles: row.n,
-    }))
+  return rows.map((row) => ({
+    speedTestId: row.id,
+    ts: row.ts,
+    bytesDown: row.bytes_down,
+    durationS: row.duration_s,
+    wireMbps: row.wire_mbps,
+    maxLinkMbit: maxLink,
+    vantageCycles,
+  }))
 }
 
 /**

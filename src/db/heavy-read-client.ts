@@ -38,35 +38,39 @@ export interface HeavyReader {
 export function createHeavyReader(
   source: { dbPath: string } | { inline: BunSQLiteDatabase<typeof schema> },
 ): HeavyReader {
-  let worker: Worker | null = null
+  // The pending reads belong to the worker that was sent them: a late 'close' from a
+  // dead worker must not reject what its replacement is still computing.
+  interface Slot {
+    worker: Worker
+    pending: Map<number, Pending>
+  }
+  let current: Slot | null = null
   let nextId = 1
-  const pending = new Map<number, Pending>()
   const inFlight = new Map<string, Promise<unknown>>()
 
-  function failAll(error: Error): void {
-    for (const entry of pending.values()) entry.reject(error)
-    pending.clear()
-  }
-
-  function startWorker(dbPath: string): Worker {
-    const started = new Worker(new URL('./heavy-read-worker.ts', import.meta.url).href)
-    started.onmessage = (event: MessageEvent<WorkerResponse>) => {
+  function startWorker(dbPath: string): Slot {
+    const worker = new Worker(new URL('./heavy-read-worker.ts', import.meta.url).href)
+    const slot: Slot = { worker, pending: new Map() }
+    worker.onmessage = (event: MessageEvent<WorkerResponse>) => {
       const message = event.data
-      const entry = pending.get(message.id)
+      const entry = slot.pending.get(message.id)
       if (!entry) return
-      pending.delete(message.id)
+      slot.pending.delete(message.id)
       if (message.ok) entry.resolve(message.value as never)
       else entry.reject(new Error(message.error))
     }
     const onDeath = (reason: string) => {
-      if (worker === started) worker = null
-      failAll(new Error(`heavy-read worker ${reason}`))
+      if (current === slot) current = null
+      const error = new Error(`heavy-read worker ${reason}`)
+      for (const entry of slot.pending.values()) entry.reject(error)
+      slot.pending.clear()
+      worker.terminate()
     }
-    started.onerror = (event: ErrorEvent) => onDeath(`failed: ${event.message}`)
-    started.addEventListener('close', () => onDeath('closed'))
+    worker.onerror = (event: ErrorEvent) => onDeath(`failed: ${event.message}`)
+    worker.addEventListener('close', () => onDeath('closed'))
     const init: WorkerRequest = { type: 'init', dbPath }
-    started.postMessage(init)
-    return started
+    worker.postMessage(init)
+    return slot
   }
 
   return {
@@ -84,11 +88,11 @@ export function createHeavyReader(
       if (shared) return shared as Promise<HeavyReadResult<K>>
 
       const run = new Promise<HeavyReadResult<K>>((resolve, reject) => {
-        worker ??= startWorker(source.dbPath)
+        const slot = (current ??= startWorker(source.dbPath))
         const id = nextId++
-        pending.set(id, { resolve, reject })
+        slot.pending.set(id, { resolve, reject })
         const request: WorkerRequest = { type: 'read', id, name, params }
-        worker.postMessage(request)
+        slot.worker.postMessage(request)
       }).finally(() => inFlight.delete(key))
       inFlight.set(key, run)
       return run

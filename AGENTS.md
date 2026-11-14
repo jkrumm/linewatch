@@ -386,7 +386,7 @@ watchdog are launchd agents with their own `make *-setup` / `make *-teardown`; a
 - **Both pushers are bounded; launchd never starts a second instance of a running
   job, so one hung call silences a monitor for good** (dotfiles hit a 28 h freeze,
   2026-11-06). The heartbeat runs under `jobrun --timeout 45 --every 60` (cadence 60 s;
-  API read 5 s and push 15 s sit inside it; a killed run pushes nothing, and silence
+  API read 5 s and push 30 s sit inside it — a loaded Kuma host answers in 7–14 s; a killed run pushes nothing, and silence
   is what Kuma alerts on). Its log bound survives jobrun's pipe via
   `LINEWATCH_HEARTBEAT_LOG_VIA_JOBRUN=1`. The watchdog is a KeepAlive daemon, so
   jobrun's deadline does not fit: every `ping` goes through `spawnBounded`

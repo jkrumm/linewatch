@@ -62,13 +62,18 @@ const config = {
   /**
    * The push crosses the WAN this monitor is about, so during an outage it does
    * not fail fast — it hangs until this fires. Kept well under the 60 s
-   * StartInterval so two runs can never overlap. Status read (5 s) + push (15 s)
-   * leave the run well inside jobrun's `--timeout 45` in the plist, which is the
+   * StartInterval so two runs can never overlap. Status read (5 s) + push (30 s)
+   * leave the run inside jobrun's `--timeout 45` in the plist, which is the
    * backstop for everything these two bounds do not reach: launchd never starts a
    * second instance of a running job, so one hung run would otherwise silence
    * the monitor for good.
+   *
+   * 30 s, not 15: the homelab host Kuma runs on sat at load average ~29 on
+   * 2026-11-14 and its push endpoint answered in 7–14 s (a 404 took 7 s), so a
+   * 15 s bound failed 8 runs in a row on a healthy line. Kuma's window is 240 s
+   * to DOWN; a slow-but-delivered push is a heartbeat.
    */
-  pushTimeoutMs: positiveNumberFromEnv('LINEWATCH_HEARTBEAT_PUSH_TIMEOUT_MS', 15_000),
+  pushTimeoutMs: positiveNumberFromEnv('LINEWATCH_HEARTBEAT_PUSH_TIMEOUT_MS', 30_000),
   /** Must equal the plist's StandardOutPath — launchd opens it once, O_APPEND, and never reopens it. */
   logPath:
     process.env['LINEWATCH_HEARTBEAT_LOG_PATH'] ??

@@ -1,8 +1,8 @@
 import { Elysia } from 'elysia'
 import { z } from 'zod'
-import { db } from '../db/client.js'
+import { heavyRead } from '../db/heavy-read-client.js'
 import { rangeProblem } from '../lib/query-limits.js'
-import { MAX_INTERVAL_MS, bucketThroughput } from '../db/bucket-throughput.js'
+import { MAX_INTERVAL_MS } from '../db/bucket-throughput.js'
 
 /**
  * How much the line actually carried, over time — as opposed to how much it
@@ -48,7 +48,7 @@ const ThroughputBucketSchema = z.object({
 
 export const throughputRoutes = new Elysia().get(
   '/api/throughput',
-  ({ query, status }) => {
+  async ({ query, status }) => {
     const problem = rangeProblem({ from: query.from, to: query.to, bucket: query.bucket })
     if (problem) return status(422, problem)
     return {
@@ -56,7 +56,7 @@ export const throughputRoutes = new Elysia().get(
       to: query.to,
       bucketSeconds: query.bucket,
       maxIntervalMs: MAX_INTERVAL_MS,
-      buckets: bucketThroughput(db, {
+      buckets: await heavyRead('bucketThroughput', {
         from: query.from,
         to: query.to,
         bucketSeconds: query.bucket,

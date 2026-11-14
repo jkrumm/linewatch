@@ -4,7 +4,7 @@ import { and, desc, gte, isNull, lte, or, type SQL } from 'drizzle-orm'
 import { db } from '../db/client.js'
 import { outage } from '../db/schema.js'
 import { config } from '../config.js'
-import { rangeSummary } from '../db/range-summary.js'
+import { heavyRead } from '../db/heavy-read-client.js'
 import { limitQuery, windowProblem } from '../lib/query-limits.js'
 
 const RangeSummarySchema = z.object({
@@ -54,7 +54,7 @@ const OutageSchema = z.object({
 
 export const outagesRoutes = new Elysia().get(
   '/api/outages',
-  ({ query, status }) => {
+  async ({ query, status }) => {
     const problem = windowProblem(query)
     if (problem) return status(422, problem)
     const conditions: SQL[] = []
@@ -86,7 +86,7 @@ export const outagesRoutes = new Elysia().get(
     // headline ("24 h: 0 min downtime") must be read together with this.
     const summary =
       query.from !== undefined && query.to !== undefined
-        ? rangeSummary(db, {
+        ? await heavyRead('rangeSummary', {
             from: query.from,
             to: query.to,
             probeCycleSeconds: config.probeCycleSeconds,

@@ -8,6 +8,7 @@ import {
   isRangeError,
   resolveRange,
 } from '../services/router/range.js'
+import { resolveCollectorHostIp } from '../services/router/collector-address.js'
 import { routerConfig } from '../services/router/config.js'
 import { getRouterExecutor } from '../services/router/scheduler.js'
 
@@ -234,8 +235,12 @@ export const routerRoutes = new Elysia()
   .get(
     '/api/router',
     () => {
+      const collectorHostIp = resolveCollectorHostIp({
+        db,
+        override: routerConfig.collectorHostIpOverride,
+      })
       const snapshot = readRouterSnapshot(db, {
-        collectorHostIp: routerConfig.collectorHostIp,
+        collectorHostIp,
         staleAfterMs: routerConfig.staleAfterMs,
       })
       return {
@@ -243,7 +248,7 @@ export const routerRoutes = new Elysia()
         writeEnabled: getRouterExecutor().capability === 'live',
         disabledReason: routerConfig.disabledReason,
         configWarning: routerConfig.configWarning,
-        collectorHostIp: routerConfig.collectorHostIp,
+        collectorHostIp,
         pollIntervalMs: routerConfig.pollIntervalMs,
         now: snapshot.now,
         staleAfterMs: snapshot.staleAfterMs,
@@ -265,7 +270,7 @@ export const routerRoutes = new Elysia()
           ),
         disabledReason: z.string().nullable(),
         configWarning: z.string().nullable(),
-        collectorHostIp: z.string(),
+        collectorHostIp: z.string().nullable(),
         pollIntervalMs: z.number().int(),
         now: z.number().int(),
         staleAfterMs: z.number().int(),

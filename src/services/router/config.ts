@@ -44,8 +44,12 @@ export interface RouterConfig {
    */
   staleAfterMs: number
   requestTimeoutMs: number
-  /** LAN address of the host running the native collector — the vantage to corroborate. */
-  collectorHostIp: string
+  /**
+   * `LINEWATCH_COLLECTOR_HOST_IP`: pins the collector host's LAN address. Unset
+   * (the default) means it is derived from the collector's own recorded default
+   * route — see `collector-address.ts`; the address is a DHCP lease and moves.
+   */
+  collectorHostIpOverride: string | null
   /** Why the poller is off, when it is off. */
   disabledReason: string | null
   /**
@@ -147,7 +151,7 @@ export function buildRouterConfig(env: NodeJS.ProcessEnv): RouterConfig {
     pollIntervalMs: cron.intervalMs,
     staleAfterMs: cron.intervalMs * STALE_AFTER_INTERVALS,
     requestTimeoutMs: Number(env['LINEWATCH_ROUTER_TIMEOUT_MS'] ?? 10_000),
-    collectorHostIp: env['LINEWATCH_COLLECTOR_HOST_IP'] ?? '192.168.1.100',
+    collectorHostIpOverride: env['LINEWATCH_COLLECTOR_HOST_IP'] ?? null,
     // Requires the password too: a write capability with no way to log in is
     // not a capability, and reporting it as one would misdescribe the system.
     writeEnabled: env['LINEWATCH_ROUTER_WRITE'] === '1' && password !== null,

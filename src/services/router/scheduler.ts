@@ -2,6 +2,7 @@ import { Cron } from 'croner'
 import { db } from '../../db/client.js'
 import { event } from '../../db/schema.js'
 import { RouterClient, RouterSessionLostError, RouterUnreachableError } from './client.js'
+import { resolveCollectorHostIp } from './collector-address.js'
 import { routerConfig } from './config.js'
 import { RouterPoller } from './poll.js'
 import { LiveExecutor, NullExecutor, type RouterActionExecutor } from './actions.js'
@@ -183,7 +184,8 @@ export function startRouterPoller(): Cron | null {
   poller = new RouterPoller({
     db,
     client,
-    collectorHostIp: routerConfig.collectorHostIp,
+    collectorHostIp: () =>
+      resolveCollectorHostIp({ db, override: routerConfig.collectorHostIpOverride }),
   })
   executor = routerConfig.writeEnabled ? new LiveExecutor(client) : new NullExecutor()
   console.log(

@@ -415,7 +415,7 @@ export type RouterSnapshot = {
   pollerEnabled: boolean
   disabledReason: string | null
   configWarning: string | null
-  collectorHostIp: string
+  collectorHostIp: string | null
   pollIntervalMs: number
   /** The server's clock when the snapshot was taken — the reference every `ageMs` is against. */
   now: number

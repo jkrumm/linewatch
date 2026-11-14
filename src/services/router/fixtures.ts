@@ -190,12 +190,6 @@ export const ETH_INTF_ROWS: Array<Record<string, string>> = [
   },
 ]
 
-/** `DEV2_HOSTS` — the count that validates the host list. */
-export const HOSTS_ROW: Record<string, string> = {
-  hostNumberOfEntries: '3',
-  stack: '0,0,0,0,0,0',
-}
-
 /**
  * The device name the wire carries. Nothing parses or stores it — `router_host`
  * has no name column, because a fifth of this router's names were vendor
@@ -205,39 +199,54 @@ export const HOSTS_ROW: Record<string, string> = {
  */
 export const HOST_NAME_CANARY = 'FIXTURE-CANARY-NOT-A-REAL-HOSTNAME'
 
-/** `DEV2_HOST_ENTRY` — must be read with `gl`; `go` returns only the first row. */
-export const HOST_ENTRY_ROWS: Array<Record<string, string>> = [
+/**
+ * `DEV2_WIFI_APDEV_ETHASSOCDEV` — the wired clients. `DEV2_HOST_ENTRY` and
+ * `DEV2_HOSTS` answer success with no data on the current firmware, so this and
+ * the Wi-Fi list below are where the client list lives now. Read with `gl`.
+ */
+export const ETH_ASSOC_ROWS: Array<Record<string, string>> = [
   {
-    physAddress: '00:11:22:33:44:55',
-    IPAddress: '192.168.1.100',
-    addressSource: 'DHCP',
-    layer1Interface: 'Device.Ethernet.Interface.1.',
-    hostName: HOST_NAME_CANARY,
-    interfaceType: 'Ethernet',
-    X_TP_LanConnDev: 'br0',
-    active: '1',
-    X_TP_ClientType: 'Other',
-    stack: '0,0,0,0,0,0',
-  },
-  {
-    physAddress: '00:11:22:33:44:66',
-    IPAddress: '192.168.1.104',
-    layer1Interface: 'Device.WiFi.Radio.1.',
+    APDeviceID: '00:11:22:33:44:00',
+    APDeviceMACAddress: '00:11:22:33:44:00',
     X_TP_HostName: HOST_NAME_CANARY,
-    interfaceType: 'Wi-Fi',
+    IPAddress: '192.168.1.100',
+    MACAddress: '00:11:22:33:44:55',
     active: '1',
-    X_TP_ClientType: 'Phone',
-    stack: '0,0,0,0,0,0',
+    linkSpeed: '1000',
+    interfaceType: 'Ethernet',
+    duplexMode: 'Full',
+    stack: '1,1,0,0,0,0',
   },
   {
-    physAddress: '00:11:22:33:44:77',
+    APDeviceID: '00:11:22:33:44:00',
+    X_TP_HostName: HOST_NAME_CANARY,
     IPAddress: '192.168.1.105',
-    layer1Interface: 'Device.Ethernet.Interface.2.',
-    hostName: HOST_NAME_CANARY,
-    interfaceType: 'Ethernet',
-    // Inactive: a stale DHCP lease, not a connection.
+    MACAddress: '00:11:22:33:44:77',
+    // Inactive: a stale association, not a connection.
     active: '0',
-    X_TP_ClientType: 'Other',
-    stack: '0,0,0,0,0,0',
+    linkSpeed: '100',
+    interfaceType: 'Ethernet',
+    duplexMode: 'Full',
+    stack: '1,2,0,0,0,0',
+  },
+]
+
+/** `DEV2_WIFI_APDEV_ASSOCDEV` — the Wi-Fi clients. The address key is `X_TP_IPAddress`. */
+export const WIFI_ASSOC_ROWS: Array<Record<string, string>> = [
+  {
+    X_TP_HostName: HOST_NAME_CANARY,
+    X_TP_IPAddress: '192.168.1.104',
+    MACAddress: '00:11:22:33:44:66',
+    operatingStandard: 'ax',
+    active: '1',
+    signalStrength: '72',
+    stack: '1,1,1,1,0,0',
+  },
+  {
+    // An inactive entry carries no address at all on this firmware.
+    X_TP_HostName: HOST_NAME_CANARY,
+    MACAddress: '00:11:22:33:44:88',
+    active: '0',
+    stack: '1,1,1,2,0,0',
   },
 ]

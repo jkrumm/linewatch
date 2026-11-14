@@ -315,73 +315,72 @@ export function parseEthPorts(rows: readonly RouterRow[]): EthPort[] {
 
 export interface HostEntry {
   ip: string | null
-  interfaceType: string | null
+  interfaceType: 'Ethernet' | 'Wi-Fi'
   active: number | null
+  /** Not on the association lists; kept so `router_host` rows written by the old firmware still read. */
   clientType: string | null
-  /** `Device.Ethernet.Interface.N.` — the router's own pointer at the port. */
-  layer1Interface: string | null
+  /** The router's own reading of this client's negotiated link — wired clients only. */
+  linkMbit: number | null
+  linkDuplex: string | null
 }
 
 /**
- * Connected devices (`DEV2_HOST_ENTRY`, which must be read with `gl`).
+ * Connected devices, from the two association lists the current firmware still
+ * fills: `DEV2_WIFI_APDEV_ETHASSOCDEV` (wired, both `gl` and `gs`) and
+ * `DEV2_WIFI_APDEV_ASSOCDEV` (Wi-Fi). `DEV2_HOSTS`, `DEV2_HOST_ENTRY` and
+ * `DEV2_STORED_HOST_ENTRY` answer `errorcode 0` with no data at all on it
+ * (2026-11-14), which is why this is not one read of one list any more.
  *
- * The device name (`hostName`/`X_TP_HostName`) is deliberately not read. A fifth
- * of the names this router hands out are vendor defaults of the form three-letter
+ * Which list a row came from is the interface type; neither carries the field.
+ * The wired list also gives the client's negotiated speed and duplex, which is
+ * the router-side half of the link corroboration — the old port pointer
+ * (`layer1Interface`) is gone, so the port is no longer resolved, the link is
+ * read off the client itself.
+ *
+ * The device name (`X_TP_HostName`) is deliberately not read. A fifth of the
+ * names this router hands out are vendor defaults of the form three-letter
  * prefix + 12 hex digits — a MAC with its separators stripped — so storing the
- * name stored the MAC. `redact.ts` now blanks the key as well, but the parser not
+ * name stored the MAC. `redact.ts` blanks the key as well, but the parser not
  * asking is the guard that survives a firmware calling the field something else.
  */
-export function parseHosts(rows: readonly RouterRow[]): HostEntry[] {
-  return rows.map((row) => ({
-    ip: str(row, 'IPAddress'),
-    interfaceType: str(row, 'interfaceType'),
-    active: int(row, 'active'),
-    clientType: str(row, 'X_TP_ClientType'),
-    layer1Interface: str(row, 'layer1Interface') ?? str(row, 'X_TP_Layer2Interface'),
-  }))
+export function parseHosts(input: {
+  wired: readonly RouterRow[]
+  wifi: readonly RouterRow[]
+}): HostEntry[] {
+  return [
+    ...input.wired.map((row): HostEntry => ({
+      ip: str(row, 'IPAddress'),
+      interfaceType: 'Ethernet',
+      active: int(row, 'active'),
+      clientType: null,
+      linkMbit: int(row, 'linkSpeed'),
+      linkDuplex: str(row, 'duplexMode'),
+    })),
+    ...input.wifi.map((row): HostEntry => ({
+      ip: str(row, 'X_TP_IPAddress'),
+      interfaceType: 'Wi-Fi',
+      active: int(row, 'active'),
+      clientType: null,
+      linkMbit: null,
+      linkDuplex: null,
+    })),
+  ]
 }
 
 /**
- * The Ethernet port a host is attached to, resolved through the firmware's own
- * `Device.Ethernet.Interface.N.` reference rather than guessed.
- *
- * The guess is not survivable: on this unit LAN1 negotiated 1000 Mbit and LAN2
- * negotiated 100 Mbit, both `Up`. Picking "the first port that is up" would have
- * compared the collector host's 1000baseT against LAN2's 100 and reported a
- * link-speed disagreement that does not exist.
+ * The router's view of the link a wired host sits on, in the shape
+ * `compareVantage` takes. Name, alias and status are unknown rather than
+ * invented: the client list does not say which port it is on, and a client that
+ * is `active` has no separate "port down" to report.
  */
-export function resolveHostPort(input: {
-  host: HostEntry | undefined
-  ports: readonly EthPort[]
-}): EthPort | null {
-  const reference = input.host?.layer1Interface
-  if (reference === undefined || reference === null) return null
-  const instance = Number(reference.match(/Device\.Ethernet\.Interface\.(\d+)\.?$/)?.[1])
-  if (!Number.isFinite(instance)) return null
-  return input.ports.find((port) => port.stack === instance) ?? null
-}
-
-/**
- * Guards against the silent-truncation failure this protocol invites: `go` on a
- * LIST object returns only the first instance without reporting an error, so a
- * plausible one-row answer is indistinguishable from the truth unless the row
- * count is checked against the firmware's own count field.
- *
- * Returns a description of the mismatch, or null when the list is trustworthy.
- */
-export function checkListLength(input: {
-  oid: string
-  rows: readonly unknown[]
-  expected: number | null
-}): string | null {
-  if (input.expected === null) return null
-  if (input.rows.length === input.expected) return null
-  const truncation =
-    input.rows.length === 1 && input.expected > 1 ? ' (the "go" truncation shape)' : ''
-  return `${input.oid} returned ${input.rows.length} instances, firmware reports ${input.expected}${truncation}`
-}
-
-/** `DEV2_HOSTS.hostNumberOfEntries` — the count that validates the host list. */
-export function parseHostCount(rows: readonly RouterRow[]): number | null {
-  return int(rows[0], 'hostNumberOfEntries')
+export function hostLink(host: HostEntry | undefined): EthPort | null {
+  if (host === undefined || host.interfaceType !== 'Ethernet') return null
+  return {
+    name: null,
+    alias: null,
+    status: null,
+    maxBitRate: host.linkMbit,
+    duplexMode: host.linkDuplex,
+    stack: null,
+  }
 }

@@ -21,10 +21,10 @@ import {
   DSL_LINE_STATS_ROW,
   ETH_INTF_ROWS,
   FAST_LINE_ROW,
-  HOSTS_ROW,
-  HOST_ENTRY_ROWS,
+  ETH_ASSOC_ROWS,
   IP_INTF_ROWS,
   IP_INTF_STATS_ROWS,
+  WIFI_ASSOC_ROWS,
 } from './fixtures.js'
 import { readRouterSnapshot, RouterPoller, type RouterReader } from './poll.js'
 import { redactRow } from './redact.js'
@@ -39,8 +39,8 @@ function defaultResponses(): Record<string, RawRows> {
     DEV2_IP_INTF: IP_INTF_ROWS,
     DEV2_IP_INTF_STATS: IP_INTF_STATS_ROWS,
     DEV2_ETH_INTF: ETH_INTF_ROWS,
-    DEV2_HOSTS: [HOSTS_ROW],
-    DEV2_HOST_ENTRY: HOST_ENTRY_ROWS,
+    DEV2_WIFI_APDEV_ETHASSOCDEV: ETH_ASSOC_ROWS,
+    DEV2_WIFI_APDEV_ASSOCDEV: WIFI_ASSOC_ROWS,
   }
 }
 
@@ -128,7 +128,7 @@ function makePoller(client: RouterReader, now: () => number) {
   const poller = new RouterPoller({
     db,
     client,
-    collectorHostIp: '192.168.1.100',
+    collectorHostIp: () => '192.168.1.100',
     now,
     sleep: () => Promise.resolve(),
   })
@@ -194,14 +194,18 @@ describe('RouterPoller', () => {
     expect(db.select().from(routerHost).all()).toHaveLength(0)
   })
 
-  it('reads the host list with `gl`, never `go`', () => {
+  it('reads both client lists with `gl`, never `go`, and never the empty host OIDs', async () => {
     const client = new FakeRouter()
     const { poller } = makePoller(client, () => 1_000)
-    return poller.poll().then(() => {
-      const hostEntry = client.calls.find((call) => call.oid === 'DEV2_HOST_ENTRY')
-      // `go` on this list returns exactly one instance and no error at all.
-      expect(hostEntry?.operation).toBe('gl')
-    })
+    await poller.poll()
+    for (const oid of ['DEV2_WIFI_APDEV_ETHASSOCDEV', 'DEV2_WIFI_APDEV_ASSOCDEV']) {
+      // `go` on a list returns exactly one instance and no error at all.
+      expect(client.calls.find((call) => call.oid === oid)?.operation).toBe('gl')
+    }
+    // They answer success with no data on the current firmware: a poll that
+    // read them would record an empty network and a vanished collector.
+    expect(client.calls.map((call) => call.oid)).not.toContain('DEV2_HOST_ENTRY')
+    expect(client.calls.map((call) => call.oid)).not.toContain('DEV2_HOSTS')
   })
 
   it('records one line sample with margins already converted to dB', async () => {
@@ -240,17 +244,6 @@ describe('RouterPoller', () => {
     expect(hosts.map((host) => host.ip)).toEqual(['192.168.1.100', '192.168.1.104'])
   })
 
-  it('warns when a list is shorter than the count the firmware reports', async () => {
-    const client = new FakeRouter()
-    client.replace('DEV2_HOST_ENTRY', [HOST_ENTRY_ROWS[0]!])
-    const { db, poller } = makePoller(client, () => 1_000)
-
-    const summary = await poller.poll()
-    expect(summary.warnings.join(' ')).toContain('the "go" truncation shape')
-    // Still recorded: the mismatch is the alarm, not a reason to drop the poll.
-    expect(db.select().from(routerHost).all()).toHaveLength(1)
-  })
-
   it('degrades to a warning when one OID is refused and records the rest', async () => {
     const client = new FakeRouter(defaultResponses(), {
       DEV2_ETH_INTF: new RouterOidError('DEV2_ETH_INTF', '9005'),
@@ -265,7 +258,7 @@ describe('RouterPoller', () => {
 
   it('treats a busy device as a per-OID problem, not a failed poll', async () => {
     const client = new FakeRouter(defaultResponses(), {
-      DEV2_HOST_ENTRY: new RouterBusyError('DEV2_HOST_ENTRY'),
+      DEV2_WIFI_APDEV_ASSOCDEV: new RouterBusyError('DEV2_WIFI_APDEV_ASSOCDEV'),
     })
     const { db, poller } = makePoller(client, () => 1_000)
 
@@ -361,20 +354,20 @@ describe('RouterPoller', () => {
   })
 
   /**
-   * An abandoned poll never reaches DEV2_HOST_ENTRY, so the router-side view of
+   * An abandoned poll never reaches the client lists, so the router-side view of
    * the collector is empty — not because the router lost sight of it, but
    * because nobody asked. Comparing against that empty view manufactures a
    * `host_presence` disagreement out of a question that was never put.
    */
   it('does not read an unasked host list as the router losing the collector', async () => {
     const client = new FakeRouter(defaultResponses(), {
-      DEV2_HOST_ENTRY: new RouterSessionLostError('socket closed'),
+      DEV2_WIFI_APDEV_ETHASSOCDEV: new RouterSessionLostError('socket closed'),
     })
     const { db, poller } = makePoller(client, () => 1_000)
     writeHostVantage(db, 1_000)
 
     const summary = await poller.poll()
-    expect(summary.abandonedAt).toMatchObject({ oid: 'DEV2_HOST_ENTRY' })
+    expect(summary.abandonedAt).toMatchObject({ oid: 'DEV2_WIFI_APDEV_ETHASSOCDEV' })
     expect(summary.disagreements).toEqual([])
     const linkChanges = db
       .select()
@@ -424,7 +417,7 @@ describe('RouterPoller', () => {
     const detail = JSON.parse(events[0]!.detail) as { reason: string; disagreements: unknown[] }
     expect(detail.reason).toBe('vantage_disagreement')
     expect(detail.disagreements).toEqual([
-      { field: 'link_speed', host: '100 Mbit', router: '1000 Mbit on LAN1' },
+      { field: 'link_speed', host: '100 Mbit', router: '1000 Mbit' },
     ])
 
     now = 120_000
@@ -434,6 +427,54 @@ describe('RouterPoller', () => {
     events = db.select().from(event).all()
     expect(events).toHaveLength(2)
     expect(JSON.parse(events[1]!.detail)).toMatchObject({ reason: 'vantage_agreement_restored' })
+  })
+
+  it('does not compare when the collector address cannot be told', async () => {
+    const client = new FakeRouter()
+    const db = createTestDb()
+    client.useClock(() => 1_000)
+    const poller = new RouterPoller({
+      db,
+      client,
+      collectorHostIp: () => null,
+      now: () => 1_000,
+      sleep: () => Promise.resolve(),
+    })
+    writeHostVantage(db, 1_000)
+
+    // Unknown is not absent: an address nobody could resolve must not read as
+    // the router having lost the collector.
+    const summary = await poller.poll()
+    expect(summary.disagreements).toEqual([])
+    expect(db.select().from(event).all()).toHaveLength(0)
+  })
+
+  it('records the collector missing from both client lists as host_presence', async () => {
+    const client = new FakeRouter()
+    client.replace('DEV2_WIFI_APDEV_ETHASSOCDEV', [])
+    const { db, poller } = makePoller(client, () => 1_000)
+    writeHostVantage(db, 1_000)
+
+    const summary = await poller.poll()
+    expect(summary.disagreements).toEqual([
+      {
+        field: 'host_presence',
+        host: 'default route over ethernet',
+        router: 'no host entry for the collector address',
+      },
+    ])
+  })
+
+  it('does not compare when only one client list answered', async () => {
+    const client = new FakeRouter(defaultResponses(), {
+      DEV2_WIFI_APDEV_ASSOCDEV: new RouterBusyError('DEV2_WIFI_APDEV_ASSOCDEV'),
+    })
+    client.replace('DEV2_WIFI_APDEV_ETHASSOCDEV', [])
+    const { db, poller } = makePoller(client, () => 1_000)
+    writeHostVantage(db, 1_000)
+
+    const summary = await poller.poll()
+    expect(summary.disagreements).toEqual([])
   })
 
   it('does not compare against a host vantage older than one poll interval', async () => {

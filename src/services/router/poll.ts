@@ -21,14 +21,12 @@ import {
   type RouterVantage,
 } from './derive.js'
 import {
-  checkListLength,
   parseEthPorts,
-  parseHostCount,
   parseHosts,
   parseIntfSamples,
   parseLineSample,
   parseLiveWan,
-  resolveHostPort,
+  hostLink,
   type EthPort,
 } from './parse.js'
 import type { RouterRow } from './redact.js'
@@ -85,8 +83,8 @@ const READS = {
   ipIntf: { oid: 'DEV2_IP_INTF', operation: 'gl' },
   ipIntfStats: { oid: 'DEV2_IP_INTF_STATS', operation: 'gl' },
   ethIntf: { oid: 'DEV2_ETH_INTF', operation: 'gl' },
-  hosts: { oid: 'DEV2_HOSTS', operation: 'go' },
-  hostEntry: { oid: 'DEV2_HOST_ENTRY', operation: 'gl' },
+  wiredClients: { oid: 'DEV2_WIFI_APDEV_ETHASSOCDEV', operation: 'gl' },
+  wifiClients: { oid: 'DEV2_WIFI_APDEV_ASSOCDEV', operation: 'gl' },
 } as const satisfies Record<string, ReadPlan>
 
 export interface RouterReader {
@@ -102,8 +100,12 @@ export interface RouterReader {
 export interface RouterPollerDeps {
   db: BunSQLiteDatabase<typeof schema>
   client: RouterReader
-  /** LAN address of the host running the native collector — the vantage to corroborate. */
-  collectorHostIp: string
+  /**
+   * LAN address of the host running the native collector — the vantage to
+   * corroborate. A function because it is a DHCP lease, resolved per poll; null
+   * means it cannot be told, and the corroboration is then skipped.
+   */
+  collectorHostIp: () => string | null
   now?: () => number
   /** Injected in tests to keep a poll instant. */
   sleep?: (ms: number) => Promise<void>
@@ -144,7 +146,7 @@ export interface RouterPollSummary {
 export class RouterPoller {
   private readonly db: BunSQLiteDatabase<typeof schema>
   private readonly client: RouterReader
-  private readonly collectorHostIp: string
+  private readonly collectorHostIp: () => string | null
   private readonly now: () => number
   private readonly sleep: (ms: number) => Promise<void>
 
@@ -185,8 +187,8 @@ export class RouterPoller {
       ipIntf: [] as RouterRow[],
       ipIntfStats: [] as RouterRow[],
       ethIntf: [] as RouterRow[],
-      hosts: [] as RouterRow[],
-      hostEntry: [] as RouterRow[],
+      wiredClients: [] as RouterRow[],
+      wifiClients: [] as RouterRow[],
     }
 
     /** Which reads actually answered. Distinct from "returned rows": an OID that
@@ -237,14 +239,7 @@ export class RouterPoller {
       wanIfName: wan?.ifName ?? null,
     })
     const ports = parseEthPorts(rows.ethIntf)
-    const hosts = parseHosts(rows.hostEntry)
-
-    const hostCountMismatch = checkListLength({
-      oid: READS.hostEntry.oid,
-      rows: hosts,
-      expected: parseHostCount(rows.hosts),
-    })
-    if (hostCountMismatch !== null) warnings.push(hostCountMismatch)
+    const hosts = parseHosts({ wired: rows.wiredClients, wifi: rows.wifiClients })
 
     // Only the live WAN and the LAN bridge are persisted. The other five
     // interfaces are configured-but-idle WAN profiles (USB 3G/4G, SFP, the two
@@ -253,7 +248,7 @@ export class RouterPoller {
     const persistedInterfaces = interfaces.filter(
       (intf) => intf.role === 'wan' || intf.role === 'lan',
     )
-    // Only active hosts. An inactive DEV2_HOST_ENTRY row is a stale DHCP lease,
+    // Only active hosts. An inactive client row is a stale association,
     // not a connection, so its absence from a poll is the truthful record.
     const activeHosts = hosts.filter((host) => host.active === 1)
 
@@ -286,15 +281,23 @@ export class RouterPoller {
       )
     })
 
-    const collectorHost = hosts.find((host) => host.ip === this.collectorHostIp)
-    const collectorPort = resolveHostPort({ host: collectorHost, ports })
+    const collectorIp = this.collectorHostIp()
+    const collectorHost =
+      collectorIp === null ? undefined : hosts.find((host) => host.ip === collectorIp)
+    const collectorPort = hostLink(collectorHost)
     const hostVantage = this.latestHostVantage(ts)
-    // Gated on the read, not on the rows. Without this an abandoned poll that
-    // never reached DEV2_HOST_ENTRY would compare the collector's live vantage
+    // Gated on the reads, not on the rows. Without this an abandoned poll that
+    // never reached the client lists would compare the collector's live vantage
     // against an empty router-side view and record a `host_presence`
     // disagreement — the router losing sight of the collector — from a question
-    // that was never asked.
-    const comparable = hostVantage !== null && answered.has('hostEntry')
+    // that was never asked. Both lists, because the collector is on one of them
+    // and which one is itself part of what is compared. And without an address
+    // for the collector there is nothing to look up: unknown, not absent.
+    const comparable =
+      hostVantage !== null &&
+      collectorIp !== null &&
+      answered.has('wiredClients') &&
+      answered.has('wifiClients')
     const disagreements = comparable
       ? compareVantage(hostVantage, this.routerVantage(collectorHost, collectorPort))
       : []
@@ -598,7 +601,8 @@ export interface Observation<T> {
 }
 
 export interface RouterSnapshotParams {
-  collectorHostIp: string
+  /** Null when the collector's address cannot be told — then there is no collector row to serve. */
+  collectorHostIp: string | null
   /** Age at which a value stops being current — `routerConfig.staleAfterMs` in production. */
   staleAfterMs: number
   now?: number
@@ -641,9 +645,9 @@ export interface RouterSnapshot {
  * itself the finding.
  *
  * The host/router corroboration is deliberately *not* recomputed here. It is
- * materialised into `event` at poll time, like outages — the port a host sits on
- * is resolved through a firmware pointer that is not persisted, so a read path
- * could only guess it.
+ * materialised into `event` at poll time, like outages — the router-side link
+ * speed and duplex it compares are not persisted on `router_host`, so a read
+ * path could only guess them.
  */
 export function readRouterSnapshot(
   db: BunSQLiteDatabase<typeof schema>,
@@ -674,15 +678,19 @@ export function readRouterSnapshot(
   const line = observeRow(
     db.select().from(routerLineSample).orderBy(desc(routerLineSample.ts)).limit(1).all()[0],
   )
-  const collector = observeRow(
-    db
-      .select()
-      .from(routerHost)
-      .where(eq(routerHost.ip, params.collectorHostIp))
-      .orderBy(desc(routerHost.ts))
-      .limit(1)
-      .all()[0],
-  )
+  const collectorIp = params.collectorHostIp
+  const collector =
+    collectorIp === null
+      ? null
+      : observeRow(
+          db
+            .select()
+            .from(routerHost)
+            .where(eq(routerHost.ip, collectorIp))
+            .orderBy(desc(routerHost.ts))
+            .limit(1)
+            .all()[0],
+        )
   const latestPortTs = db
     .select({ ts: routerEthPort.ts })
     .from(routerEthPort)

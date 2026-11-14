@@ -148,6 +148,26 @@ found 0 occurrences in the dump. Do not accept an unvalidated all-clear here.
 | 192.168.1.106 | Wi-Fi | 1 | Other |
 | 192.168.1.107 | Wi-Fi | 1 | Android |
 
+**Update 2026-11-14: this list is empty now.** On the current firmware `DEV2_HOSTS`,
+`DEV2_HOST_ENTRY` (`gl`, `gs`, `go`) and `DEV2_STORED_HOST_ENTRY` answer
+`{success: true, errorcode: 0}` with no data — an empty answer, not an error, so nothing
+flags it. The clients are in two lists instead, both read with `gl`:
+
+- `DEV2_WIFI_APDEV_ETHASSOCDEV` — wired: `IPAddress`, `active`, `interfaceType`, and the
+  client's own negotiated `linkSpeed` / `duplexMode`, plus byte and packet counters.
+- `DEV2_WIFI_APDEV_ASSOCDEV` — Wi-Fi: the address key is `X_TP_IPAddress` (absent on
+  inactive entries), plus `signalStrength`, `lastData{Down,Up}linkRate`, `active`.
+
+Neither names the LAN port, so the port pointer (`layer1Interface`) the corroboration used
+is gone; the wired client's own `linkSpeed`/`duplexMode` is the router-side link reading.
+`DEV2_ETH_INTF` still lists the ports. The poller no longer reads the empty OIDs and has no
+count field to cross-check the lists against.
+
+Also from that probe: the collector host's DHCP address had moved off the `.100` the poller
+was configured with, so the corroboration was comparing the collector against a different
+wired client. The address is now derived from the collector's recorded default-route
+interface (`services/router/collector-address.ts`); `LINEWATCH_COLLECTOR_HOST_IP` overrides.
+
 Per host: `physAddress`, `IPAddress`, `addressSource`, `leaseTimeRemaining`,
 `interfaceType`, `X_TP_LanConnDev`, `active`, `X_TP_ClientType`, `X_TP_NetworkReadyTime`.
 No per-host byte counters here.

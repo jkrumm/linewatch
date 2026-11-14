@@ -106,11 +106,12 @@ export function compareVantage(host: HostVantage, router: RouterVantage): Disagr
     return found
   }
 
+  const portLabel = port.alias ?? port.name
   if (host.linkMbit !== null && port.maxBitRate !== null && host.linkMbit !== port.maxBitRate) {
     found.push({
       field: 'link_speed',
       host: `${host.linkMbit} Mbit`,
-      router: `${port.maxBitRate} Mbit on ${port.alias ?? port.name ?? '?'}`,
+      router: `${port.maxBitRate} Mbit${portLabel === null ? '' : ` on ${portLabel}`}`,
     })
   }
 

@@ -4,21 +4,19 @@ import {
   DSL_LINE_STATS_ROW,
   ETH_INTF_ROWS,
   FAST_LINE_ROW,
-  HOSTS_ROW,
-  HOST_ENTRY_ROWS,
+  ETH_ASSOC_ROWS,
   HOST_NAME_CANARY,
   IP_INTF_ROWS,
   IP_INTF_STATS_ROWS,
+  WIFI_ASSOC_ROWS,
 } from './fixtures.js'
 import {
-  checkListLength,
+  hostLink,
   parseEthPorts,
-  parseHostCount,
   parseHosts,
   parseIntfSamples,
   parseLineSample,
   parseLiveWan,
-  resolveHostPort,
 } from './parse.js'
 import { redactRow } from './redact.js'
 
@@ -29,7 +27,8 @@ const adtWan = ADT_WAN_ROWS.map(redactRow)
 const ipIntf = IP_INTF_ROWS.map(redactRow)
 const ipIntfStats = IP_INTF_STATS_ROWS.map(redactRow)
 const ethIntf = ETH_INTF_ROWS.map(redactRow)
-const hostEntry = HOST_ENTRY_ROWS.map(redactRow)
+const wired = ETH_ASSOC_ROWS.map(redactRow)
+const wifi = WIFI_ASSOC_ROWS.map(redactRow)
 
 describe('parseLineSample', () => {
   it('reads carrier health from DEV2_FAST_LINE and showtime from DEV2_DSL_LINE_STATS', () => {
@@ -180,7 +179,7 @@ describe('parseIntfSamples', () => {
   })
 })
 
-describe('parseEthPorts and resolveHostPort', () => {
+describe('parseEthPorts', () => {
   it('reads the negotiated link per port', () => {
     const ports = parseEthPorts(ethIntf)
     expect(ports[0]).toEqual({
@@ -192,47 +191,48 @@ describe('parseEthPorts and resolveHostPort', () => {
       stack: 1,
     })
   })
-
-  it("follows the host's own layer1Interface pointer instead of guessing a port", () => {
-    const ports = parseEthPorts(ethIntf)
-    const hosts = parseHosts(hostEntry)
-    const port = resolveHostPort({ host: hosts[0], ports })
-    // LAN1 (1000) and LAN2 (100) are both Up: "the first port that is up" would
-    // have been right by luck here and wrong for any host on LAN2.
-    expect(port?.alias).toBe('LAN1')
-    expect(port?.maxBitRate).toBe(1000)
-  })
-
-  it('resolves nothing for a host that is not on an ethernet port', () => {
-    const ports = parseEthPorts(ethIntf)
-    const hosts = parseHosts(hostEntry)
-    expect(resolveHostPort({ host: hosts[1], ports })).toBeNull()
-    expect(resolveHostPort({ host: undefined, ports })).toBeNull()
-  })
 })
 
 describe('parseHosts', () => {
-  it('reads address, attachment and activity', () => {
-    const hosts = parseHosts(hostEntry)
+  it('reads wired clients from the ethernet list, with their own negotiated link', () => {
+    const hosts = parseHosts({ wired, wifi })
     expect(hosts[0]).toEqual({
       ip: '192.168.1.100',
       interfaceType: 'Ethernet',
       active: 1,
-      clientType: 'Other',
-      layer1Interface: 'Device.Ethernet.Interface.1.',
+      clientType: null,
+      linkMbit: 1000,
+      linkDuplex: 'Full',
     })
-    expect(hosts[2]?.active).toBe(0)
+    expect(hosts[1]?.active).toBe(0)
   })
 
-  // The device name is the one field on this OID that must not survive parsing:
+  it('takes the Wi-Fi address from X_TP_IPAddress and types the row by the list it came from', () => {
+    const hosts = parseHosts({ wired, wifi })
+    expect(hosts[2]).toEqual({
+      ip: '192.168.1.104',
+      interfaceType: 'Wi-Fi',
+      active: 1,
+      clientType: null,
+      linkMbit: null,
+      linkDuplex: null,
+    })
+    // An inactive association with no address stays a row with a null ip, not a guess.
+    expect(hosts[3]).toMatchObject({ ip: null, active: 0 })
+  })
+
+  it('is empty when both lists are, which is a measurement and not an error', () => {
+    expect(parseHosts({ wired: [], wifi: [] })).toEqual([])
+  })
+
+  // The device name is the one field on these OIDs that must not survive parsing:
   // this router's vendor defaults are a MAC with the separators stripped, and
-  // the column that used to hold them is gone. The raw rows still carry it under
-  // two spellings, so the assertion is against the whole parsed object.
+  // the column that used to hold them is gone.
   it('carries no device name out of a row that has one', () => {
     // Against the raw rows, not the redacted ones: the parser has to drop the
     // name on its own rather than inherit the redactor's blanking.
-    expect(JSON.stringify(HOST_ENTRY_ROWS)).toContain(HOST_NAME_CANARY)
-    const hosts = parseHosts(HOST_ENTRY_ROWS)
+    expect(JSON.stringify([...ETH_ASSOC_ROWS, ...WIFI_ASSOC_ROWS])).toContain(HOST_NAME_CANARY)
+    const hosts = parseHosts({ wired: ETH_ASSOC_ROWS, wifi: WIFI_ASSOC_ROWS })
     expect(JSON.stringify(hosts)).not.toContain(HOST_NAME_CANARY)
     for (const host of hosts) {
       expect(Object.keys(host).some((key) => /name/i.test(key))).toBe(false)
@@ -240,24 +240,22 @@ describe('parseHosts', () => {
   })
 })
 
-describe('checkListLength', () => {
-  it('accepts a list that matches the firmware count', () => {
-    expect(
-      checkListLength({
-        oid: 'DEV2_HOST_ENTRY',
-        rows: parseHosts(hostEntry),
-        expected: parseHostCount([redactRow(HOSTS_ROW)]),
-      }),
-    ).toBeNull()
+describe('hostLink', () => {
+  it("reads a wired host's own negotiated link, with no port it cannot name", () => {
+    const hosts = parseHosts({ wired, wifi })
+    expect(hostLink(hosts[0])).toEqual({
+      name: null,
+      alias: null,
+      status: null,
+      maxBitRate: 1000,
+      duplexMode: 'Full',
+      stack: null,
+    })
   })
 
-  it('names the silent-truncation shape when a list comes back with one row', () => {
-    const message = checkListLength({ oid: 'DEV2_HOST_ENTRY', rows: [{}], expected: 8 })
-    expect(message).toContain('returned 1 instances')
-    expect(message).toContain('the "go" truncation shape')
-  })
-
-  it('says nothing when the firmware offers no count to check against', () => {
-    expect(checkListLength({ oid: 'DEV2_ETH_INTF', rows: [{}], expected: null })).toBeNull()
+  it('has no link for a Wi-Fi host or an absent one', () => {
+    const hosts = parseHosts({ wired, wifi })
+    expect(hostLink(hosts[2])).toBeNull()
+    expect(hostLink(undefined)).toBeNull()
   })
 })

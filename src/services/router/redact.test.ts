@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'bun:test'
-import { ADT_WAN_ROWS, ETH_INTF_ROWS, HOST_ENTRY_ROWS, HOST_NAME_CANARY } from './fixtures.js'
+import {
+  ADT_WAN_ROWS,
+  ETH_ASSOC_ROWS,
+  ETH_INTF_ROWS,
+  HOST_NAME_CANARY,
+  WIFI_ASSOC_ROWS,
+} from './fixtures.js'
 import { redactRow, redactValue } from './redact.js'
 
 const PPPOE_CONNECTION = ADT_WAN_ROWS[1]!
@@ -99,7 +105,7 @@ describe('redactRow', () => {
 
   it('redacts every MAC the port and host lists carry', () => {
     const ports = ETH_INTF_ROWS.map(redactRow)
-    const hosts = HOST_ENTRY_ROWS.map(redactRow)
+    const hosts = [...ETH_ASSOC_ROWS, ...WIFI_ASSOC_ROWS].map(redactRow)
     for (const row of [...ports, ...hosts]) {
       for (const value of Object.values(row)) {
         expect(value).not.toMatch(/^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$/)
@@ -110,7 +116,8 @@ describe('redactRow', () => {
   // Same canary discipline as the credential above: prove the name is in the
   // input before asserting it is not in the output.
   it('removes the device name every host entry carries', () => {
-    expect(JSON.stringify(HOST_ENTRY_ROWS)).toContain(HOST_NAME_CANARY)
-    expect(JSON.stringify(HOST_ENTRY_ROWS.map(redactRow))).not.toContain(HOST_NAME_CANARY)
+    const rows = [...ETH_ASSOC_ROWS, ...WIFI_ASSOC_ROWS]
+    expect(JSON.stringify(rows)).toContain(HOST_NAME_CANARY)
+    expect(JSON.stringify(rows.map(redactRow))).not.toContain(HOST_NAME_CANARY)
   })
 })

@@ -1,9 +1,8 @@
 import { Elysia } from 'elysia'
 import { z } from 'zod'
-import { db } from '../db/client.js'
+import { heavyRead } from '../db/heavy-read-client.js'
 import { config } from '../config.js'
 import { routerConfig } from '../services/router/config.js'
-import { collectVerdictInput } from '../lib/verdict-queries.js'
 import { deriveVerdicts } from '../lib/verdict.js'
 
 const EvidenceSchema = z.object({
@@ -41,8 +40,8 @@ const VerdictSchema = z.object({
 
 export const verdictRoutes = new Elysia().get(
   '/api/verdicts',
-  ({ query }) => {
-    const input = collectVerdictInput(db, {
+  async ({ query }) => {
+    const input = await heavyRead('collectVerdictInput', {
       from: query.from,
       to: query.to,
       now: Date.now(),

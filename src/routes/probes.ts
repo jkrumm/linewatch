@@ -1,8 +1,8 @@
 import { Elysia } from 'elysia'
 import { z } from 'zod'
 import { and, eq } from 'drizzle-orm'
-import { bucketProbes, bucketVantage } from '../db/bucket-probes.js'
 import { db } from '../db/client.js'
+import { heavyRead } from '../db/heavy-read-client.js'
 import { event, probeSample, wifiSample } from '../db/schema.js'
 import { config } from '../config.js'
 import { hasValidBearer } from '../lib/auth.js'
@@ -398,7 +398,7 @@ export const probesRoutes = new Elysia()
   )
   .get(
     '/api/probes',
-    ({ query, status }) => {
+    async ({ query, status }) => {
       const problem = rangeProblem({ from: query.from, to: query.to, bucket: query.bucket })
       if (problem) return status(422, problem)
       const params = {
@@ -408,10 +408,10 @@ export const probesRoutes = new Elysia()
         ...(query.target !== undefined ? { target: query.target } : {}),
       }
       return {
-        buckets: bucketProbes(db, params),
+        buckets: await heavyRead('bucketProbes', params),
         // Separate series, one row per bucket: the vantage belongs to the cycle,
         // so folding it into `buckets` would repeat it once per target.
-        vantage: bucketVantage(db, params),
+        vantage: await heavyRead('bucketVantage', params),
       }
     },
     {

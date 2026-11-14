@@ -340,3 +340,32 @@ describe('collectVerdictInput — stalls beyond the bound-parameter limit', () =
     expect(input.pathStalls[0]?.linkWatchS).toBeNull()
   })
 })
+
+describe('collectVerdictInput — a month of speed tests over a month of cycles', () => {
+  test('the speed-test candidates do not rescan the cycle table once per test', () => {
+    const db = createTestDb()
+    const cycles = 30_000
+    const tests = 720
+    db.run(sql`
+      WITH RECURSIVE k(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM k WHERE n < ${cycles - 1})
+      INSERT INTO probe_cycle (ts, link_mbit)
+      SELECT ${T0} + k.n * ${CYCLE_MS}, 1000 FROM k
+    `)
+    db.run(sql`
+      WITH RECURSIVE k(n) AS (SELECT 0 UNION ALL SELECT n + 1 FROM k WHERE n < ${tests - 1})
+      INSERT INTO speed_test (ts, backend, ok, bytes_down, duration_s)
+      SELECT ${T0} + k.n * 3600000 / 10, 'ookla', 1, 100000000, 8 FROM k
+    `)
+
+    const to = T0 + cycles * CYCLE_MS
+    const started = performance.now()
+    const input = collectVerdictInput(db, { ...PARAMS, to, now: to })
+    const elapsedMs = performance.now() - started
+
+    expect(input.throughput).toHaveLength(tests)
+    expect(input.throughput[0]?.maxLinkMbit).toBe(1000)
+    expect(input.throughput[0]?.vantageCycles).toBe(cycles)
+    // The per-test rescan took many seconds at this size; one pass takes tens of ms.
+    expect(elapsedMs).toBeLessThan(1000)
+  })
+})

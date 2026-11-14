@@ -1,4 +1,5 @@
-import { createCipheriv, createDecipheriv, createHash } from 'node:crypto'
+import { createHash } from 'node:crypto'
+import { newEnvelopeKey, open, seal } from './envelope.js'
 import { redactRow, type RouterRow } from './redact.js'
 
 /**
@@ -292,7 +293,7 @@ export class RouterClient {
    * Sends one `$.dm.op` action over the held session.
    *
    * The envelope is byte-identical to a read — same `/cgi_gdpr?9`, same RSA
-   * `sign` with a non-incrementing `seq`, same AES-128-CBC body, same TokenID —
+   * `sign` with a non-incrementing `seq`, same AES-128-GCM body, same TokenID —
    * so nothing here is new transport, only a different `operation` and `oid`.
    * `stack` is the caller's, because the object being acted on decides it: the
    * WAN connection's own stack is `3,0,0,0,0,0` while `DEV2_IP_INTF`'s `ppp0`
@@ -385,6 +386,10 @@ export class RouterClient {
     return fetch(`${this.options.baseUrl}${path}`, {
       ...init,
       signal: AbortSignal.timeout(this.options.requestTimeoutMs),
+      // The router's certificate is self-signed (its own welcome page says so),
+      // so there is nothing to verify against. The payload is also RSA/AES
+      // enveloped, and this only ever talks to the one LAN address configured.
+      ...(this.options.baseUrl.startsWith('https:') ? { tls: { rejectUnauthorized: false } } : {}),
     })
   }
 
@@ -407,6 +412,13 @@ export class RouterClient {
       if (nn?.[1] !== undefined && ee?.[1] !== undefined && seq?.[1] !== undefined) {
         return { nn: nn[1], ee: ee[1], seq: Number(seq[1]) }
       }
+      if (body.includes('id="welcome-html"')) {
+        // Not flakiness: the device serves its HTTPS-only welcome page for every
+        // plain-HTTP path (verified 2026-11-14). Retrying cannot change that.
+        throw new Error(
+          `${this.options.baseUrl} answered the HTTPS welcome page; set LINEWATCH_ROUTER_URL to the https:// address`,
+        )
+      }
       console.warn(
         `[router] getGDPRParm attempt ${attempt + 1}: status ${response.status}, ${body.length} bytes, no RSA params`,
       )
@@ -418,10 +430,7 @@ export class RouterClient {
     const { nn, ee, seq } = await this.fetchRsaParams()
     const now = Date.now()
     const session: Session = {
-      key: String(now).padEnd(16, '0').slice(0, 16),
-      iv: String(now + 7)
-        .padEnd(16, '0')
-        .slice(0, 16),
+      ...newEnvelopeKey(),
       hash: md5(this.options.user + this.options.password),
       nn,
       ee,
@@ -492,8 +501,7 @@ export class RouterClient {
     plain: string,
     isLogin = false,
   ): Promise<{ status: number; body: string }> {
-    const cipher = createCipheriv('aes-128-cbc', Buffer.from(session.key), Buffer.from(session.iv))
-    const data = Buffer.concat([cipher.update(plain, 'utf8'), cipher.final()]).toString('base64')
+    const { data, tag } = seal(session, plain)
     const signed = isLogin
       ? `key=${session.key}&iv=${session.iv}&h=${session.hash}&s=${session.seq + data.length}`
       : `h=${session.hash}&s=${session.seq + data.length}`
@@ -501,7 +509,7 @@ export class RouterClient {
     const response = await this.fetch(path, {
       method: 'POST',
       headers: this.headers(session, 'text/plain, */*; q=0.01'),
-      body: `sign=${this.rsa(session, signed)}\r\ndata=${data}\r\n`,
+      body: `sign=${this.rsa(session, signed)}\r\ndata=${data}\r\ntag=${tag}\r\n`,
     })
     const setCookie = response.headers.get('set-cookie')
     if (setCookie) session.cookie = setCookie.split(';')[0] ?? session.cookie
@@ -509,15 +517,7 @@ export class RouterClient {
     const raw = await response.text()
     let body = raw
     try {
-      const decipher = createDecipheriv(
-        'aes-128-cbc',
-        Buffer.from(session.key),
-        Buffer.from(session.iv),
-      )
-      body = Buffer.concat([
-        decipher.update(Buffer.from(raw.trim(), 'base64')),
-        decipher.final(),
-      ]).toString('utf8')
+      body = open(session, raw)
     } catch {
       // Not AES-decryptable: either an error page or a response to a session the
       // router no longer knows. Left as-is for the caller to classify.

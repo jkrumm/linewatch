@@ -24,6 +24,23 @@ function withPasswordFile(contents: string | null): {
 }
 
 describe('buildRouterConfig', () => {
+  it('defaults to the https:// address — plain HTTP only serves a welcome page now', () => {
+    const { env, cleanup } = withPasswordFile(null)
+    try {
+      const config = buildRouterConfig({ ...env, LINEWATCH_ROUTER_PASSWORD: 'x' })
+      expect(config.baseUrl).toBe('https://192.168.1.1')
+      expect(
+        buildRouterConfig({
+          ...env,
+          LINEWATCH_ROUTER_PASSWORD: 'x',
+          LINEWATCH_ROUTER_URL: 'https://router.invalid',
+        }).baseUrl,
+      ).toBe('https://router.invalid')
+    } finally {
+      cleanup()
+    }
+  })
+
   it('enables the poller from LINEWATCH_ROUTER_PASSWORD — the only path that reaches the container', () => {
     const { env, cleanup } = withPasswordFile(null)
     try {

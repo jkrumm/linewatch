@@ -29,6 +29,15 @@ curl succeeded seconds later. It recovers on retry — `discover.ts` retries 6×
 backoff. This is device flakiness, not a protocol error; a poller without this retry will
 look broken every few runs.
 
+**Update 2026-11-14: the transport changed.** The device now answers every plain-HTTP path
+with its HTTPS-only "Welcome" page (a 200, 23268 bytes, no RSA params — which the retry loop
+above cannot distinguish from the flakiness it describes) and serves the data model on
+`https://` with a self-signed certificate. The AES layer moved from CBC (16-char key/IV) to
+GCM (16-byte key, 12-byte IV, a separate `tag=` field in the request; the response is
+`base64(ciphertext)` + `base64(tag)` concatenated). The RSA/seq/TokenID parts are unchanged.
+`src/services/router/envelope.ts` holds the AES side; `docs/router-spike/` still shows the
+old CBC-over-HTTP spike as it was measured.
+
 ## Status fields that lie on this firmware
 
 Do not trust `status` / `linkStatus` generically. Measured, simultaneously:

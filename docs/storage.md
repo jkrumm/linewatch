@@ -229,6 +229,15 @@ collide on the archive's timestamped name — a drill artifact, not a live path.
 - A `.backup` of a WAL database is itself WAL-mode and cannot be opened
   `-readonly` without its `-shm`; every snapshot and archive here is switched to
   `journal_mode=delete` before it is verified.
+- **The volume-side targets stream, they never bind-mount.** Colima's shared mounts
+  are an explicit list (`~/.colima/default/colima.yaml`) that no longer includes this
+  checkout, so a `-v ./backups:/backups` write by a container lands inside the VM and
+  the host sees nothing — the first `db-move` attempt on 2026-11-14 hit exactly that
+  (and failed safe: the container came back, the volume was never written).
+  `volume-backup` takes the `.backup` snapshot inside a throwaway container, streams
+  it out on stdout and re-checks it on the host; `rollback-to-container` streams the
+  native snapshot in on stdin. Also: `docker compose build` resolves base images over
+  the VM's network, which timed out — nothing here builds.
 - **`make up` is the only thing that renders the plist.** The plist carries the
   checkout path, the `bun` path and the database path; a moved checkout needs a
   `make up` from the new location.

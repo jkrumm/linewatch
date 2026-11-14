@@ -1,8 +1,10 @@
-.PHONY: help env up deploy down rebuild guard-deploy logs logs-follow verify collector-setup collector-teardown collector-logs check \
+.PHONY: help env up deploy down guard-deploy logs logs-follow verify collector-setup collector-teardown collector-logs check \
+	app-stop app-start speedtest-install \
 	heartbeat-setup heartbeat-teardown heartbeat-status heartbeat-logs router-reconnect router-reboot \
 	watchdog-setup watchdog-teardown watchdog-status watchdog-logs watchdog-arm watchdog-disarm \
 	watchdog-readiness watchdog-state \
-	marker db-counts db-shell db-backup db-restore db-import
+	db-counts db-shell db-backup db-vacuum db-restore db-move \
+	volume-counts volume-backup container-env rollback-to-container
 .DEFAULT_GOAL := help
 
 REPO_DIR      := $(shell pwd)
@@ -25,61 +27,60 @@ PLIST_LABEL   := com.jkrumm.linewatch-collector-agent
 # entry cannot keep a second copy of the probe alive alongside the new one.
 OLD_PLIST_LABEL := com.jkrumm.linewatch-collector
 
-# Storage: the database lives in a named Docker volume that the host cannot open
-# (docs/storage.md). Every db-* target below therefore works through a container.
-LIVE_VOLUME   := linewatch-data
-# Overridable on the command line so the destructive targets can be *rehearsed*
+# The app: one native launchd job on 127.0.0.1:7731 (collector/app.ts). Rendered by
+# `make up` from collector/com.jkrumm.linewatch-app.plist.template. It ran in a
+# Colima container until 2026-11-14; docs/storage.md has the move and the rollback.
+APP_LABEL     := com.jkrumm.linewatch-app
+APP_LOG       := $(LOG_DIR)/linewatch-app.log
+APP_PLIST     := $(LAUNCHAGENTS)/$(APP_LABEL).plist
+
+# The record. A plain file on the host, outside the checkout so a `git clean`
+# cannot reach it. Overridable so the destructive db-* targets can be *rehearsed*
 # against a scratch copy instead of the record:
 #
-#   make db-backup  VOLUME=linewatch-drill                  # copy of the drill volume
-#   make db-restore VOLUME=linewatch-drill FROM=<snap>.db
+#   make db-backup  DB_FILE=/tmp/drill.db
+#   make db-restore DB_FILE=/tmp/drill.db FROM=<snap>.db
 #
-# A non-live VOLUME never stops or starts the service, and mounts itself over
-# /app/data in the throwaway container. "Rehearsed once by hand" is how a restore
-# path rots; this makes the drill repeatable and harmless.
-VOLUME        := $(LIVE_VOLUME)
-IS_LIVE       := $(if $(filter $(VOLUME),$(LIVE_VOLUME)),1,)
-DB            := /app/data/linewatch.db
-# Compose derives its project name from the directory. `up` asserts that the
-# fixed `container_name: linewatch` belongs to *this* project before starting.
-COMPOSE_PROJECT := $(notdir $(REPO_DIR))
-# What the deploy fingerprint covers (scripts/codesum.ts). The Dockerfile's
-# `fingerprint` stage must COPY and hash exactly this list.
-FINGERPRINT_PATHS := src web/src drizzle package.json bun.lock Dockerfile web/package.json web/bun.lock
+# A non-live DB_FILE never stops or starts the service. "Rehearsed once by hand"
+# is how a restore path rots; this makes the drill repeatable and harmless.
+DB_DIR        := $(HOME)/.local/share/linewatch
+LIVE_DB       := $(DB_DIR)/linewatch.db
+DB_FILE       := $(LIVE_DB)
+IS_LIVE       := $(if $(filter $(DB_FILE),$(LIVE_DB)),1,)
 BACKUP_DIR    := $(REPO_DIR)/backups
-HOST_DATA_DIR := $(REPO_DIR)/data
-MARKER        := $(HOST_DATA_DIR)/MOVED-TO-DOCKER-VOLUME
-HOST_OWNER    := $(shell id -u):$(shell id -g)
 
-REQUIRE_VOLUME = @docker volume inspect $(VOLUME) >/dev/null 2>&1 || { echo "  ✗ Docker volume '$(VOLUME)' does not exist — run 'make up' first."; exit 1; }
-
-# Stopping and starting the service is only correct for the live volume. A drill
-# against a scratch volume must leave the running service alone.
-SERVICE_STOP  = $(if $(IS_LIVE),docker compose down,echo "  · drill on volume $(VOLUME) — leaving the running service alone")
+# Stopping and starting the service is only correct for the live database.
 # Deliberately `$(SUBMAKE)`, not the literal `$(MAKE)`: GNU make runs any recipe
 # line containing that string even under `-n`, and here it shares a line with the
 # restore itself. `make -n db-restore` has to stay a dry run.
 SUBMAKE       := $(MAKE)
-SERVICE_START = $(if $(IS_LIVE),$(SUBMAKE) up,echo "  · drill on volume $(VOLUME) — service untouched")
+SERVICE_STOP  = $(if $(IS_LIVE),$(SUBMAKE) --no-print-directory app-stop,echo "  · drill on $(DB_FILE) — leaving the running service alone")
+SERVICE_START = $(if $(IS_LIVE),$(SUBMAKE) --no-print-directory app-start,echo "  · drill on $(DB_FILE) — service untouched")
+
+# The pre-2026-11-14 home of the record, kept untouched for the rollback window:
+# the named Docker volume the host cannot open. Only the one-time `db-move` and
+# `rollback-to-container` reach it, through a throwaway container (docs/storage.md).
+LIVE_VOLUME   := linewatch-data
+VOLUME        := $(LIVE_VOLUME)
+VOLUME_DB     := /app/data/linewatch.db
+# Compose derives its project name from the directory; the container-side targets
+# assert that the fixed `container_name: linewatch` belongs to *this* project.
+COMPOSE_PROJECT := $(notdir $(REPO_DIR))
+HOST_OWNER    := $(shell id -u):$(shell id -g)
 
 # A throwaway container from this project's own image, with the volume and
-# ./backups mounted. Safe to run while `linewatch` is up: both sit inside the
-# same Docker VM kernel, where SQLite's fcntl locks genuinely work —
-# host-vs-container was the broken pairing, container-vs-container never was.
-# Also works while the service is down, which is what `db-restore` needs.
-# Runs as root because it has to write both the app-owned volume and the
-# host-owned ./backups bind mount; it publishes no ports and mounts nothing else.
-# The explicit -v overrides the service's own /app/data mount, which is what
-# makes VOLUME=<scratch> a real drill rather than a differently-labelled way to
-# hit the record.
-DB_TOOL = docker compose run --rm --no-deps -T --user 0:0 -v "$(VOLUME):/app/data" -v "$(BACKUP_DIR):/backups" --entrypoint sh linewatch -c
+# ./backups mounted. Runs as root because it has to write both the app-owned
+# volume and the host-owned ./backups bind mount; it publishes no ports.
+VOLUME_TOOL = docker compose run --rm --no-deps -T --user 0:0 -v "$(VOLUME):/app/data" -v "$(BACKUP_DIR):/backups" --entrypoint sh linewatch -c
+# compose refuses to parse docker-compose.yml without ./.env (it is the container's
+# env_file); the volume-side targets carry no secret, so an empty one is enough.
+REQUIRE_VOLUME = @[ -f .env ] || { : > .env; chmod 600 .env; }; docker volume inspect $(VOLUME) >/dev/null 2>&1 || { echo "  ✗ Docker volume '$(VOLUME)' does not exist — nothing to move."; exit 1; }
+REQUIRE_DB = @test -f "$(DB_FILE)" || { echo "  ✗ no database at $(DB_FILE) — the app has not run here yet (make up, or make db-move for the pre-2026-11-14 record)."; exit 1; }
 
-# Read-only sibling of DB_TOOL: no ./backups mount, and deliberately *not* root,
-# because a root-owned `-shm` left behind by a read would lock the app (uid 999)
-# out of its own database.
-DB_READ = docker compose run --rm --no-deps -T -v "$(VOLUME):/app/data" --entrypoint sh linewatch -c
-
-REQUIRE_UP = @docker ps --format '{{.Names}}' | grep -qx linewatch || { echo "  ✗ linewatch is down — the database lives in the $(VOLUME) Docker volume and only a container can open it. Run 'make up' first."; exit 1; }
+# The Ookla CLI, pinned in the URL like the Dockerfile's linux build was. The
+# macOS build is one universal binary.
+SPEEDTEST_BIN := $(HOME)/.local/bin/speedtest
+SPEEDTEST_URL := https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-macosx-universal.tgz
 
 HEARTBEAT_LABEL := com.jkrumm.linewatch-heartbeat
 HEARTBEAT_LOG   := $(LOG_DIR)/linewatch-heartbeat.log
@@ -175,123 +176,123 @@ endef
 help: ## Show targets
 	@awk 'BEGIN{FS=":.*##"; printf "Targets:\n"} /^[a-zA-Z_-]+:.*##/ {printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-env: ## Ensure the bearer token, the router password (if any) and .env exist (idempotent; `up` and `db-import` do this for you)
+env: ## Ensure the bearer token exists (idempotent; `up` does this for you)
 	@mkdir -p "$(TOKEN_DIR)"
 	@if [ ! -f "$(TOKEN_FILE)" ]; then \
 		openssl rand -hex 32 > "$(TOKEN_FILE)"; \
 		chmod 600 "$(TOKEN_FILE)"; \
 		echo "  ✓ generated bearer token at $(TOKEN_FILE)"; \
 	fi
-	@# Both credentials travel the same way: host file -> .env -> compose
-	@# `env_file`. Nothing is bind-mounted into the image, because the container's
-	@# `app` user has --home-dir /app, so the poller's own
-	@# ~/.config/linewatch/router-password fallback resolves to /app/.config there
-	@# and can never be the deployment path. The router password is optional: with
-	@# no file the poller stays disabled and the API serves exactly as before.
-	@#
-	@# LINEWATCH_UID/GID are stripped and not re-added: they existed for the old
-	@# ./data bind mount's ownership, which the named volume replaced.
-	@TOKEN=$$(cat "$(TOKEN_FILE)"); \
-	if [ -f .env ]; then grep -vE '^LINEWATCH_(TOKEN|ROUTER_PASSWORD|UID|GID)=' .env > .env.tmp || true; else : > .env.tmp; fi; \
-	chmod 600 .env.tmp; \
-	printf 'LINEWATCH_TOKEN=%s\n' "$$TOKEN" >> .env.tmp; \
-	if [ -f "$(ROUTER_PW_FILE)" ]; then \
-		: "first line only, CR stripped: compose reads .env line-by-line, so a"; \
-		: "trailing newline or a CRLF file would otherwise corrupt the value"; \
-		ROUTER_PW=$$(head -n 1 "$(ROUTER_PW_FILE)" | tr -d '\r'); \
-		if [ -z "$$ROUTER_PW" ]; then \
-			echo "  ! $(ROUTER_PW_FILE) is empty — router poller stays disabled"; \
-		else \
-			printf 'LINEWATCH_ROUTER_PASSWORD=%s\n' "$$ROUTER_PW" >> .env.tmp; \
-			echo "  ✓ router password read from $(ROUTER_PW_FILE) — poller enabled"; \
-		fi; \
+	@# The app reads the token, and the router password if one exists, straight
+	@# from these two chmod-600 host files — the same two the collector uses. No
+	@# .env, no secrets cache: monitoring must keep working with an unseeded cache.
+	@# The router password is optional: with no file the poller stays disabled and
+	@# GET /api/router says so.
+	@if [ -s "$(ROUTER_PW_FILE)" ]; then \
+		echo "  ✓ router password at $(ROUTER_PW_FILE) — poller enabled"; \
 	else \
-		echo "  · no $(ROUTER_PW_FILE) — router poller stays disabled (GET /api/router says so). To enable: write the router UI password there, chmod 600, re-run 'make up'."; \
-	fi; \
-	mv .env.tmp .env; \
-	chmod 600 .env
-
-up: guard-deploy env marker ## THE deploy: token + .env + volume, build (API and dashboard), recreate, wait for health, prove the container is your working tree. Safe to re-run any time.
-	@# `container_name: linewatch` is a fixed name, so a container started by a
-	@# *different* compose project — a sibling worktree, a renamed directory, an
-	@# interrupted run — holds that name without being tracked here. Compose then
-	@# fails with "container name is already in use" and the orphan keeps serving
-	@# whatever image it was built from, which is how a rebuilt bearer-auth fix went
-	@# undeployed for half an hour. Assert the name is ours; do not ship a separate
-	@# "more thorough" target, which would only offer a way to distrust `up`.
-	@if docker inspect linewatch >/dev/null 2>&1; then \
-		OWNER=$$(docker inspect linewatch --format '{{index .Config.Labels "com.docker.compose.project"}}' 2>/dev/null); \
-		if [ "$$OWNER" != "$(COMPOSE_PROJECT)" ]; then \
-			echo "  ! container 'linewatch' belongs to compose project '$${OWNER:-<none>}', not '$(COMPOSE_PROJECT)' — removing it"; \
-			docker rm -f linewatch >/dev/null; \
-		fi; \
+		echo "  · no $(ROUTER_PW_FILE) — router poller stays disabled (GET /api/router says so)"; \
 	fi
-	@# The volume is declared `external:` so `docker compose down -v` can never
-	@# delete the uptime history. That means Compose will not create it either —
-	@# so ensure it here rather than failing a fresh clone with a bare
-	@# "external volume not found".
-	@docker volume inspect $(VOLUME) >/dev/null 2>&1 || { \
-		docker volume create $(VOLUME) >/dev/null && \
-		echo "  ✓ created empty volume $(VOLUME) (run 'make db-import' if you have a pre-volume ./data/linewatch.db)"; }
-	docker compose build
-	@# Docker creates a fresh named volume root:root 0755 (measured), and the
-	@# image runs as the non-root `app` user, so without this the very first boot
-	@# fails with EACCES on the database. Asserted on every `up` rather than only
-	@# at creation: the volume can also be recreated by hand.
-	@docker compose run --rm --no-deps --user 0:0 --entrypoint sh linewatch -c 'chown -R app:app /app/data' >/dev/null
-	docker compose up -d --force-recreate --remove-orphans
+
+speedtest-install: ## Install the Ookla CLI to ~/.local/bin (idempotent; `up` does this for you)
+	@# The speed-test runner shells out to `speedtest`. In the container the
+	@# Dockerfile put it there; natively it has to be on the PATH the plist sets.
+	@# Fetched into a fresh directory, never into the checkout.
+	@if [ -x "$(SPEEDTEST_BIN)" ] && "$(SPEEDTEST_BIN)" --version >/dev/null 2>&1; then \
+		echo "  · speedtest already at $(SPEEDTEST_BIN)"; exit 0; \
+	fi; \
+	TMP=$$(mktemp -d); \
+	curl -fsSL "$(SPEEDTEST_URL)" -o "$$TMP/speedtest.tgz" \
+		&& tar -xzf "$$TMP/speedtest.tgz" -C "$$TMP" speedtest \
+		&& mkdir -p "$(dir $(SPEEDTEST_BIN))" \
+		&& install -m 755 "$$TMP/speedtest" "$(SPEEDTEST_BIN)" \
+		|| { rm -rf "$$TMP"; echo "  ✗ could not install the Ookla CLI from $(SPEEDTEST_URL)"; exit 1; }; \
+	rm -rf "$$TMP"; \
+	"$(SPEEDTEST_BIN)" --version | head -n 1 \
+		|| { echo "  ✗ $(SPEEDTEST_BIN) does not run"; exit 1; }; \
+	echo "  ✓ speedtest installed at $(SPEEDTEST_BIN)"
+
+up: guard-deploy env speedtest-install ## THE deploy: build the dashboard, render + (re)start the launchd job, wait for health, prove it runs this checkout. Safe to re-run any time.
+	@# Refuse to start an EMPTY record while the old one is still in the Docker
+	@# volume: the app would migrate a fresh database, the collector's spool would
+	@# fill it, and the history would look lost. `db-move` is the one-time move.
+	@# Fails open (no docker, no volume) so it can never block a healthy host;
+	@# FRESH=1 is the policy override for a deliberately empty start.
+	@if [ ! -f "$(LIVE_DB)" ] && [ -z "$(FRESH)" ] && docker volume inspect $(LIVE_VOLUME) >/dev/null 2>&1; then \
+		echo "  ✗ no database at $(LIVE_DB), but the $(LIVE_VOLUME) volume still holds the record — run 'make db-move' once. (FRESH=1 starts empty on purpose.)"; exit 1; \
+	fi
+	bun install --frozen-lockfile
+	cd web && bun install --frozen-lockfile && bun run build
+	@mkdir -p "$(DB_DIR)"
+	$(call install_agent,$(APP_LABEL),$(APP_LOG))
 	@printf "  waiting for /health… "
 	@for i in 1 2 3 4 5 6 7 8 9 10; do \
 		if curl -fsS http://127.0.0.1:7731/health >/dev/null 2>&1; then echo "ok"; exit 0; fi; \
 		sleep 2; \
 	done; \
 	echo "TIMED OUT — check: make logs"; exit 1
-	@# Assert, don't nuke. `bun run build` writes web/dist on the host and a dev
-	@# server serves it — neither is a deploy, and on 2026-08-02 that shipped a
-	@# dashboard two generations stale with nothing reporting it. This compares
-	@# the image's baked-in fingerprint against the working tree's
-	@# (scripts/codesum.ts) and catches staleness from any cause in ~1s.
-	@printf "  verifying the container is your working tree… "
-	@HOST=$$(bun scripts/codesum.ts $(FINGERPRINT_PATHS) 2>/dev/null); \
-	CONT=$$(docker exec linewatch cat /app/.codesum 2>/dev/null); \
-	if [ -z "$$HOST" ]; then \
-		echo "FAILED"; echo "  ✗ could not fingerprint the working tree — is bun on PATH?"; exit 1; \
-	elif [ -z "$$CONT" ]; then \
-		echo "FAILED"; echo "  ✗ the running image carries no /app/.codesum — it predates this check, so it is not this build."; exit 1; \
-	elif [ "$$HOST" != "$$CONT" ]; then \
-		echo "MISMATCH"; \
-		echo "  ✗ the running container is NOT your working tree — diagnose, do not rebuild past it."; \
-		echo "      working tree: $$HOST"; \
-		echo "      container:    $$CONT"; \
-		exit 1; \
+	@# Assert, don't nuke. The container proved itself with a baked-in source
+	@# fingerprint; a native job has no image to go stale, so the failure it can
+	@# have is the other one — answering from the wrong tree (a sibling worktree, an
+	@# orphan from an older checkout) or from the wrong database. Ask the kernel
+	@# what the listening process is actually holding.
+	@printf "  verifying the job runs this checkout and the record… "
+	@PID=$$(lsof -nP -iTCP:7731 -sTCP:LISTEN -t 2>/dev/null | head -n 1); \
+	if [ -z "$$PID" ]; then echo "FAILED"; echo "  ✗ nothing is listening on 127.0.0.1:7731"; exit 1; fi; \
+	CWD=$$(lsof -a -p $$PID -d cwd -Fn 2>/dev/null | sed -n 's/^n//p'); \
+	WANT=$$(cd "$(REPO_DIR)" && pwd -P); \
+	if [ "$$CWD" != "$$WANT" ]; then \
+		echo "MISMATCH"; echo "  ✗ the process on :7731 (pid $$PID) runs from '$$CWD', not '$$WANT' — diagnose, do not redeploy past it."; exit 1; \
 	fi; \
-	echo "ok ($$HOST)"
+	if ! lsof -p $$PID -Fn 2>/dev/null | grep -qF "$(LIVE_DB)"; then \
+		echo "MISMATCH"; echo "  ✗ pid $$PID does not hold $(LIVE_DB) open — it is serving a different record."; exit 1; \
+	fi; \
+	echo "ok (pid $$PID)"
 	@echo "✓ linewatch up — http://127.0.0.1:7731"
 
-down: ## Stop the stack
-	docker compose down
+app-stop: ## (internal) Unload the launchd job; the plist stays, so the next login or `app-start` brings it back
+	@UID_N=$$(id -u); \
+	if launchctl bootout gui/$$UID_N/$(APP_LABEL) 2>/dev/null; then echo "  ✓ $(APP_LABEL) stopped"; else echo "  · $(APP_LABEL) was not loaded"; fi; \
+	for i in 1 2 3 4 5 6 7 8 9 10; do \
+		lsof -nP -iTCP:7731 -sTCP:LISTEN -t >/dev/null 2>&1 || exit 0; \
+		sleep 1; \
+	done; \
+	echo "  ✗ something still listens on :7731 after 10 s"; exit 1
 
-logs: ## Show the last 200 lines of container logs, then exit (bounded — no follow)
-	docker compose logs --tail=200
+app-start: ## (internal) Load the launchd job again after an app-stop and wait for /health
+	@if [ ! -f "$(APP_PLIST)" ]; then echo "  · $(APP_LABEL) is not installed — nothing to start (make up)"; exit 0; fi; \
+	launchctl bootstrap gui/$$(id -u) "$(APP_PLIST)" 2>/dev/null || true; \
+	printf "  waiting for /health… "; \
+	for i in 1 2 3 4 5 6 7 8 9 10; do \
+		if curl -fsS http://127.0.0.1:7731/health >/dev/null 2>&1; then echo "ok"; exit 0; fi; \
+		sleep 2; \
+	done; \
+	echo "TIMED OUT — check: make logs"; exit 1
 
-logs-follow: ## Follow container logs until interrupted (blocking)
-	@# What `make logs` used to do. Kept under its own name so the canonical `logs`
-	@# target can be a bounded, scriptable tail that exits.
-	docker compose logs -f
+down: ## Stop the app (the heartbeat will push `down` and Kuma alerts on a sustained stop; `make up` brings it back)
+	@$(SUBMAKE) --no-print-directory app-stop
+
+logs: ## Show the last 200 lines of the app log, then exit (bounded — no follow)
+	@touch "$(APP_LOG)"
+	@tail -n 200 "$(APP_LOG)"
+
+logs-follow: ## Follow the app log until interrupted (blocking; truncation by the in-place rotation is survived)
+	@touch "$(APP_LOG)"
+	tail -f "$(APP_LOG)"
 
 verify: ## Probe the running stack's health endpoint; exits non-zero if it is not live
-	@# The production health URL. Loopback-only (docker-compose.yml publishes
-	@# 127.0.0.1:7731), so this is only meaningful on the mini itself.
+	@# The production health URL. Loopback-only, so this is only meaningful on the
+	@# mini itself.
 	@curl -fsS http://127.0.0.1:7731/health \
 		&& echo "  ✓ live and healthy — http://127.0.0.1:7731/health" \
-		|| { echo "  ✗ no healthy answer from http://127.0.0.1:7731/health — is the stack up? (make up)"; exit 1; }
+		|| { echo "  ✗ no healthy answer from http://127.0.0.1:7731/health — is the job up? (make up)"; exit 1; }
 
 deploy: ## Report how master ships: `make up` on the mini from an up-to-date master checkout (no CD)
-	@# There is no CD for this repo (only check.yml). The container ships by `make up`
+	@# There is no CD for this repo (only check.yml). The app ships by `make up`
 	@# from an up-to-date master checkout on the mini.
 	@echo "  · no CD — ship with: git checkout master && git pull && make up (on the mini)"
 
-guard-deploy: ## (internal) Refuse to deploy from a non-master checkout or with tracked modifications; override with ALLOW_DIRTY_DEPLOY=1
+guard-deploy: ## (internal) Refuse to deploy from a non-master checkout, a worktree or with tracked modifications; override with ALLOW_DIRTY_DEPLOY=1
 	@if [ -n "$(ALLOW_DIRTY_DEPLOY)" ]; then \
 		echo "  ! ALLOW_DIRTY_DEPLOY set — skipping the master/clean-tree guard"; exit 0; \
 	fi; \
@@ -299,82 +300,52 @@ guard-deploy: ## (internal) Refuse to deploy from a non-master checkout or with 
 	if [ "$$BRANCH" != "master" ]; then \
 		echo "  ✗ refusing to deploy from '$$BRANCH' — deploys come from master. Emergency override: make up ALLOW_DIRTY_DEPLOY=1"; exit 1; \
 	fi; \
+	: "The plist points launchd at THIS directory. A linked worktree is deleted when"; \
+	: "its branch lands, and the job would then be pointing at nothing."; \
+	if [ "$$(git rev-parse --git-dir)" != "$$(git rev-parse --git-common-dir)" ]; then \
+		echo "  ✗ refusing to deploy from a linked worktree — the launchd job would point into a directory that is deleted when the branch lands. Deploy from the main checkout."; exit 1; \
+	fi; \
 	if [ -n "$$(git status --porcelain --untracked-files=no)" ]; then \
 		echo "  ✗ refusing to deploy with uncommitted changes to tracked files:"; \
 		git status --porcelain --untracked-files=no | sed 's/^/      /'; \
 		echo "    Commit them first. Emergency override: make up ALLOW_DIRTY_DEPLOY=1"; exit 1; \
 	fi
 
-rebuild: guard-deploy ## Refresh pinned base images (docker compose build --pull), then same as `up`
-	docker compose build --pull
-	$(MAKE) up
+# ── Database (a host file — see docs/storage.md) ─────────────────────────────
 
-# ── Database (container-owned — see docs/storage.md) ─────────────────────────
+db-counts: ## Row counts per table in the database (read-only, scriptable)
+	$(REQUIRE_DB)
+	@for t in $$(sqlite3 -readonly "$(DB_FILE)" "select name from sqlite_master where type='table' order by name"); do printf "  %-24s %s\n" "$$t" "$$(sqlite3 -readonly "$(DB_FILE)" "select count(*) from \"$$t\"")"; done; \
+	printf "  %-24s %s\n" "probe_sample max ts" "$$(sqlite3 -readonly "$(DB_FILE)" "select coalesce(max(ts),0) from probe_sample")"
 
-# A note for whoever finds the vestigial host ./data directory. It is no longer
-# what *arms* src/db/client.ts — that guard triggers on the path itself, because
-# ./data is where docker-compose.yml mounts the volume, so it survives a fresh
-# clone. This file used to be the only trigger, was gitignored, and was written
-# by `db-import` alone — which refuses to run once the volume holds rows. A
-# re-clone therefore disarmed the guard with no supported way to re-arm it.
-marker:
-	@mkdir -p "$(HOST_DATA_DIR)"
-	@{ \
-		echo "linewatch's database lives in the '$(VOLUME)' Docker volume, mounted over this"; \
-		echo "directory inside the container. Nothing here is the record."; \
-		echo "The host must never open it: SQLite's fcntl locks do not cross the"; \
-		echo "macOS-host / Docker-VM boundary, and that corrupted this database on"; \
-		echo "2026-07-30. src/db/client.ts refuses a host-side open of this directory."; \
-		echo "Use: make db-counts | make db-shell | make db-backup — or read the API."; \
-		echo "See docs/storage.md."; \
-	} > "$(MARKER)"
-
-# The scriptable sibling of db-shell. db-shell execs an interactive prompt, so it
-# cannot answer "how many rows are in there" from a script or an agent — and the
-# host may not open the file itself.
-db-counts: ## Row counts per table in the container-owned database (read-only, scriptable)
-	$(REQUIRE_VOLUME)
-	@# A throwaway container rather than `exec`, so this also answers while the
-	@# service is stopped — which is exactly when a restore wants to be checked.
-	@$(DB_READ) 'if [ ! -f $(DB) ]; then echo "  · no database in volume $(VOLUME) yet"; exit 0; fi; \
-		for t in $$(sqlite3 -readonly $(DB) ".tables"); do printf "  %-24s %s\n" "$$t" "$$(sqlite3 -readonly $(DB) "select count(*) from \"$$t\"")"; done; \
-		printf "  %-24s %s\n" "probe_sample max ts" "$$(sqlite3 -readonly $(DB) "select coalesce(max(ts),0) from probe_sample")"'
-
-db-shell: ## Interactive sqlite3 prompt on the container-owned database
-	$(REQUIRE_UP)
-	@echo "  · $(DB) inside the linewatch container — .quit to leave"
-	@docker compose exec linewatch sqlite3 $(DB)
+db-shell: ## Interactive sqlite3 prompt on the database (the app may stay up: WAL, one host kernel)
+	$(REQUIRE_DB)
+	@echo "  · $(DB_FILE) — .quit to leave"
+	@sqlite3 "$(DB_FILE)"
 
 # Integrity-gated on both sides: a snapshot of a corrupt database is worse than
 # no snapshot, and a snapshot that arrives corrupt is a backup you only discover
 # is useless during a restore. `.backup` is SQLite's online backup API, so it
 # captures the WAL too — a plain `cp` of the main file silently omits everything
 # written since the last checkpoint.
-db-backup: ## Verified snapshot of the database into ./backups (gitignored)
-	$(REQUIRE_VOLUME)
+db-backup: ## Verified snapshot of the database into ./backups (gitignored); SNAP=<name>.db names it
+	$(REQUIRE_DB)
 	@mkdir -p "$(BACKUP_DIR)"
-	@$(DB_TOOL) 'set -e; \
-		[ "$$(sqlite3 -readonly $(DB) "pragma integrity_check")" = ok ] || { echo "  ✗ source fails integrity_check — refusing to snapshot a corrupt database"; exit 1; }; \
-		OUT="/backups/linewatch-$$(date -u +%Y%m%dT%H%M%SZ).db"; \
-		sqlite3 $(DB) ".backup $$OUT"; \
-		: "Take the snapshot out of WAL mode before anything else touches it."; \
-		: "A .backup inherits journal_mode from the source, and a WAL database"; \
-		: "cannot be opened -readonly unless its -shm sidecar exists, which the"; \
-		: "rm below deletes. Snapshots written before this line are valid but"; \
-		: "unverifiable: sqlite3 -readonly answers unable to open database file"; \
-		: "on a perfectly good 14874-row backup. That is the worst possible"; \
-		: "property for a file whose only job is to be readable on the day"; \
-		: "something has gone wrong. journal_mode=delete makes it a genuine"; \
-		: "single file, openable anywhere, read-only or not."; \
-		sqlite3 "$$OUT" "pragma journal_mode=delete" >/dev/null; \
-		[ "$$(sqlite3 -readonly "$$OUT" "pragma integrity_check")" = ok ] || { echo "  ✗ snapshot fails integrity_check"; rm -f "$$OUT"; exit 1; }; \
-		ROWS=$$(sqlite3 -readonly "$$OUT" "select count(*) from probe_sample"); \
-		SIZE=$$(du -h "$$OUT" | cut -f1); \
-		chown $(shell id -u):$(shell id -g) "$$OUT"; \
-		: "the snapshot inherits WAL mode, and a -readonly open cannot delete its"; \
-		: "own sidecars on close — drop them so the snapshot is a single file"; \
-		rm -f "$$OUT"-wal "$$OUT"-shm; \
-		echo "  ✓ backups/$$(basename $$OUT) — $$ROWS probe_sample rows, $$SIZE"'
+	@set -e; \
+	[ "$$(sqlite3 -readonly "$(DB_FILE)" "pragma integrity_check")" = ok ] || { echo "  ✗ source fails integrity_check — refusing to snapshot a corrupt database"; exit 1; }; \
+	OUT="$(BACKUP_DIR)/$(if $(SNAP),$(SNAP),linewatch-$$(date -u +%Y%m%dT%H%M%SZ).db)"; \
+	sqlite3 "$(DB_FILE)" ".backup $$OUT"; \
+	: "Take the snapshot out of WAL mode before anything else touches it."; \
+	: "A .backup inherits journal_mode from the source, and a WAL database"; \
+	: "cannot be opened -readonly unless its -shm sidecar exists. A snapshot"; \
+	: "whose only job is to be readable on the day something has gone wrong"; \
+	: "must be a genuine single file, openable anywhere, read-only or not."; \
+	sqlite3 "$$OUT" "pragma journal_mode=delete" >/dev/null; \
+	[ "$$(sqlite3 -readonly "$$OUT" "pragma integrity_check")" = ok ] || { echo "  ✗ snapshot fails integrity_check"; rm -f "$$OUT"; exit 1; }; \
+	ROWS=$$(sqlite3 -readonly "$$OUT" "select count(*) from probe_sample"); \
+	SIZE=$$(du -h "$$OUT" | cut -f1); \
+	rm -f "$$OUT"-wal "$$OUT"-shm; \
+	echo "  ✓ backups/$$(basename $$OUT) — $$ROWS probe_sample rows, $$SIZE"
 
 intervention: ## Record a manual action on the line: make intervention ACTION="swapped the LAN cable" [NOTE="..."]
 	@# Attribution is the whole point: without a recorded action, a recovery two
@@ -402,7 +373,7 @@ intervention: ## Record a manual action on the line: make intervention ACTION="s
 		-d "$$BODY" \
 		&& echo "  ✓ recorded — it will appear on the timeline and in GET /api/events"
 
-router-reconnect: ## Re-dial the WAN connection (needs LINEWATCH_ROUTER_WRITE=1 in .env; drops the line for ~15s)
+router-reconnect: ## Re-dial the WAN connection (needs LINEWATCH_ROUTER_WRITE=1 in the app plist; drops the line for ~15s)
 	@# No OID parameter, and there never will be one: the router routes every
 	@# verb through one URL with the verb inside an encrypted body, so a target
 	@# that took an operation name would put a factory reset one typo away. The
@@ -435,7 +406,7 @@ router-reboot: ## Reboot the router (needs LINEWATCH_ROUTER_WRITE=1; takes the W
 		|| echo "  · no answer from the API - if the router went down mid-request that is the expected signature; check make logs and the probe record"
 
 db-vacuum: ## Rebuild the database, reclaiming freed pages (run after a migration that DROPs a column)
-	$(REQUIRE_VOLUME)
+	$(REQUIRE_DB)
 	@# Why this exists rather than trusting the migration: SQLite's ALTER TABLE
 	@# DROP COLUMN rewrites the live rows but returns the old pages to the
 	@# freelist WITHOUT zeroing them, so a dropped column's contents stay
@@ -447,18 +418,18 @@ db-vacuum: ## Rebuild the database, reclaiming freed pages (run after a migratio
 	@# Integrity-gated on both sides for the same reason db-backup is: VACUUM
 	@# rewrites the whole file, and doing that to an already-corrupt database
 	@# turns a recoverable problem into an unrecoverable one.
-	$(SERVICE_STOP)
+	@$(SERVICE_STOP)
 	@STATUS=0; \
-	$(DB_TOOL) 'set -e; \
-		[ "$$(sqlite3 -readonly $(DB) "pragma integrity_check")" = ok ] || { echo "  ✗ fails integrity_check — refusing to vacuum a corrupt database"; exit 1; }; \
-		BEFORE=$$(du -k $(DB) | cut -f1); \
+	( set -e; \
+		[ "$$(sqlite3 -readonly "$(DB_FILE)" "pragma integrity_check")" = ok ] || { echo "  ✗ fails integrity_check — refusing to vacuum a corrupt database"; exit 1; }; \
+		BEFORE=$$(du -k "$(DB_FILE)" | cut -f1); \
 		: "checkpoint first: VACUUM does not rewrite pages still sitting in the"; \
 		: "WAL, and the dropped values can be in there too"; \
-		sqlite3 $(DB) "pragma wal_checkpoint(TRUNCATE)" >/dev/null; \
-		sqlite3 $(DB) "vacuum"; \
-		[ "$$(sqlite3 -readonly $(DB) "pragma integrity_check")" = ok ] || { echo "  ✗ fails integrity_check AFTER vacuum — restore from ./backups"; exit 1; }; \
-		AFTER=$$(du -k $(DB) | cut -f1); \
-		echo "  ✓ vacuumed — $${BEFORE}K → $${AFTER}K"' || STATUS=$$?; \
+		sqlite3 "$(DB_FILE)" "pragma wal_checkpoint(TRUNCATE)" >/dev/null; \
+		sqlite3 "$(DB_FILE)" "vacuum"; \
+		[ "$$(sqlite3 -readonly "$(DB_FILE)" "pragma integrity_check")" = ok ] || { echo "  ✗ fails integrity_check AFTER vacuum — restore from ./backups"; exit 1; }; \
+		AFTER=$$(du -k "$(DB_FILE)" | cut -f1); \
+		echo "  ✓ vacuumed — $${BEFORE}K → $${AFTER}K" );   STATUS=$$?; \
 	$(SERVICE_START); \
 	exit $$STATUS
 
@@ -469,33 +440,35 @@ db-restore: ## Restore the database from a snapshot in ./backups: make db-restor
 		exit 1; \
 	fi
 	@test -f "$(BACKUP_DIR)/$(FROM)" || { echo "  ✗ no such snapshot: backups/$(FROM)"; exit 1; }
-	$(REQUIRE_VOLUME)
 	@# Stop the API first. Restoring under a live writer would either lose every
 	@# write made after the copy or interleave them with it.
-	$(SERVICE_STOP)
+	@$(SERVICE_STOP)
 	@# Whatever the restore decides, the service has to come back: a refusal or a
 	@# failed assert that leaves linewatch stopped turns a safety check into an
 	@# outage, and the collector's spool only covers a window that ends. So the
 	@# exit status is carried past the restart rather than aborting the recipe.
+	@mkdir -p "$(dir $(DB_FILE))"
 	@STATUS=0; \
-	$(DB_TOOL) 'set -e; \
-		SRC="/backups/$(FROM)"; \
+	( set -e; \
+		SRC="$(BACKUP_DIR)/$(FROM)"; \
+		DB="$(DB_FILE)"; \
 		: "a -readonly open of a WAL database recreates its sidecars; leaving them"; \
 		: "next to the snapshot makes the *next* restore count main+WAL and copy"; \
 		: "main only. Clean them on every exit, refusals included."; \
-		trap "rm -f $${SRC}-wal $${SRC}-shm" EXIT; \
+		trap 'rm -f "$$SRC-wal" "$$SRC-shm"' EXIT; \
 		STAMP=$$(date -u +%Y%m%dT%H%M%SZ); \
-		ARCHIVE="/backups/linewatch-pre-restore-$$STAMP.db"; \
+		ARCHIVE="$(BACKUP_DIR)/linewatch-pre-restore-$$STAMP.db"; \
+		KEPT=""; \
 		[ "$$(sqlite3 -readonly "$$SRC" "pragma integrity_check")" = ok ] || { echo "  ✗ snapshot fails integrity_check — refusing to restore"; exit 1; }; \
 		WANT=$$(sqlite3 -readonly "$$SRC" "select count(*) from probe_sample"); \
 		SNAP_MAX=$$(sqlite3 -readonly "$$SRC" "select coalesce(max(ts),0) from probe_sample"); \
-		if [ -f $(DB) ]; then \
-			if LIVE_MAX=$$(sqlite3 -readonly $(DB) "select coalesce(max(ts),0) from probe_sample" 2>/dev/null); then \
-				NEWER=$$(sqlite3 -readonly $(DB) "select count(*) from probe_sample where ts > $$SNAP_MAX"); \
-				NEWER_ST=$$(sqlite3 -readonly $(DB) "select count(*) from speed_test where ts > $$SNAP_MAX"); \
+		if [ -f "$$DB" ]; then \
+			if LIVE_MAX=$$(sqlite3 -readonly "$$DB" "select coalesce(max(ts),0) from probe_sample" 2>/dev/null); then \
+				NEWER=$$(sqlite3 -readonly "$$DB" "select count(*) from probe_sample where ts > $$SNAP_MAX"); \
+				NEWER_ST=$$(sqlite3 -readonly "$$DB" "select count(*) from speed_test where ts > $$SNAP_MAX"); \
 				if [ "$$NEWER" -gt 0 ] || [ "$$NEWER_ST" -gt 0 ]; then \
-					FIRST=$$(sqlite3 -readonly $(DB) "select min(datetime(ts/1000,'\''unixepoch'\'')) from probe_sample where ts > $$SNAP_MAX"); \
-					LAST=$$(sqlite3 -readonly $(DB) "select max(datetime(ts/1000,'\''unixepoch'\'')) from probe_sample where ts > $$SNAP_MAX"); \
+					FIRST=$$(sqlite3 -readonly "$$DB" "select min(datetime(ts/1000,'unixepoch')) from probe_sample where ts > $$SNAP_MAX"); \
+					LAST=$$(sqlite3 -readonly "$$DB" "select max(datetime(ts/1000,'unixepoch')) from probe_sample where ts > $$SNAP_MAX"); \
 					echo "  ! the live database holds measurements this snapshot does not:"; \
 					echo "      probe_sample rows newer than the snapshot: $$NEWER"; \
 					echo "      speed_test  rows newer than the snapshot: $$NEWER_ST"; \
@@ -508,22 +481,20 @@ db-restore: ## Restore the database from a snapshot in ./backups: make db-restor
 					echo "  ! FORCE=1 — discarding them deliberately"; \
 				fi; \
 				: "archive with the online backup API, not mv: mv takes the main file"; \
-				: "and leaves the WAL behind, which is the thing docs/storage.md says"; \
-				: "is not a backup."; \
-				sqlite3 $(DB) ".backup $$ARCHIVE"; \
-				[ "$$(sqlite3 -readonly "$$ARCHIVE" "pragma integrity_check")" = ok ] || { echo "  ✗ pre-restore archive fails integrity_check — refusing to overwrite the live database"; rm -f "$$ARCHIVE"-wal "$$ARCHIVE"-shm; exit 1; }; \
+				: "and leaves the WAL behind, which docs/storage.md says is not a backup."; \
+				sqlite3 "$$DB" ".backup $$ARCHIVE"; \
+				sqlite3 "$$ARCHIVE" "pragma journal_mode=delete" >/dev/null; \
+				[ "$$(sqlite3 -readonly "$$ARCHIVE" "pragma integrity_check")" = ok ] || { echo "  ✗ pre-restore archive fails integrity_check — refusing to overwrite the live database"; rm -f "$$ARCHIVE" "$$ARCHIVE-wal" "$$ARCHIVE-shm"; exit 1; }; \
 				ARCH_ROWS=$$(sqlite3 -readonly "$$ARCHIVE" "select count(*) from probe_sample"); \
 				ARCH_MAX=$$(sqlite3 -readonly "$$ARCHIVE" "select coalesce(max(ts),0) from probe_sample"); \
-				rm -f "$$ARCHIVE"-wal "$$ARCHIVE"-shm; \
-				chown $(HOST_OWNER) "$$ARCHIVE"; \
+				rm -f "$$ARCHIVE-wal" "$$ARCHIVE-shm"; \
 				KEPT="backups/$$(basename $$ARCHIVE)"; \
 				echo "  ✓ archived the live database first: $$KEPT — $$ARCH_ROWS probe_sample rows, max ts $$ARCH_MAX (WAL included; restorable with FROM=)"; \
 			else \
-				UNREAD="/backups/linewatch-unreadable-$$STAMP"; \
+				UNREAD="$(BACKUP_DIR)/linewatch-unreadable-$$STAMP"; \
 				mkdir -p "$$UNREAD"; \
-				cp $(DB) "$$UNREAD"/; \
-				for s in -wal -shm; do if [ -f $(DB)$$s ]; then cp $(DB)$$s "$$UNREAD"/; fi; done; \
-				chown -R $(HOST_OWNER) "$$UNREAD"; \
+				cp "$$DB" "$$UNREAD"/; \
+				for s in -wal -shm; do if [ -f "$$DB$$s" ]; then cp "$$DB$$s" "$$UNREAD"/; fi; done; \
 				KEPT="backups/$$(basename $$UNREAD)/"; \
 				echo "  ! the live database cannot be read (probe_sample query failed) — that is"; \
 				echo "    corruption, not an empty database. Copied it, WAL and all, to"; \
@@ -532,16 +503,14 @@ db-restore: ## Restore the database from a snapshot in ./backups: make db-restor
 				echo "    (that is what recovered 945 of 1408 rows on 2026-07-30)"; \
 				[ -n "$(FORCE)" ] || { echo "  ✗ refusing to replace an unreadable database — re-run with FORCE=1 once you have recovered what you can."; exit 1; }; \
 			fi; \
-			rm -f $(DB) $(DB)-wal $(DB)-shm; \
+			rm -f "$$DB" "$$DB-wal" "$$DB-shm"; \
 		fi; \
-		: "restore with .backup for the same reason db-import does: the snapshot"; \
-		: "may carry a WAL, and cp would copy the main file without it."; \
-		sqlite3 "$$SRC" ".backup $(DB)"; \
-		chown -R app:app /app/data; \
-		[ "$$(sqlite3 -readonly $(DB) "pragma integrity_check")" = ok ] || { echo "  ✗ restored database fails integrity_check"; exit 1; }; \
-		GOT=$$(sqlite3 -readonly $(DB) "select count(*) from probe_sample"); \
+		: "restore with .backup: the snapshot may carry a WAL, and cp would copy"; \
+		: "the main file without it."; \
+		sqlite3 "$$SRC" ".backup $$DB"; \
+		[ "$$(sqlite3 -readonly "$$DB" "pragma integrity_check")" = ok ] || { echo "  ✗ restored database fails integrity_check"; exit 1; }; \
+		GOT=$$(sqlite3 -readonly "$$DB" "select count(*) from probe_sample"); \
 		[ "$$GOT" = "$$WANT" ] || { echo "  ✗ row count mismatch after restore: $$WANT -> $$GOT"; exit 1; }; \
-		chown -R app:app /app/data; \
 		echo "  ✓ the database is now exactly backups/$(FROM): $$GOT probe_sample rows, max ts $$SNAP_MAX."; \
 		: "deliberately not claiming more than that. The old message — restored N"; \
 		: "rows, previous copy kept — read as if nothing was lost, on a target that"; \
@@ -550,75 +519,121 @@ db-restore: ## Restore the database from a snapshot in ./backups: make db-restor
 			echo "    Whatever the database held after that snapshot is no longer live. It"; \
 			echo "    survives only in $$KEPT."; \
 		else \
-			echo "    The volume held no database before this, so nothing was replaced."; \
-		fi' || STATUS=$$?; \
+			echo "    There was no database before this, so nothing was replaced."; \
+		fi );   STATUS=$$?; \
 	$(SERVICE_START); \
 	exit $$STATUS
 
-# One-time, and idempotent enough to re-run: it refuses once the volume holds
-# real rows. Imports with `.backup` rather than `cp` because the source still has
-# a live WAL — the whole reason the old bind mount was unsafe.
-db-import: env ## ONE-TIME: move a pre-volume ./data/linewatch.db (or FROM=<file>.db in ./backups) into the linewatch-data volume
-	@SRC="$(if $(FROM),$(BACKUP_DIR)/$(FROM),$(HOST_DATA_DIR)/linewatch.db)"; \
-	test -f "$$SRC" || { echo "  ✗ nothing to import at $$SRC"; exit 1; }
+# ── The move out of the Docker volume, and the way back (docs/storage.md) ────
+
+volume-counts: ## Row counts per table in the Docker volume's database (read-only; the pre-move record)
+	$(REQUIRE_VOLUME)
+	@# A throwaway container, so this answers while the container service is down
+	@# — which is exactly when a move wants to be checked. Not root: a root-owned
+	@# `-shm` left behind by a read would lock the app (uid 999) out of its own file.
+	@docker compose run --rm --no-deps -T -v "$(VOLUME):/app/data" --entrypoint sh linewatch -c 'if [ ! -f $(VOLUME_DB) ]; then echo "  · no database in volume $(VOLUME)"; exit 0; fi; \
+		for t in $$(sqlite3 -readonly $(VOLUME_DB) "select name from sqlite_master where type='\''table'\'' order by name"); do printf "  %-24s %s\n" "$$t" "$$(sqlite3 -readonly $(VOLUME_DB) "select count(*) from \"$$t\"")"; done; \
+		printf "  %-24s %s\n" "probe_sample max ts" "$$(sqlite3 -readonly $(VOLUME_DB) "select coalesce(max(ts),0) from probe_sample")"'
+
+volume-backup: ## Verified snapshot of the Docker volume's database into ./backups; SNAP=<name>.db names it
+	$(REQUIRE_VOLUME)
 	@mkdir -p "$(BACKUP_DIR)"
-	@docker volume inspect $(VOLUME) >/dev/null 2>&1 || docker volume create $(VOLUME) >/dev/null
-	@# The running container holds ./data open through the bind mount this change
-	@# removes. Two processes on one WAL database is the bug — stop it first.
-	$(SERVICE_STOP)
-	@# The import runs sqlite3 from the image, so the image has to be current —
-	@# `docker compose run` never builds on its own.
-	docker compose build
-	@STATUS=0; \
-	docker compose run --rm --no-deps -T --user 0:0 \
-		-v "$(VOLUME):/app/data" -v "$(BACKUP_DIR):/backups" -v "$(HOST_DATA_DIR):/olddata" \
-		--entrypoint sh linewatch -c 'set -e; \
-		SRC="$(if $(FROM),/backups/$(FROM),/olddata/linewatch.db)"; \
-		trap "rm -f $${SRC}-wal $${SRC}-shm" EXIT; \
-		[ "$$(sqlite3 -readonly "$$SRC" "pragma integrity_check")" = ok ] || { echo "  ✗ source fails integrity_check — refusing to import a corrupt database"; exit 1; }; \
-		WANT=$$(sqlite3 -readonly "$$SRC" "select count(*) from probe_sample"); \
-		if [ -f $(DB) ]; then \
-			: "an unreadable table is corruption, not an empty database. Coalescing"; \
-			: "the failure to 0 (the old ...-or-echo-0 fallback) put a corrupt file on the"; \
-			: "safe-to-delete branch — and .recover on exactly such a file is what"; \
-			: "salvaged 945 rows on 2026-07-30. Separate query-failed from returned-0."; \
-			if HAVE=$$(sqlite3 -readonly $(DB) "select count(*) from probe_sample" 2>/dev/null); then \
-				[ "$$HAVE" = 0 ] || { echo "  ✗ the volume already holds $$HAVE probe_sample rows — refusing to overwrite. Use make db-restore."; exit 1; }; \
-			else \
-				UNREAD="/backups/linewatch-unreadable-$$(date -u +%Y%m%dT%H%M%SZ)"; \
-				mkdir -p "$$UNREAD"; \
-				cp $(DB) "$$UNREAD"/; \
-				for s in -wal -shm; do if [ -f $(DB)$$s ]; then cp $(DB)$$s "$$UNREAD"/; fi; done; \
-				chown -R $(HOST_OWNER) "$$UNREAD"; \
-				[ -s "$$UNREAD/$$(basename $(DB))" ] || { echo "  ✗ could not copy the unreadable database aside — refusing to touch it"; exit 1; }; \
-				echo "  ! the volume holds a database whose probe_sample table cannot be read."; \
-				echo "    That is corruption, not an empty volume. Copied it, WAL and all, to"; \
-				echo "    backups/$$(basename $$UNREAD)."; \
-				echo "    Salvage before overwriting:  sqlite3 <copy> .recover"; \
-				echo "    (that is what recovered 945 of 1408 rows on 2026-07-30)"; \
-				[ -n "$(FORCE)" ] || { echo "  ✗ refusing to delete an unreadable database — re-run with FORCE=1 once you have recovered what you can."; exit 1; }; \
-				echo "  ! FORCE=1 — importing over it; the copy above is now the only source"; \
-			fi; \
-			rm -f $(DB) $(DB)-wal $(DB)-shm; \
-		fi; \
-		sqlite3 "$$SRC" ".backup $(DB)"; \
-		chown -R app:app /app/data; \
-		[ "$$(sqlite3 -readonly $(DB) "pragma integrity_check")" = ok ] || { echo "  ✗ imported copy fails integrity_check"; exit 1; }; \
-		GOT=$$(sqlite3 -readonly $(DB) "select count(*) from probe_sample"); \
-		[ "$$GOT" = "$$WANT" ] || { echo "  ✗ row count mismatch: $$WANT -> $$GOT"; exit 1; }; \
-		chown -R app:app /app/data; \
-		echo "  ✓ imported $$GOT probe_sample rows into the $(VOLUME) volume"' || STATUS=$$?; \
-	if [ $$STATUS -ne 0 ]; then $(SERVICE_START); exit $$STATUS; fi
-	@$(MAKE) --no-print-directory marker
-	@# Move the pre-volume files out of ./data so nothing can mistake them for
-	@# live data, and so a stray host-side tool has nothing to find.
-	@ARCHIVE="$(BACKUP_DIR)/data.pre-volume-$$(date -u +%Y%m%dT%H%M%SZ)"; \
-	if ls "$(HOST_DATA_DIR)"/linewatch.db* >/dev/null 2>&1; then \
-		mkdir -p "$$ARCHIVE"; \
-		mv "$(HOST_DATA_DIR)"/linewatch.db* "$$ARCHIVE"/; \
-		echo "  ✓ pre-volume files archived to $${ARCHIVE#$(REPO_DIR)/}"; \
+	@$(VOLUME_TOOL) 'set -e; \
+		[ "$$(sqlite3 -readonly $(VOLUME_DB) "pragma integrity_check")" = ok ] || { echo "  ✗ source fails integrity_check — refusing to snapshot a corrupt database"; exit 1; }; \
+		OUT="/backups/$(if $(SNAP),$(SNAP),linewatch-volume-$$(date -u +%Y%m%dT%H%M%SZ).db)"; \
+		sqlite3 $(VOLUME_DB) ".backup $$OUT"; \
+		sqlite3 "$$OUT" "pragma journal_mode=delete" >/dev/null; \
+		[ "$$(sqlite3 -readonly "$$OUT" "pragma integrity_check")" = ok ] || { echo "  ✗ snapshot fails integrity_check"; rm -f "$$OUT"; exit 1; }; \
+		ROWS=$$(sqlite3 -readonly "$$OUT" "select count(*) from probe_sample"); \
+		chown $(HOST_OWNER) "$$OUT"; \
+		rm -f "$$OUT"-wal "$$OUT"-shm; \
+		echo "  ✓ backups/$$(basename $$OUT) — $$ROWS probe_sample rows"'
+
+# One-time. The ordering is the safety argument: the container is stopped before
+# anything is read (no writer on the volume), the copy goes through a `.backup`
+# snapshot (WAL included, integrity-gated), the host file is compared with the
+# volume table by table AND by newest sample time before the app is ever started,
+# and the volume is never written. The collector's spool covers the window — it
+# keeps measuring while the API is down and replays on the next good cycle.
+db-move: guard-deploy ## ONE-TIME: stop the container, copy the volume's database to the host, compare, then `make up`
+	$(REQUIRE_VOLUME)
+	@if [ -f "$(LIVE_DB)" ]; then \
+		echo "  ✗ $(LIVE_DB) already exists — the move has happened (or the app started empty). Refusing to overwrite a host database; move it aside by hand if you mean to redo this."; exit 1; \
 	fi
-	$(SERVICE_START)
+	docker compose build
+	@mkdir -p "$(DB_DIR)" "$(BACKUP_DIR)"
+	docker compose down
+	@STATUS=0; \
+	( set -e; \
+		SNAP="linewatch-move-$$(date -u +%Y%m%dT%H%M%SZ).db"; \
+		$(SUBMAKE) --no-print-directory volume-backup SNAP="$$SNAP"; \
+		$(SUBMAKE) --no-print-directory volume-counts > "$(BACKUP_DIR)/.move-before.txt"; \
+		cp "$(BACKUP_DIR)/$$SNAP" "$(LIVE_DB)"; \
+		chmod 600 "$(LIVE_DB)"; \
+		[ "$$(sqlite3 -readonly "$(LIVE_DB)" "pragma integrity_check")" = ok ] || { echo "  ✗ the host copy fails integrity_check"; exit 1; }; \
+		$(SUBMAKE) --no-print-directory db-counts > "$(BACKUP_DIR)/.move-after.txt"; \
+		if ! diff "$(BACKUP_DIR)/.move-before.txt" "$(BACKUP_DIR)/.move-after.txt"; then \
+			echo "  ✗ the host copy differs from the volume (diff above: < volume, > host)"; exit 1; \
+		fi; \
+		echo "  ✓ host copy equals the volume — every table and the newest sample time:"; \
+		cat "$(BACKUP_DIR)/.move-after.txt" );   STATUS=$$?; \
+	if [ $$STATUS -ne 0 ]; then \
+		rm -f "$(LIVE_DB)" "$(LIVE_DB)-wal" "$(LIVE_DB)-shm"; \
+		echo "  ! move failed — starting the container again; the volume was never written"; \
+		docker compose up -d; \
+		exit $$STATUS; \
+	fi
+	@echo "  · the $(LIVE_VOLUME) volume is untouched and is the rollback for 7 days (docs/storage.md)"
+	$(SUBMAKE) up
+
+container-env: env ## (internal, rollback) Write ./.env for the compose container: bearer token + router password
+	@TOKEN=$$(cat "$(TOKEN_FILE)"); \
+	if [ -f .env ]; then grep -vE '^LINEWATCH_(TOKEN|ROUTER_PASSWORD|UID|GID)=' .env > .env.tmp || true; else : > .env.tmp; fi; \
+	chmod 600 .env.tmp; \
+	printf 'LINEWATCH_TOKEN=%s\n' "$$TOKEN" >> .env.tmp; \
+	if [ -s "$(ROUTER_PW_FILE)" ]; then \
+		: "first line only, CR stripped: compose reads .env line-by-line"; \
+		ROUTER_PW=$$(head -n 1 "$(ROUTER_PW_FILE)" | tr -d '\r'); \
+		[ -z "$$ROUTER_PW" ] || printf 'LINEWATCH_ROUTER_PASSWORD=%s\n' "$$ROUTER_PW" >> .env.tmp; \
+	fi; \
+	mv .env.tmp .env; \
+	chmod 600 .env
+
+# The way back. It carries the record forward, not just the pre-move volume: the
+# volume is a week-old (or older) copy, and putting it back as-is would discard
+# every measurement taken natively since the move. The volume's own database is
+# archived first, so even this is reversible.
+rollback-to-container: ## ROLLBACK: stop + unload the native app, carry its database back into the volume, start the container
+	$(REQUIRE_DB)
+	$(REQUIRE_VOLUME)
+	@mkdir -p "$(BACKUP_DIR)"
+	$(SUBMAKE) --no-print-directory app-stop
+	$(call teardown_agent,$(APP_LABEL))
+	@STAMP=$$(date -u +%Y%m%dT%H%M%SZ); \
+	$(SUBMAKE) --no-print-directory db-backup SNAP="linewatch-rollback-$$STAMP.db" && \
+	$(SUBMAKE) --no-print-directory container-env && \
+	docker compose build && \
+	$(VOLUME_TOOL) 'set -e; \
+		SRC=/backups/linewatch-rollback-'"$$STAMP"'.db; \
+		if [ -f $(VOLUME_DB) ]; then \
+			sqlite3 $(VOLUME_DB) ".backup /backups/linewatch-volume-pre-rollback-'"$$STAMP"'.db"; \
+			echo "  ✓ the volume'\''s own database kept as backups/linewatch-volume-pre-rollback-'"$$STAMP"'.db"; \
+		fi; \
+		rm -f $(VOLUME_DB) $(VOLUME_DB)-wal $(VOLUME_DB)-shm; \
+		sqlite3 "$$SRC" ".backup $(VOLUME_DB)"; \
+		chown -R app:app /app/data; \
+		[ "$$(sqlite3 -readonly $(VOLUME_DB) "pragma integrity_check")" = ok ] || { echo "  ✗ the volume copy fails integrity_check"; exit 1; }; \
+		[ "$$(sqlite3 -readonly $(VOLUME_DB) "select count(*) from probe_sample")" = "$$(sqlite3 -readonly "$$SRC" "select count(*) from probe_sample")" ] || { echo "  ✗ row count mismatch"; exit 1; }; \
+		chown -R app:app /app/data; \
+		echo "  ✓ the volume now holds the native record"' && \
+	docker compose up -d --force-recreate --remove-orphans
+	@printf "  waiting for /health… "
+	@for i in 1 2 3 4 5 6 7 8 9 10; do \
+		if curl -fsS http://127.0.0.1:7731/health >/dev/null 2>&1; then echo "ok"; exit 0; fi; \
+		sleep 2; \
+	done; \
+	echo "TIMED OUT — check: docker logs linewatch"; exit 1
+	@echo "✓ back in the container. The native app is unloaded and its plist removed; its database is still at $(LIVE_DB)."
 
 collector-setup: ## Generate the bearer token (if absent), render + load the native ping collector's LaunchAgent
 	@mkdir -p "$(TOKEN_DIR)"

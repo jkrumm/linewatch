@@ -11,9 +11,11 @@ import { Elysia } from 'elysia'
  * budget. Both halves of that sentence are asserted here, because the OpenAPI
  * description claimed a bearer on this route for a while after it was removed.
  *
- * A real run moves 250 MB–1 GB. `speedtest` is therefore made unresolvable for
- * the duration (PATH), which exercises the whole trigger → runner → row path —
+ * A real run moves 250 MB–1 GB. The CLI is therefore pointed at a path that does
+ * not exist (`LINEWATCH_SPEEDTEST_BIN`, read at each run), which exercises the whole trigger → runner → row path —
  * `runOoklaSpeedtest` records a failed run as data — without touching the line.
+ * Emptying `PATH` does not do this: Bun still resolves an installed CLI, and the
+ * mini has one.
  */
 
 const TOKEN = 'test-token-not-the-real-one'
@@ -21,6 +23,7 @@ const TOKEN = 'test-token-not-the-real-one'
 process.env['LINEWATCH_DB'] = ':memory:'
 process.env['LINEWATCH_TOKEN'] = TOKEN
 process.env['LINEWATCH_SPEEDTEST_MIN_INTERVAL_S'] = '300'
+process.env['LINEWATCH_SPEEDTEST_BIN'] = '/nonexistent/speedtest'
 
 const { speedtestsRoutes } = await import('./speedtests.js')
 const { db } = await import('../db/client.js')
@@ -32,7 +35,6 @@ afterAll(resetSharedDb)
 const { speedTest } = await import('../db/schema.js')
 
 const app = new Elysia().use(speedtestsRoutes)
-const realPath = process.env['PATH']
 
 function run(headers: Record<string, string> = {}): Promise<Response> {
   return app.handle(new Request('http://localhost/api/speedtests/run', { method: 'POST', headers }))
@@ -47,16 +49,10 @@ async function waitForRow(): Promise<void> {
   throw new Error('the triggered run never recorded a speed_test row')
 }
 
-afterAll(() => {
-  if (realPath !== undefined) process.env['PATH'] = realPath
-})
-
 describe('POST /api/speedtests/run', () => {
   test('the first call triggers a run, the second is rate-limited', async () => {
     // No `speedtest` binary reachable: the run fails fast and is recorded as a
     // failed run, which is exactly what the limiter reads.
-    process.env['PATH'] = '/nonexistent'
-
     const first = await run()
     expect(first.status).toBe(200)
     expect(await first.json()).toEqual({ ok: true, triggered: true })

@@ -5,7 +5,7 @@ long for, and what throughput does it actually deliver. Runs on the Mac mini,
 the only always-on machine on this line.
 
 STATUS: v1 live — collector, heartbeat and watchdog (shadow mode) run under
-launchd; API/UI run in Docker (see AGENTS.md Shape table).
+launchd; the API/UI are a native launchd job too since 2026-11-14 (see AGENTS.md Shape table; they ran in Docker before).
 
 ## Why this exists rather than a container off the shelf
 
@@ -43,13 +43,14 @@ What *does* work in a container, measured the same day:
 | TCP connect | Honest | `1.1.1.1:443` → 4.5 ms, matching native ICMP RTT; `192.0.2.1:443` times out |
 | ICMP | Fabricated | see above |
 
-So the collector runs natively under launchd and everything else runs in Docker.
-That split is the whole architecture.
+So the collector has to run natively under launchd. Everything else ran in Docker
+until 2026-11-14, when it moved to a second launchd job to stop paying a Colima VM's
+memory for ~50 MiB of work; the collector/API split is still the architecture.
 
 ## Shape
 
 ```
-launchd (native, macOS)              Docker (Colima)
+launchd (native, macOS)              launchd (native, macOS)
 ┌────────────────────────┐          ┌──────────────────────────────┐
 │ collector/probe.ts     │  POST    │ Elysia API : 7731            │
 │  ping ×20 per target   │ ───────► │  ingest → outage state machine│
@@ -59,15 +60,15 @@ launchd (native, macOS)              Docker (Colima)
                                     └───────────────────────────────────┘
 ```
 
-The collector is the only native piece: ~870 lines across `probe.ts`,
+The collector is the only piece that *needs* to be native (the API became native by choice): ~870 lines across `probe.ts`,
 `ping-parser.ts` and `vantage.ts`, no npm dependencies, and nothing shelled out
 to beyond the system `ping`, `route`, `ifconfig`, `netstat` and `networksetup`.
 Most of it is parsing their output, kept in pure modules with fixture tests.
 Everything with a reason to change — schema, detection logic, API, dashboard,
-and the 10-minute read-only router poll — stays in the container with a restart
-policy and rollhook deployment.
+and the 10-minute read-only router poll — stays in the second native job
+(`collector/app.ts`), restarted by launchd KeepAlive and deployed by `make up`.
 
-**The collector spools.** If the API is down (redeploy, container restart) it
+**The collector spools.** If the API is down (redeploy, app restart) it
 appends batches to `collector/spool.jsonl` and replays them on the next
 successful cycle. A deploy must not punch a hole in the uptime record — that
 hole would read as an outage, which is precisely the thing being measured.
@@ -109,9 +110,10 @@ the table is large enough to matter — noted, not built.
 
 ## Schema
 
-The database file lives in the `linewatch-data` Docker volume and the host may
-never open it — [`storage.md`](storage.md) has the rule, the corruption it
-replaced, and the `make db-*` targets that reach it.
+The database file is `~/.local/share/linewatch/linewatch.db` (it lived in the
+`linewatch-data` Docker volume until 2026-11-14) —
+[`storage.md`](storage.md) has the rule, the corruption the volume replaced, the
+move, and the `make db-*` targets.
 
 `probe_sample` — one row per target per cycle.
 
@@ -295,7 +297,7 @@ redaction. `ifconfig -v`'s `uplink rate`/`downlink rate` are omitted too: they
 disagree with the PHY rate by ~4× (53.95 vs 229 Mbit) and would only invite a
 fabricated single "wifi speed".
 
-All four kinds are now written. `config_change` records a container start:
+All four kinds are now written. `config_change` records an app start:
 downtime was otherwise invisible in the schema, and the 07:10→08:17 hole on
 2026-08-01 — six missed polls over 67 minutes, almost certainly a rebuild — was
 indistinguishable from the router refusing for that long, so every coverage
@@ -303,9 +305,9 @@ figure computed from `router_line_sample` blamed the router for the deploys.
 `note` carries poller telemetry, and only for polls that were not clean: a clean
 poll evidences itself in the rows it stored, and one note per poll would be 52k
 rows a year in the table the timeline reads. It is in the record rather than
-stdout because `make up` runs `--force-recreate`, which destroys the previous
-container's log — so every failure-mode tally in this repo was bounded by
-time-since-last-deploy.
+stdout because the log is bounded and truncated in place (and, under the container,
+`make up` ran `--force-recreate`, which destroyed the previous container's log) — so
+every failure-mode tally in this repo was bounded by time-since-last-deploy.
 
 `router_wan_sample` — the WAN *connection*, one row per poll, between the
 carrier line and the IP interface. It exists because the 2026-08-01 outage could
@@ -405,7 +407,7 @@ in-process timer, so restarting the container cannot reset the budget.
 
 | Route | Purpose |
 |-|-|
-| `GET /health` | container healthcheck |
+| `GET /health` | `make verify`, the deploy wait, the old container healthcheck |
 | `POST /api/probes` | batch ingest from the collector: one cycle, one sample per target, plus the optional `cycle` vantage (bearer) |
 | `GET /api/status` | now: up/down, ongoing outage, last sample per target, last speed test, latest vantage (negotiated link, the NIC's supported ceiling, DHCP bind time) |
 | `GET /api/probes?from&to&target&bucket` | server-bucketed timeseries: median of medians, max loss, p5/p95 band, plus a parallel per-bucket `vantage` series |
@@ -522,7 +524,7 @@ The five sections, in reading order:
 
 ## Ports
 
-`7731` — service (API + built UI, one container). `7732` — Vite dev only.
+`7731` — service (API + built UI, one launchd job). `7732` — Vite dev only.
 
 ## Known limits, stated rather than discovered later
 

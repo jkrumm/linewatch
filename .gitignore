@@ -1,14 +1,14 @@
 node_modules
 
-# Vestigial since the database moved into the linewatch-data Docker volume — now
-# holds only the MOVED-TO-DOCKER-VOLUME marker (docs/storage.md). Nothing here is
+# Vestigial since the database left the repo (2026-07-30 into a Docker volume, 2026-11-14
+# onto ~/.local/share/linewatch) — holds at most the old MOVED-TO-DOCKER-VOLUME marker (docs/storage.md). Nothing here is
 # the record: src/db/client.ts refuses a host-side open of this directory by
 # path, so the guard survives a fresh clone that has no marker.
 data
 # Throwaway database for a native `bun run dev` / `bun run start`. Never the
-# record — that only ever lives in the linewatch-data volume.
+# record — that lives at ~/.local/share/linewatch/linewatch.db.
 .dev-data
-# `make db-backup` snapshots, and the pre-volume archive left by `make db-import`.
+# `make db-backup` snapshots, restore archives and the db-move working files.
 backups
 collector/spool.jsonl
 # The watchdog's two spools. Separate from each other because they drain over

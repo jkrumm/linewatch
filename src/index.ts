@@ -137,7 +137,7 @@ export const app = new Elysia()
     },
     { detail: { hide: true } },
   )
-  .listen({ port: config.port })
+  .listen({ hostname: config.host, port: config.port })
 
 // Written before the schedulers, so a start that crashes on the way up is still
 // on record as a start — which is the shape a restart loop has.

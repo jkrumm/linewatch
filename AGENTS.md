@@ -14,7 +14,9 @@ forever and is silently wrong.
 
 TCP connect from a container *is* honest (`192.0.2.1:443` correctly times out),
 so a TCP-based probe is the legitimate fallback if ICMP ever becomes awkward.
-Throughput through the VM is unaffected, so speed tests belong in the container.
+Throughput through the VM was unaffected, which is why the speed tests once lived in
+the container; the API now runs natively too (2026-11-14), so they measure from the
+host's own interface and the VM's NAT overhead is out of the number.
 
 ## Shape
 
@@ -23,7 +25,7 @@ Throughput through the VM is unaffected, so speed tests belong in the container.
 | `collector/{probe,ping-parser,vantage,link-sampler,wifi}.ts` | native, launchd | real ICMP + the host's own vantage + 1 Hz link state + the radio; no npm deps |
 | `collector/heartbeat{,-verdict}.ts` | native, launchd, 60 s | pushes the Uptime Kuma heartbeat; its own agent so a dead collector is still reportable |
 | `collector/watchdog{,-ladder,-state,-report}.ts` | native, launchd, 15 s | decides and acts on a wedged line; **ships in shadow mode** |
-| API + SQLite + Ookla + router poll + UI | Docker (`:7731`) | restart policy, rollhook CD |
+| `collector/app.ts` → `src/index.ts`: API + SQLite + Ookla + router poll + UI | native, launchd `com.jkrumm.linewatch-app` (`127.0.0.1:7731`) | KeepAlive; the Colima VM held 4–6 GiB of host memory for ~50 MiB of this |
 
 The collector POSTs batches with a bearer token and **spools to
 `collector/spool.jsonl` on failure**, replaying on the next successful cycle. Do
@@ -49,7 +51,7 @@ checks sample freshness for that reason and its tests pin it.
 `LINEWATCH_WATCHDOG_ARMED` in the plist decides whether an authorised rung is
 *performed*; without it the machine still walks the whole ladder and writes
 `would_*` notes, which is the only thing that makes a shadow run worth its
-weeks. `LINEWATCH_ROUTER_WRITE` in the container decides whether the executor
+weeks. `LINEWATCH_ROUTER_WRITE` in the app's plist decides whether the executor
 can reach the device at all, and the watchdog **reads that capability from
 `GET /api/router` rather than assuming it** — the two processes are configured
 separately, so guessing would make a shadow run report actions that never
@@ -66,10 +68,15 @@ input; untrusted means no action, no ledger write, and a `down` push every tick.
 in `decide()`, not the runner, because the runner executes for real about once a
 month and the tests are the only thing that exercises this monthly code daily.
 
-**The database is in the `linewatch-data` named Docker volume and the host
-cannot open it.** Read it with `make db-counts` / `make db-shell`, never by
-opening the file — [`docs/storage.md`](docs/storage.md) has the rule, the
-corruption that forced it, and the backup/restore targets.
+**The database is `~/.local/share/linewatch/linewatch.db`, owned by the native app
+— and it must never again be opened from inside a container alongside a host
+process.** That pairing corrupted it on 2026-07-30. Read it with `make db-counts` /
+`make db-shell`; take snapshots with `make db-backup`.
+[`docs/storage.md`](docs/storage.md) has the rule, the corruption, the backup and
+restore targets, the 2026-11-14 move out of the `linewatch-data` volume, and
+`make rollback-to-container`. The volume stays untouched until 2026-11-21 as the
+rollback; `docker-compose.yml` and the `Dockerfile` exist for that and for nothing
+else — nothing on the mini starts the container.
 
 ## The dashboard runs on basalt-ui, and the guards are the contract
 
@@ -163,7 +170,7 @@ say they disagreed; the guards below exist so that cannot happen silently again.
   else is open on the tailnet — including `POST /api/speedtests/run`, which is a dashboard button
   with no token to present and is **rate-limited instead** (429 within
   `speedtestMinIntervalS`, 5 min by default, measured against the newest
-  `speed_test` row so a container restart cannot reset it). Saturating the line
+  `speed_test` row so an app restart cannot reset it). Saturating the line
   is its only abuse and the limit caps that. `grep -rn hasValidBearer src/` is
   the source of truth; keep this list in sync with it.
 - `GET /api/probes` **must** bucket in SQL, and so must any new range route.
@@ -187,7 +194,7 @@ say they disagreed; the guards below exist so that cannot happen silently again.
   from the carrier side. **1 Hz resolves transitions of ~2 s and longer: no
   recorded transition means none was observed above that resolution, never that
   the link was stable.** `intervention` is written by `POST /api/interventions`.
-  All four `event` kinds are now written. `config_change` records container
+  All four `event` kinds are now written. `config_change` records app
   starts, so a deploy stops being indistinguishable from the router refusing to
   answer; `note` carries poller telemetry (non-clean polls only — a clean poll
   evidences itself in the rows it stored, and one note per poll would be 52k
@@ -358,26 +365,30 @@ macOS `ping` output fixtures — including the 100%-loss case, where `ping` **ex
 non-zero and prints no round-trip summary line**. That is a valid measurement,
 not an error; never gate on the exit code.
 
-Drive containers via `make`, never raw `docker` (the global docker-makefile rule,
-and a hook enforces it).
+The only container left is the rollback one: drive it via `make`, never raw `docker`
+(the global docker-makefile rule, and a hook enforces it). A fresh worktree cannot
+`make up` — the deploy guard refuses a branch other than `master` and a linked worktree,
+because the launchd plist points at the directory it was rendered from.
 
 ## Deploy
 
 There is **no CD**: `.github/workflows/` holds only `check.yml`, and no rollhook webhook ships
 this repo (verified 2026-10-15 — a merged fix stayed undeployed until `make up`). The API, SQLite
 store, router poller and dashboard (`docs/DESIGN.md`) ship by **`make up` on the mini from an
-up-to-date `master` checkout**: it builds and recreates the container, waits for `/health` and
-proves the container is the working tree. So pull `master` first; never `make up` from a feature
-branch or a dirty tree. `make deploy` only prints this. The native collector, heartbeat and
+up-to-date `master` checkout of the main clone**: it installs, builds the dashboard, renders and
+restarts the `com.jkrumm.linewatch-app` launchd job, waits for `/health`, and asks the kernel that
+the process on `:7731` runs from this directory and holds the live database. So pull `master`
+first; never `make up` from a feature branch, a linked worktree or a dirty tree. A first deploy
+after 2026-11-14 on a mini that still has the volume runs `make db-move` once (it chains into `make up`). `make deploy` only prints this. The native collector, heartbeat and
 watchdog are launchd agents with their own `make *-setup` / `make *-teardown`; a change under
 `collector/` reaches the mini through those.
 
 ## Verify & Monitor
 
-- **Health URL:** `http://127.0.0.1:7731/health` — `GET /health`, the endpoint the
-  container's own healthcheck probes (`docker-compose.yml`); the port is published
-  on loopback only. `make verify` curls it and exits non-zero when the stack is not
-  answering.
+- **Health URL:** `http://127.0.0.1:7731/health` — `GET /health`; the app binds
+  loopback only. `make verify` curls it and exits non-zero when the app is not
+  answering. The app log is `~/Library/Logs/linewatch-app.log` (`make logs`),
+  bounded in place at 8 MiB + one `.1` generation by `collector/app.ts`.
 - **Uptime Kuma:** the line monitor is `Home Line - Push`, fed every 60 s by
   `collector/heartbeat.ts`, 240 s to DOWN. **Silence is the alert** — it runs on the
   homelab's different WAN, so a severed push is the home-line outage signature. A
@@ -411,7 +422,7 @@ watchdog are launchd agents with their own `make *-setup` / `make *-teardown`; a
   outage`, and the test suite missed it because tests use a pre-migrated DB. Keep
   migration an invariant of importing the client.
 - **`make logs` is a bounded tail now** (`--tail=200`, then exits). It no longer
-  follows; `make logs-follow` does. `make collector-logs` / `heartbeat-logs` /
+  follows; `make logs-follow` does (both read the launchd job's log, not a container's). `make collector-logs` / `heartbeat-logs` /
   `watchdog-logs` are unchanged and still follow their host-side logs.
 - **Container ICMP is fabricated** — see "The one fact that must not be forgotten"
   at the top. The collector stays native; a containerised probe reports a flawless

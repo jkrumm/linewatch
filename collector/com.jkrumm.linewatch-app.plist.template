@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.jkrumm.linewatch-app</string>
+  <!-- The API, SQLite store, Ookla runner, router poller and the built dashboard
+       (docs/DESIGN.md "Shape"), as one native process on 127.0.0.1:7731 — the port
+       the Caddy door proxies. It ran in a Colima container until 2026-11-14; the VM
+       held 4-6 GiB of host memory for ~50 MiB of this, and a vz VM never gives
+       memory back while it runs. docs/storage.md has the move.
+
+       RunAtLoad + KeepAlive, like the collector: it survives a reboot and is
+       replaced if it exits. argv[0] is run-agent.sh for the same Background Task
+       Management reason as the collector's — read that file before changing it. -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>__REPO_DIR__/collector/run-agent.sh</string>
+    <string>__REPO_DIR__/collector/app.ts</string>
+  </array>
+  <key>WorkingDirectory</key><string>__REPO_DIR__</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <!-- A crash loop costs one start per ten seconds and shows in the log as such,
+       instead of the kernel's respawn speed. -->
+  <key>ThrottleInterval</key><integer>10</integer>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>LINEWATCH_BUN</key><string>__BUN__</string>
+    <!-- ~/.local/bin first: the Ookla CLI lives there (`make speedtest-install`).
+         launchd starts this with no shell profile, so an unqualified `speedtest`
+         in speedtest-runner.ts resolves only through this line. -->
+    <key>PATH</key><string>__HOME__/.local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <!-- The record. Outside the checkout on purpose: a `git clean -xdf` of the repo
+         must not be able to touch it, and src/db/client.ts refuses <repo>/data. -->
+    <key>LINEWATCH_DB</key><string>__HOME__/.local/share/linewatch/linewatch.db</string>
+    <!-- Must stay identical to StandardOutPath below (collector/app.ts bounds the
+         file by truncating it in place and refuses unless fd 1 is provably it). -->
+    <key>LINEWATCH_APP_LOG_PATH</key><string>__HOME__/Library/Logs/linewatch-app.log</string>
+    <!-- Deliberately absent, and adding it here is the whole procedure:
+
+           LINEWATCH_ROUTER_WRITE   let the two router action routes reach the device
+
+         The bearer token and the router password are NOT here: the app reads
+         ~/.config/linewatch/token and ~/.config/linewatch/router-password itself,
+         the same chmod-600 host files the collector uses, so monitoring does not
+         depend on the secrets cache being seeded. -->
+  </dict>
+  <key>StandardOutPath</key><string>__HOME__/Library/Logs/linewatch-app.log</string>
+  <key>StandardErrorPath</key><string>__HOME__/Library/Logs/linewatch-app.log</string>
+</dict>
+</plist>

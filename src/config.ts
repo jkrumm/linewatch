@@ -69,6 +69,13 @@ const DEGRADED_LOSS_PCT = 20
 const SPEEDTEST_MIN_INTERVAL_S = 300
 
 export interface Config {
+  /**
+   * The interface the API binds. Loopback by default: the Caddy door is the only
+   * way in, and `POST /api/speedtests/run` has no bearer. The container needs
+   * `0.0.0.0` to be reachable through its published port — docker-compose.yml sets
+   * `LINEWATCH_HOST` for exactly that, and the native job must never inherit it.
+   */
+  host: string
   port: number
   dbPath: string
   /** Cadence of one full ping cycle across every target, in seconds. */
@@ -111,6 +118,7 @@ function resolveHomeGateway(targets: Target[]): string {
 const targets = parseTargets(process.env['LINEWATCH_TARGETS'])
 
 export const config: Config = {
+  host: process.env['LINEWATCH_HOST'] ?? '127.0.0.1',
   port: Number(process.env['LINEWATCH_PORT'] ?? 7731),
   dbPath: process.env['LINEWATCH_DB'] ?? './data/linewatch.db',
   probeCycleSeconds: Number(process.env['LINEWATCH_PROBE_CYCLE_S'] ?? 30),

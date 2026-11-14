@@ -32,18 +32,19 @@ $ docker run --rm alpine fping -C 4 -q 1.1.1.1 192.0.2.1
 a flawless 100%-uptime graph forever.
 
 So the ping collector runs **natively** under launchd, and everything else — API,
-SQLite, hourly Ookla runs, dashboard — runs in Docker. Container throughput was
-measured as unaffected (63.7 vs 61.9 MB/s native), so only ICMP needs to escape.
+SQLite, hourly Ookla runs, dashboard — is one native launchd job too (it ran in
+Docker until 2026-11-14; a Colima VM held 4–6 GiB of host memory for ~50 MiB of
+this). Only ICMP *had* to be native; the rest moved to give the memory back.
 
 Full reasoning, schema, and API contract: [`docs/DESIGN.md`](docs/DESIGN.md).
 
 ## Run it
 
 ```bash
-make up                # build + start the container stack (API + UI on :7731)
+make up                # build the dashboard, (re)start the launchd job (API + UI on :7731)
 make collector-setup   # generate the bearer token, load the native LaunchAgent
 make heartbeat-setup   # load the Uptime Kuma heartbeat agent (needs the push URL)
-make logs              # container logs
+make logs              # the app's log
 make collector-logs    # collector logs
 make heartbeat-status  # what the heartbeat would report right now, without pushing
 make check             # typecheck + tests

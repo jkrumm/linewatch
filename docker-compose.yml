@@ -1,3 +1,9 @@
+# ROLLBACK ONLY since 2026-11-14. The app runs natively under launchd
+# (collector/com.jkrumm.linewatch-app.plist.template); nothing on the mini starts this
+# container, and the `linewatch-data` volume it mounts is the untouched pre-move copy
+# kept until 2026-11-21. `make rollback-to-container` is the one way it starts, and it
+# carries the native database back first (docs/storage.md). Original header follows.
+#
 # One always-on service on the Mac mini (docs/DESIGN.md "Shape"). Colima's
 # NAT fabricates ICMP replies inside a container, so only the API + Ookla +
 # built UI live here — the ping collector runs natively (collector/probe.ts,
@@ -42,6 +48,10 @@ services:
         format: raw
     environment:
       LINEWATCH_PORT: '7731'
+      # Inside the container the app must bind every interface for the published port to
+      # reach it; the host side of that port is pinned to 127.0.0.1 above. The native
+      # job sets nothing and gets loopback (src/config.ts).
+      LINEWATCH_HOST: '0.0.0.0'
       LINEWATCH_DB: ./data/linewatch.db
       # Read by src/db/client.ts. Inside the container the database is reachable
       # and must be opened; on the host the same open is a bug, so the guard
@@ -52,7 +62,7 @@ services:
     # the Docker VM where there is no host ownership to match. Dropping it means
     # the container runs as the image's own non-root `app` user (Dockerfile
     # `USER app`) instead of having its identity depend on which machine started
-    # it. `make db-import` chowns the volume to `app` once, at creation.
+    # it. `make up` used to chown the volume to `app`; `make rollback-to-container` still does.
     volumes:
       # Named volume, NOT a bind mount — the host must not be able to open this
       # file at all.

@@ -39,6 +39,17 @@ export interface OoklaOptions {
 
 const SIGKILL = 9
 
+/**
+ * The CLI to run. `speedtest` on the PATH by default; the launchd plist puts
+ * `~/.local/bin` first. The override exists for tests: a test that wants "no CLI"
+ * must say so here, because emptying `PATH` in-process does not stop Bun from
+ * resolving the binary — and on a host that has the CLI installed (the mini, since
+ * the app went native) that ran a real 250 MB–1 GB test from `make check`.
+ */
+function speedtestBin(): string {
+  return process.env['LINEWATCH_SPEEDTEST_BIN'] ?? 'speedtest'
+}
+
 function spawnSpeedtest(cmd: string[]): SpeedtestProcess {
   return Bun.spawn(cmd, { stdout: 'pipe', stderr: 'pipe' })
 }
@@ -56,7 +67,7 @@ export async function runOoklaSpeedtest(
   const startedAt = Date.now()
 
   try {
-    const proc = spawn(['speedtest', '--format=json', '--accept-license', '--accept-gdpr'])
+    const proc = spawn([speedtestBin(), '--format=json', '--accept-license', '--accept-gdpr'])
 
     // Raced against a deadline rather than trusting `proc.exited`: a hung CLI
     // never exits, and the caller's `running` flag would stay set forever.

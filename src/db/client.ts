@@ -11,14 +11,15 @@ const moduleDir = dirname(fileURLToPath(import.meta.url))
 
 /**
  * `<repo>/data` is where docker-compose.yml mounts the `linewatch-data` volume,
- * so inside the container it *is* the database and outside it is a hole in the
- * ground. Derived from this file's own location rather than the process cwd, so
- * it holds for `bun run src/index.ts` from anywhere.
+ * so inside a container it *is* the database and on the host it is a hole in the
+ * ground. Since 2026-11-14 the record lives at `~/.local/share/linewatch` and the
+ * volume is only the rollback. Derived from this file's own location rather than
+ * the process cwd, so it holds for `bun run src/index.ts` from anywhere.
  */
 const CONTAINER_OWNED_DIR = resolve(moduleDir, '../../data')
 
 /**
- * Written by `make db-import` / `make up` into the now-vestigial host `./data`
+ * Written by the retired `make db-import` / `make up` into the now-vestigial host `./data`
  * directory. Redundant with the path check above for the standard layout, and
  * the only signal that survives if someone points `LINEWATCH_DB` at a copy of
  * that directory somewhere else.
@@ -100,12 +101,13 @@ function assertContainerOwned(dbPath: string): void {
     [
       `Refusing to open ${resolved} from the host.`,
       '',
-      "The database lives in the 'linewatch-data' Docker volume, which",
-      `docker-compose.yml mounts over ${CONTAINER_OWNED_DIR} (as /app/data in the`,
-      'container). The host and the container must never hold the same SQLite file',
-      'open — that corrupted this database on 2026-07-30 (btreeInitPage error 11;',
-      '945 of ~1400 rows recovered).',
-      'Opening it here would silently create a NEW empty database and write into nothing.',
+      `${CONTAINER_OWNED_DIR} is where docker-compose.yml mounts the pre-2026-11-14`,
+      "'linewatch-data' Docker volume, so nothing real lives at this path on the host.",
+      'Opening it here would silently create a NEW empty database and write into nothing —',
+      'while the record is at ~/.local/share/linewatch/linewatch.db (LINEWATCH_DB in the',
+      'launchd plist). A host process and a container must also never hold one SQLite',
+      'file open together: that corrupted this database on 2026-07-30 (btreeInitPage',
+      'error 11; 945 of ~1400 rows recovered).',
       '',
       '  • Serve the real data:      make up   (then http://127.0.0.1:7731)',
       '  • Row counts (scriptable):  make db-counts',

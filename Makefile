@@ -68,10 +68,12 @@ VOLUME_DB     := /app/data/linewatch.db
 COMPOSE_PROJECT := $(notdir $(REPO_DIR))
 HOST_OWNER    := $(shell id -u):$(shell id -g)
 
-# A throwaway container from this project's own image, with the volume and
-# ./backups mounted. Runs as root because it has to write both the app-owned
-# volume and the host-owned ./backups bind mount; it publishes no ports.
-VOLUME_TOOL = docker compose run --rm --no-deps -T --user 0:0 -v "$(VOLUME):/app/data" -v "$(BACKUP_DIR):/backups" --entrypoint sh linewatch -c
+# A throwaway container from this project's own image with the volume mounted, run
+# as root (it writes the app-owned volume). Data crosses to and from the host on
+# stdout / stdin and NEVER through a bind mount: Colima's shared mounts are an
+# explicit list that does not include this checkout (2026-11-14), so a `-v ./backups`
+# silently landed the snapshot inside the VM and the host never saw it.
+VOLUME_RUN = docker compose run --rm --no-deps -T --user 0:0 -v "$(VOLUME):/app/data" --entrypoint sh linewatch -c
 # compose refuses to parse docker-compose.yml without ./.env (it is the container's
 # env_file); the volume-side targets carry no secret, so an empty one is enough.
 REQUIRE_VOLUME = @[ -f .env ] || { : > .env; chmod 600 .env; }; docker volume inspect $(VOLUME) >/dev/null 2>&1 || { echo "  ✗ Docker volume '$(VOLUME)' does not exist — nothing to move."; exit 1; }
@@ -535,19 +537,24 @@ volume-counts: ## Row counts per table in the Docker volume's database (read-onl
 		for t in $$(sqlite3 -readonly $(VOLUME_DB) "select name from sqlite_master where type='\''table'\'' order by name"); do printf "  %-24s %s\n" "$$t" "$$(sqlite3 -readonly $(VOLUME_DB) "select count(*) from \"$$t\"")"; done; \
 		printf "  %-24s %s\n" "probe_sample max ts" "$$(sqlite3 -readonly $(VOLUME_DB) "select coalesce(max(ts),0) from probe_sample")"'
 
-volume-backup: ## Verified snapshot of the Docker volume's database into ./backups; SNAP=<name>.db names it
+volume-backup: ## Verified snapshot of the Docker volume's database into ./backups (streamed out); SNAP=<name>.db names it
 	$(REQUIRE_VOLUME)
 	@mkdir -p "$(BACKUP_DIR)"
-	@$(VOLUME_TOOL) 'set -e; \
-		[ "$$(sqlite3 -readonly $(VOLUME_DB) "pragma integrity_check")" = ok ] || { echo "  ✗ source fails integrity_check — refusing to snapshot a corrupt database"; exit 1; }; \
-		OUT="/backups/$(if $(SNAP),$(SNAP),linewatch-volume-$$(date -u +%Y%m%dT%H%M%SZ).db)"; \
-		sqlite3 $(VOLUME_DB) ".backup $$OUT"; \
-		sqlite3 "$$OUT" "pragma journal_mode=delete" >/dev/null; \
-		[ "$$(sqlite3 -readonly "$$OUT" "pragma integrity_check")" = ok ] || { echo "  ✗ snapshot fails integrity_check"; rm -f "$$OUT"; exit 1; }; \
-		ROWS=$$(sqlite3 -readonly "$$OUT" "select count(*) from probe_sample"); \
-		chown $(HOST_OWNER) "$$OUT"; \
-		rm -f "$$OUT"-wal "$$OUT"-shm; \
-		echo "  ✓ backups/$$(basename $$OUT) — $$ROWS probe_sample rows"'
+	@# The snapshot is taken inside the container (`.backup`, WAL included), checked
+	@# there, streamed out on stdout and checked AGAIN on the host — diagnostics go to
+	@# stderr because stdout is the database.
+	@OUT="$(BACKUP_DIR)/$(if $(SNAP),$(SNAP),linewatch-volume-$$(date -u +%Y%m%dT%H%M%SZ).db)"; \
+	$(VOLUME_RUN) 'set -e; \
+		[ "$$(sqlite3 -readonly $(VOLUME_DB) "pragma integrity_check")" = ok ] || { echo "  ✗ source fails integrity_check — refusing to snapshot a corrupt database" >&2; exit 1; }; \
+		T=/tmp/snap.db; \
+		sqlite3 $(VOLUME_DB) ".backup $$T"; \
+		sqlite3 $$T "pragma journal_mode=delete" >/dev/null; \
+		[ "$$(sqlite3 -readonly $$T "pragma integrity_check")" = ok ] || { echo "  ✗ snapshot fails integrity_check" >&2; exit 1; }; \
+		cat $$T' > "$$OUT" \
+	&& [ "$$(sqlite3 -readonly "$$OUT" "pragma integrity_check")" = ok ] \
+	|| { rm -f "$$OUT"; echo "  ✗ the streamed snapshot is missing or fails integrity_check on the host — nothing was kept"; exit 1; }; \
+	rm -f "$$OUT"-wal "$$OUT"-shm; \
+	echo "  ✓ backups/$$(basename $$OUT) — $$(sqlite3 -readonly "$$OUT" "select count(*) from probe_sample") probe_sample rows, $$(du -h "$$OUT" | cut -f1)"
 
 # One-time. The ordering is the safety argument: the container is stopped before
 # anything is read (no writer on the volume), the copy goes through a `.backup`
@@ -615,19 +622,20 @@ rollback-to-container: ## ROLLBACK: stop + unload the native app, carry its data
 	@STAMP=$$(date -u +%Y%m%dT%H%M%SZ); \
 	$(SUBMAKE) --no-print-directory db-backup SNAP="linewatch-rollback-$$STAMP.db" && \
 	$(SUBMAKE) --no-print-directory container-env && \
-	$(VOLUME_TOOL) 'set -e; \
-		SRC=/backups/linewatch-rollback-'"$$STAMP"'.db; \
-		if [ -f $(VOLUME_DB) ]; then \
-			sqlite3 $(VOLUME_DB) ".backup /backups/linewatch-volume-pre-rollback-'"$$STAMP"'.db"; \
-			echo "  ✓ the volume'\''s own database kept as backups/linewatch-volume-pre-rollback-'"$$STAMP"'.db"; \
-		fi; \
+	if docker compose run --rm --no-deps -T -v "$(VOLUME):/app/data" --entrypoint sh linewatch -c '[ -f $(VOLUME_DB) ]'; then \
+		$(SUBMAKE) --no-print-directory volume-backup SNAP="linewatch-volume-pre-rollback-$$STAMP.db"; \
+	fi && \
+	$(VOLUME_RUN) 'set -e; \
+		cat > /tmp/in.db; \
+		[ "$$(sqlite3 -readonly /tmp/in.db "pragma integrity_check")" = ok ] || { echo "  ✗ the native snapshot fails integrity_check on arrival"; exit 1; }; \
+		WANT=$$(sqlite3 -readonly /tmp/in.db "select count(*) from probe_sample"); \
 		rm -f $(VOLUME_DB) $(VOLUME_DB)-wal $(VOLUME_DB)-shm; \
-		sqlite3 "$$SRC" ".backup $(VOLUME_DB)"; \
+		sqlite3 /tmp/in.db ".backup $(VOLUME_DB)"; \
 		chown -R app:app /app/data; \
 		[ "$$(sqlite3 -readonly $(VOLUME_DB) "pragma integrity_check")" = ok ] || { echo "  ✗ the volume copy fails integrity_check"; exit 1; }; \
-		[ "$$(sqlite3 -readonly $(VOLUME_DB) "select count(*) from probe_sample")" = "$$(sqlite3 -readonly "$$SRC" "select count(*) from probe_sample")" ] || { echo "  ✗ row count mismatch"; exit 1; }; \
+		[ "$$(sqlite3 -readonly $(VOLUME_DB) "select count(*) from probe_sample")" = "$$WANT" ] || { echo "  ✗ row count mismatch"; exit 1; }; \
 		chown -R app:app /app/data; \
-		echo "  ✓ the volume now holds the native record"' && \
+		echo "  ✓ the volume now holds the native record ($$WANT probe_sample rows)"' < "$(BACKUP_DIR)/linewatch-rollback-$$STAMP.db" && \
 	docker compose up -d --force-recreate --remove-orphans
 	@printf "  waiting for /health… "
 	@for i in 1 2 3 4 5 6 7 8 9 10; do \

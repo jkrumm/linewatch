@@ -560,7 +560,10 @@ db-move: guard-deploy ## ONE-TIME: stop the container, copy the volume's databas
 	@if [ -f "$(LIVE_DB)" ]; then \
 		echo "  ✗ $(LIVE_DB) already exists — the move has happened (or the app started empty). Refusing to overwrite a host database; move it aside by hand if you mean to redo this."; exit 1; \
 	fi
-	docker compose build
+	@# No `docker compose build`: the image the container ran from is already here,
+	@# and a build resolves its base images over the VM's network — which timed out
+	@# on the first real move and would have failed it before anything was touched.
+	@# `compose run` builds only if the image is genuinely absent.
 	@mkdir -p "$(DB_DIR)" "$(BACKUP_DIR)"
 	docker compose down
 	@STATUS=0; \
@@ -612,7 +615,6 @@ rollback-to-container: ## ROLLBACK: stop + unload the native app, carry its data
 	@STAMP=$$(date -u +%Y%m%dT%H%M%SZ); \
 	$(SUBMAKE) --no-print-directory db-backup SNAP="linewatch-rollback-$$STAMP.db" && \
 	$(SUBMAKE) --no-print-directory container-env && \
-	docker compose build && \
 	$(VOLUME_TOOL) 'set -e; \
 		SRC=/backups/linewatch-rollback-'"$$STAMP"'.db; \
 		if [ -f $(VOLUME_DB) ]; then \

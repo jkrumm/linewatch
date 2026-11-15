@@ -31,7 +31,7 @@ phase 5's numbers. An audit that arms is an audit that has stopped being one.
 ## Phase 1: Is anything running
 
 ```bash
-for l in collector heartbeat watchdog; do printf "%-10s " "$l"; launchctl print gui/$(id -u)/com.jkrumm.linewatch-$l 2>/dev/null | grep -E "state = |runs = |last exit" | tr -d ' \t' | tr '\n' ' '; echo; done
+for p in collector:com.jkrumm.linewatch-collector-agent heartbeat:com.jkrumm.linewatch-heartbeat watchdog:com.jkrumm.linewatch-watchdog; do n=${p%%:*}; l=${p#*:}; printf "%-10s %-40s " "$n" "$l"; out=$(launchctl print gui/$(id -u)/$l 2>/dev/null | grep -E "state = |runs = |last exit" | tr -d ' \t' | tr '\n' ' '); echo "${out:-NOT LOADED}"; done
 docker ps --filter name=linewatch --format '{{.Names}}\t{{.Status}}'
 curl -s --max-time 3 http://localhost:7731/health
 ```

@@ -344,7 +344,7 @@ because the thresholds are the thing most likely to be wrong.
 
 ```bash
 grep -oE "^  test\('[^']+'" collector/watchdog-ladder.test.ts | sed -n "/replay/!p" | head -30
-docker exec linewatch sqlite3 -readonly /app/data/linewatch.db "select date(started_at/1000,'unixepoch') d, group_concat(scope) scopes, count(*) from outage group by d, started_at;"
+sqlite3 -readonly ~/.local/share/linewatch/linewatch.db "select date(started_at/1000,'unixepoch') d, group_concat(scope) scopes, count(*) from outage group by d, started_at;"
 ```
 
 Match by **shape**, not by date. Four are pinned: the 1290 s WAN event that

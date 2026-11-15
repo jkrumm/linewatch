@@ -252,7 +252,13 @@ say they disagreed; the guards below exist so that cannot happen silently again.
   holding it meant an eviction started a 15-minute re-login backoff that
   swallowed the next three polls, measured at 20 of 55 due polls stored. Do not
   reintroduce a session kept alive between polls "to be polite" — a failed login
-  must stay a missing sample, never a carried-forward reading.
+  must stay a missing sample, never a carried-forward reading. The one exception
+  is **`pollWithRetry` in `services/router/scheduler.ts`**: a *scheduled* poll that
+  stored no line reading (login failed, threw, or lost its first read) gets one more
+  whole poll 30 s later — a new login, never the old session — because about one poll
+  in four did exactly that (2026-11-15, 75% coverage against the 80% the watchdog
+  needs). Two logins per cadence tick is the cap; `skipped` and the on-demand route
+  never retry.
 - This is a public repo: no real MAC, hostname, ISP name, city, public IP or
   credential in tracked files, fixtures and tests included.
 - The dashboard's fetch layer has a single `USE_MOCK` switch. Keep it working;

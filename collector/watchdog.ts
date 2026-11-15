@@ -54,6 +54,12 @@ import { fileURLToPath } from 'node:url'
 import { spawnBounded } from './bounded-spawn.js'
 import { DEFAULT_LOG_MAX_BYTES, rotateLogIfNeeded } from './log-rotate.js'
 import { parsePingOutput } from './ping-parser.js'
+import {
+  POLL_REQUEST_MIN_GAP_MS,
+  POLL_REQUEST_TIMEOUT_MS,
+  requestRouterPoll,
+  wantsOnDemandPoll,
+} from './watchdog-poll-request.js'
 import { captureVantage } from './vantage.js'
 import {
   classify,
@@ -794,6 +800,42 @@ async function tick(): Promise<void> {
     outcome.action === 'escalate' || outcome.state === 'latched' || outcome.state === 'untrusted',
   )
   await drainEvents()
+  await requestPollIfWaiting(outcome, now)
+}
+
+let lastPollRequestedAt: number | null = null
+
+/**
+ * Last step of the tick, so a slow poll never delays the ledger, the
+ * notification or the event drain. The reboot rung needs a line reading under
+ * 60 s old and the scheduled poll lands every 10 minutes at best; when that
+ * stale reading is all that stands in its way, ask for one now.
+ *
+ * It does not re-read the carrier here: the next tick reads the stored reading
+ * through `fetchCarrier`, so a poll that answered but stored nothing leaves
+ * `no_fresh_poll` standing. This can make evidence arrive sooner; it cannot
+ * permit a rung.
+ */
+async function requestPollIfWaiting(outcome: LadderOutcome, now: number): Promise<void> {
+  if (
+    !wantsOnDemandPoll({
+      rung: outcome.rung,
+      blockedBy: outcome.blockedBy,
+      now,
+      lastRequestedAt: lastPollRequestedAt,
+      minGapMs: POLL_REQUEST_MIN_GAP_MS,
+    })
+  )
+    return
+
+  lastPollRequestedAt = now
+  const answer = await requestRouterPoll({
+    fetch,
+    apiUrl: config.apiUrl,
+    token: config.token,
+    timeoutMs: POLL_REQUEST_TIMEOUT_MS,
+  })
+  log('poll.requested', { rung: outcome.rung, blockedBy: outcome.blockedBy, answer })
 }
 
 /**

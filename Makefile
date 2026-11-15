@@ -149,7 +149,16 @@ define install_agent
 	UID_N=$$(id -u); \
 	launchctl bootout gui/$$UID_N/$(1) 2>/dev/null || true; \
 	launchctl enable gui/$$UID_N/$(1) 2>/dev/null || true; \
-	launchctl bootstrap gui/$$UID_N "$$DST" || { echo "  ✗ launchctl bootstrap failed"; exit 1; }; \
+	: "bootout returns before launchd has finished tearing the job down, and a"; \
+	: "bootstrap in that window fails with 'Input/output error' (5) - measured"; \
+	: "2026-11-15 on make up, which left the app down until a hand retry. So the"; \
+	: "bootstrap retries a few times, a second apart, before it reports failure."; \
+	BOOTED=; \
+	for TRY in 1 2 3 4 5 6; do \
+		if launchctl bootstrap gui/$$UID_N "$$DST" 2>/dev/null; then BOOTED=1; break; fi; \
+		sleep 1; \
+	done; \
+	[ -n "$$BOOTED" ] || launchctl bootstrap gui/$$UID_N "$$DST" || { echo "  ✗ launchctl bootstrap failed"; exit 1; }; \
 	sleep 2; \
 	if launchctl print gui/$$UID_N/$(1) >/dev/null 2>&1; then \
 		echo "  ✓ $(1) loaded and enabled"; \

@@ -283,15 +283,15 @@ These are why the switches exist. Ordered by what they cost.
 
 ## 6. What is built, and what arming still needs
 
-Everything in the original "what is left" list now exists. It runs, in shadow
-mode, and has done since 2026-08-01.
+Everything in the original "what is left" list now exists. It ran in shadow
+mode from 2026-08-01 and has been armed for the reconnect rung since 2026-11-15.
 
 | Piece | Where |
 |-|-|
 | Runner — tick, gather, `decide()`, dispatch, record | `collector/watchdog.ts` |
 | Ledger, 0600, tmp → fsync → rename → fsync(dir) | `collector/watchdog-state.ts` |
 | Report mapping and notification text | `collector/watchdog-report.ts` |
-| LaunchAgent, `KeepAlive`, no arming variable | `collector/com.jkrumm.linewatch-watchdog.plist.template` |
+| LaunchAgent, `KeepAlive`, `LINEWATCH_WATCHDOG_ARMED` | `collector/com.jkrumm.linewatch-watchdog.plist.template` |
 | `make watchdog-{setup,teardown,status,state,logs,arm,disarm,readiness}` | `Makefile` |
 | Two spools — events against localhost, notifications across the WAN | `collector/watchdog.ts` |
 | A second Kuma push monitor for the watchdog's own health | `homelab/uptime-kuma/monitors.yaml` |
@@ -317,18 +317,80 @@ specification did not catch.
    excluded too: the heartbeat already reports that, and can, because the WAN is
    up.
 
-### Conditions for arming
+### Armed, 2026-11-15 — the reconnect rung only
 
-- Poll coverage ≥80% of due polls over 48 h with no deploys, p90 spacing ≤20 min.
-  **Measured 2026-08-01: 65% and 30 min** — better than the 45.6% this document
-  was written against, still short. `make watchdog-readiness` reports both.
-  At this coverage a watchdog fails exactly when the router is stressed, which
-  is when it is needed.
-- Shadow mode has produced `would_*` notes whose triggers a human agrees with.
-- The mini's LAN address is pinned by DHCP reservation.
-- The reboot rung stays behind `LINEWATCH_WATCHDOG_REBOOT`. The action itself is
-  implemented and its failure is distinguishable from its success (§3 item 6),
-  but distinguishable is not the same as warranted.
+On 2026-11-15 the home line was down from 07:57:56 to 08:28:26 and came back only
+when the router was power-cycled by hand at 08:25. The watchdog confirmed
+`wan_down_v6_unknown` at 07:58:37, found the reconnect due at 08:02 and the reboot
+due at 08:03, and was refused both by `not_armed` (the reboot also by
+`reboot_disabled`, and at 08:03 by `no_fresh_poll`). It decided correctly and could
+not act. The same morning the owner asked for the mini to heal the line itself,
+including restarting the router, which is the human agreement with the would-be
+triggers that this section used to ask for.
+
+| Switch | State |
+|-|-|
+| `LINEWATCH_ROUTER_WRITE=1` in the app's plist | on, 2026-11-15 |
+| `LINEWATCH_WATCHDOG_ARMED=1` in the watchdog's plist | on, 2026-11-15 — the reconnect rung is performed |
+| `LINEWATCH_WATCHDOG_REBOOT` | **off** |
+| Budget, latch, announce step, post-action cooldown | unchanged |
+
+The reboot rung stays off because its precondition is not met, and what it needs is
+the next section.
+
+### Conditions for arming, as measured
+
+- **Poll coverage ≥80% of due polls over 48 h, p90 spacing ≤20 min.** Read on
+  2026-11-15 on the native database (`make watchdog-readiness`; the target used to
+  call `docker exec` into a container that no longer exists): `router_line_sample`
+  has rows only from 2026-11-14 18:00, about 75% of due polls over 6 h and 27% over
+  48 h (the window is mostly before the record starts), p90 spacing 1,199 s, worst
+  gap 2,023 s. The target now measures against the configured cadence and prints
+  where the record starts.
+  - **What the misses are.** From the app log: after every restart three clean
+    polls, then a repeating four-poll cycle — first read lost (0/8), a partial
+    (7/8, the later reads lost), two clean. A poll stores a line reading iff its
+    first read answers, so the 0/8 and the login that "did not take" are the
+    misses, about one poll in four. Two shapes: the first read answers 406 and the
+    retry finds the socket closed; or the router answers every read with an empty
+    success. Both are the router, not the mini.
+  - **What was ruled out.** Bun's pooled sockets (pooled and `keepalive: false`
+    trials at 10-minute gaps in one long-lived process: 3 rounds each, 8/8 reads
+    every time); a standalone process logging in every 40 s (12 of 12 clean); another
+    router client on the host (none scheduled). The cause is not reproducible from
+    outside the app.
+  - **What was done.** One retry of a scheduled poll that stored no line reading,
+    30 s later (`pollWithRetry`, `services/router/scheduler.ts`). It does not cover
+    a degraded window longer than 30 s: the first poll after the deploy that hit one
+    (10:50) failed twice. The coverage the retry buys is still to be counted.
+  - **Why it gates the reboot rung.** The reboot needs a line reading no older than
+    60 s (`no_fresh_poll`), and the announce step fires only on a tick where that
+    precondition and everything else already hold. The fire then waits 60 s more,
+    outside the freshness window. At a 10-minute cadence that is two successful
+    polls after T0+330 s: the 08:10 poll would have announced, and the 08:20 poll
+    — the one that was missed — would have fired. Coverage is therefore not a
+    nicety here but the reboot's latency. A cheaper cure than coverage is for the
+    watchdog to ask for an on-demand poll when a rung is due and the reading is
+    stale; that is a change to the runner and is filed separately.
+  - **To arm the reboot rung:** `make watchdog-readiness READINESS_WINDOW_H=6` at
+    or above 80% over a window that starts after 2026-11-15 10:12 (the deploy that
+    carries the retry), then add `LINEWATCH_WATCHDOG_REBOOT` to the watchdog plist
+    and `make watchdog-setup`.
+- **Shadow mode produced triggers a human agrees with.** Read on 2026-11-15, every
+  due-rung note the shadow run wrote (`watchdog_blocked`, 2026-08-01 to 2026-11-15)
+  falls in two groups. Three are real WAN outages — `full_wan_down` on 2026-08-27
+  and 2026-09-24, `wan_down_v6_unknown` on 2026-11-15 — and their reconnect was
+  blocked by `not_armed` alone; arming changes exactly these. The rest are
+  `off_home_line` (the mini measuring another uplink, 2026-11-04 to 2026-11-14,
+  up to 50 notes a day) and each carries `class_off_home_line` and usually
+  `not_ethernet` beside `not_armed`, so arming changes nothing for them.
+  `make watchdog-readiness` counts the blocked rungs over its window.
+- **The mini's LAN address pinned by DHCP reservation.** The router's DHCP objects
+  answer success with no data through its API (checked: the pool, the static
+  address list, the server), so the reservation cannot be read back; it was
+  confirmed by the owner in the router's web UI on 2026-11-15.
+- **The reboot rung stays behind `LINEWATCH_WATCHDOG_REBOOT`.** The action itself
+  is implemented and its failure is distinguishable from its success (§3 item 6).
 
 ---
 

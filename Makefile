@@ -717,11 +717,11 @@ heartbeat-logs: ## Tail the heartbeat log (the previous generation is the same p
 # Watchdog
 # ---------------------------------------------------------------------------
 
-watchdog-setup: ## Render + load the watchdog LaunchAgent (starts DISARMED — shadow mode)
-	@# Shadow mode is the default and the plist carries no arming variable at
-	@# all, so this is safe to run before any of the conditions in
-	@# docs/watchdog-spec.md are met. It walks the whole ladder and writes
-	@# `would_*` notes; it cannot touch the line.
+watchdog-setup: ## Render + load the watchdog LaunchAgent (ARMED for the reconnect rung since 2026-11-15)
+	@# The rendered plist carries LINEWATCH_WATCHDOG_ARMED=1, so loading it means an
+	@# authorised reconnect is performed (docs/watchdog-spec.md section 6). The
+	@# reboot rung is a separate switch the plist leaves out. `make watchdog-disarm`
+	@# is the stand-down.
 	@if [ ! -s "$(WATCHDOG_URL_FILE)" ]; then \
 		echo "  ! no watchdog push URL at $(WATCHDOG_URL_FILE)"; \
 		echo "    The agent will run and log, but nothing reaches Uptime Kuma — so a"; \
@@ -762,7 +762,7 @@ watchdog-disarm: ## Stand the watchdog down NOW (one file; survives restarts; th
 watchdog-arm: ## Clear the disarm file (does NOT arm the agent — that is LINEWATCH_WATCHDOG_ARMED in the plist)
 	@# Two different switches, and conflating them would be dangerous. This
 	@# clears a human's explicit stand-down. Whether the agent may act at all is
-	@# LINEWATCH_WATCHDOG_ARMED in the plist, which shadow mode leaves unset.
+	@# LINEWATCH_WATCHDOG_ARMED in the plist (set since 2026-11-15; unset is shadow mode).
 	@rm -f "$(WATCHDOG_DISARM)"
 	@echo "  ✓ disarm file cleared"
 	@if launchctl print gui/$$(id -u)/$(WATCHDOG_LABEL) 2>/dev/null | grep -q 'LINEWATCH_WATCHDOG_ARMED'; then \

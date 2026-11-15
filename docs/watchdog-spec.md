@@ -369,9 +369,15 @@ the next section.
     outside the freshness window. At a 10-minute cadence that is two successful
     polls after T0+330 s: the 08:10 poll would have announced, and the 08:20 poll
     — the one that was missed — would have fired. Coverage is therefore not a
-    nicety here but the reboot's latency. A cheaper cure than coverage is for the
-    watchdog to ask for an on-demand poll when a rung is due and the reading is
-    stale; that is a change to the runner and is filed separately.
+    nicety here but the reboot's latency. So the watchdog now asks for one
+    (`collector/watchdog-poll-request.ts`): when the reboot rung is otherwise fully
+    authorised and `no_fresh_poll` (plus the `not_announced` it unblocks) is all that
+    blocks it, the last step of the tick POSTs `/api/router/poll`, at most once per
+    120 s. It never permits a rung — freshness is still read from the stored line
+    reading on the next tick — and it asks nothing while `reboot_disabled`,
+    `not_armed` or a disarm is among the blockers. It cannot help while the router
+    answers its carrier objects empty: the poll then stores no line reading either,
+    and the rung correctly stays blocked.
   - **To arm the reboot rung:** `make watchdog-readiness READINESS_WINDOW_H=6` at
     or above 80% over a window that starts after 2026-11-15 10:12 (the deploy that
     carries the retry), then add `LINEWATCH_WATCHDOG_REBOOT` to the watchdog plist

@@ -24,7 +24,7 @@ host's own interface and the VM's NAT overhead is out of the number.
 |-|-|-|
 | `collector/{probe,ping-parser,vantage,link-sampler,wifi}.ts` | native, launchd | real ICMP + the host's own vantage + 1 Hz link state + the radio; no npm deps |
 | `collector/heartbeat{,-verdict}.ts` | native, launchd, 60 s | pushes the Uptime Kuma heartbeat; its own agent so a dead collector is still reportable |
-| `collector/watchdog{,-ladder,-state,-report}.ts` | native, launchd, 15 s | decides and acts on a wedged line; **armed for the reconnect rung since 2026-11-15, reboot rung off** |
+| `collector/watchdog{,-ladder,-state,-report,-poll-request}.ts` | native, launchd, 15 s | decides and acts on a wedged line; **armed for the reconnect rung since 2026-11-15, reboot rung off**. `-poll-request` asks `POST /api/router/poll` (≥120 s apart) only when the reboot rung is otherwise authorised and `no_fresh_poll` is what blocks it; it never permits a rung |
 | `collector/app.ts` → `src/index.ts`: API + SQLite + Ookla + router poll + UI | native, launchd `com.jkrumm.linewatch-app` (`127.0.0.1:7731`) | KeepAlive; the Colima VM held 4–6 GiB of host memory for ~50 MiB of this |
 
 The collector POSTs batches with a bearer token and **spools to

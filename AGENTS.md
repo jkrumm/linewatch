@@ -24,7 +24,7 @@ host's own interface and the VM's NAT overhead is out of the number.
 |-|-|-|
 | `collector/{probe,ping-parser,vantage,link-sampler,wifi}.ts` | native, launchd | real ICMP + the host's own vantage + 1 Hz link state + the radio; no npm deps |
 | `collector/heartbeat{,-verdict}.ts` | native, launchd, 60 s | pushes the Uptime Kuma heartbeat; its own agent so a dead collector is still reportable |
-| `collector/watchdog{,-ladder,-state,-report}.ts` | native, launchd, 15 s | decides and acts on a wedged line; **ships in shadow mode** |
+| `collector/watchdog{,-ladder,-state,-report}.ts` | native, launchd, 15 s | decides and acts on a wedged line; **armed for the reconnect rung since 2026-11-15, reboot rung off** |
 | `collector/app.ts` → `src/index.ts`: API + SQLite + Ookla + router poll + UI | native, launchd `com.jkrumm.linewatch-app` (`127.0.0.1:7731`) | KeepAlive; the Colima VM held 4–6 GiB of host memory for ~50 MiB of this |
 
 The collector POSTs batches with a bearer token and **spools to
@@ -47,11 +47,14 @@ field cannot be used for this** — no ingest means no outage row can open, so a
 dead collector reports a flawless line forever. `collector/heartbeat-verdict.ts`
 checks sample freshness for that reason and its tests pin it.
 
-**The watchdog ships disarmed, and both of its switches are load-bearing.**
-`LINEWATCH_WATCHDOG_ARMED` in the plist decides whether an authorised rung is
-*performed*; without it the machine still walks the whole ladder and writes
-`would_*` notes, which is the only thing that makes a shadow run worth its
-weeks. `LINEWATCH_ROUTER_WRITE` in the app's plist decides whether the executor
+**The watchdog is armed for the reconnect rung only (2026-11-15), and its switches are
+load-bearing.** `LINEWATCH_WATCHDOG_ARMED` in the plist decides whether an authorised
+rung is *performed*; without it the machine still walks the whole ladder and writes
+notes, which is what shadow mode was. `LINEWATCH_WATCHDOG_REBOOT` is a separate switch
+and is **off**: the reboot needs a line reading under 60 s old and, at a 10-minute poll
+cadence, two successful polls, so it waits for coverage ≥80%
+(`docs/watchdog-spec.md` section 6 has the numbers and the procedure).
+`LINEWATCH_ROUTER_WRITE` in the app's plist decides whether the executor
 can reach the device at all, and the watchdog **reads that capability from
 `GET /api/router` rather than assuming it** — the two processes are configured
 separately, so guessing would make a shadow run report actions that never

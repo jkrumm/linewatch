@@ -36,14 +36,18 @@
     <!-- Must stay identical to StandardOutPath below (collector/app.ts bounds the
          file by truncating it in place and refuses unless fd 1 is provably it). -->
     <key>LINEWATCH_APP_LOG_PATH</key><string>__HOME__/Library/Logs/linewatch-app.log</string>
-    <!-- Deliberately absent, and adding it here is the whole procedure:
-
-           LINEWATCH_ROUTER_WRITE   let the two router action routes reach the device
-
-         The bearer token and the router password are NOT here: the app reads
-         ~/.config/linewatch/token and ~/.config/linewatch/router-password itself,
-         the same chmod-600 host files the collector uses, so monitoring does not
-         depend on the secrets cache being seeded. -->
+    <!-- The router write capability, on since 2026-11-15 (Issue 1380): the two
+         action routes can reach the device, and `GET /api/router` reports
+         `writeEnabled` so the watchdog reads the capability instead of assuming
+         it. It is independent of LINEWATCH_WATCHDOG_ARMED in the watchdog's own
+         plist: this lets the routes act when someone with the bearer token asks;
+         that decides whether the watchdog asks. Removing this line is the
+         stand-down for both. The bearer token and the router password are NOT
+         here: the app reads ~/.config/linewatch/token and
+         ~/.config/linewatch/router-password itself, the same chmod-600 host
+         files the collector uses, so monitoring does not depend on the secrets
+         cache being seeded. -->
+    <key>LINEWATCH_ROUTER_WRITE</key><string>1</string>
   </dict>
   <key>StandardOutPath</key><string>__HOME__/Library/Logs/linewatch-app.log</string>
   <key>StandardErrorPath</key><string>__HOME__/Library/Logs/linewatch-app.log</string>

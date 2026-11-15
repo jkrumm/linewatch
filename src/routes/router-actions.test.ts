@@ -110,6 +110,7 @@ const summary = (outcome: 'complete' | 'partial') => ({
   portRows: 0,
   hostRows: 0,
   readsOk: 8,
+  lineStored: true,
   abandonedAt: null,
   resync: false,
   sessionRestarts: [],

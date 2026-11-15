@@ -19,6 +19,14 @@ import { isRouterBusy, runExclusive } from './lock.js'
 
 const FIRST_POLL_DELAY_MS = 5_000
 
+/**
+ * Pause before the one retry of a scheduled poll that stored no line reading.
+ * Long enough for whatever invalidated the first session (the router answers
+ * 406 and closes the socket, or a login that "did not take") to have passed;
+ * short against the 10-minute cadence it saves.
+ */
+const RETRY_DELAY_MS = 30_000
+
 let lastPollAttemptAt: number | null = null
 let poller: RouterPoller | null = null
 let client: RouterClient | null = null
@@ -65,7 +73,54 @@ export function secondsSincePollAttempt(now: number): number | null {
 
 /** Serialises an on-demand poll against the scheduled one and any action: they share a session. */
 export function pollOnDemand(): Promise<PollAttempt> {
-  return pollGuarded()
+  return pollGuarded().then((run) => run.attempt)
+}
+
+/** One poll's outcome plus the fact the retry rule needs: did it store a line reading. */
+export interface PollRun {
+  attempt: PollAttempt
+  lineStored: boolean
+}
+
+/**
+ * The scheduled poll: one attempt, and **one** more fresh login when the first
+ * stored no line reading.
+ *
+ * Measured 2026-11-15: about one scheduled poll in four stored nothing — the
+ * login "did not take", or the first read answered 406 and then lost its socket
+ * — which is 75% coverage against the 80% the watchdog's arming needs. A
+ * standalone process logging in every 40 s read 12 of 12 clean, and nothing else
+ * on the host logs into the router, so the cause is not reproducible from here;
+ * the retry is the bounded answer to a cause that is not ours to remove.
+ *
+ * It is not the session repair `RouterClient` refuses: no session is held
+ * across polls, the retry is a whole new poll with its own login, and it is
+ * capped at two logins per cadence tick. `skipped` (the lock is held by an
+ * action) and `unconfigured` are not failures to read, so they never retry. The
+ * on-demand route does not use this: whoever asked decides whether to ask again.
+ */
+export async function pollWithRetry(deps: {
+  poll: () => Promise<PollRun>
+  sleep: (ms: number) => Promise<void>
+  delayMs: number
+}): Promise<PollRun> {
+  const first = await deps.poll()
+  const storedNothing =
+    first.attempt === 'login_failed' ||
+    first.attempt === 'failed' ||
+    ((first.attempt === 'complete' || first.attempt === 'partial') && !first.lineStored)
+  if (!storedNothing) return first
+  console.warn(`[router] poll stored no line reading (${first.attempt}) — one retry`)
+  await deps.sleep(deps.delayMs)
+  return deps.poll()
+}
+
+function pollScheduled(): Promise<PollRun> {
+  return pollWithRetry({
+    poll: pollGuarded,
+    sleep: (ms) => Bun.sleep(ms),
+    delayMs: RETRY_DELAY_MS,
+  })
 }
 
 /**
@@ -103,15 +158,15 @@ function recordLoginFailure(message: string): void {
   }
 }
 
-async function pollGuarded(): Promise<PollAttempt> {
-  if (poller === null || client === null) return 'unconfigured'
+async function pollGuarded(): Promise<PollRun> {
+  if (poller === null || client === null) return { attempt: 'unconfigured', lineStored: false }
   if (isRouterBusy()) {
     console.warn('[router] skipped — a poll or an action is already in progress')
-    return 'skipped'
+    return { attempt: 'skipped', lineStored: false }
   }
   const activePoller = poller
   const activeClient = client
-  return runExclusive(async (): Promise<PollAttempt> => {
+  return runExclusive(async (): Promise<PollRun> => {
     lastPollAttemptAt = Date.now()
     try {
       const summary = await activePoller.poll()
@@ -142,7 +197,7 @@ async function pollGuarded(): Promise<PollAttempt> {
         })}`,
       )
       for (const warning of summary.warnings) console.warn(`[router] ${warning}`)
-      return summary.outcome
+      return { attempt: summary.outcome, lineStored: summary.lineStored }
     } catch (error) {
       if (error instanceof RouterSessionLostError || error instanceof RouterUnreachableError) {
         // Reaching here means the *login* failed, so no read ever happened and
@@ -152,12 +207,12 @@ async function pollGuarded(): Promise<PollAttempt> {
         // non-clean poll, so it is the one case that writes a note.
         console.warn(`[router] login failed, poll never started: ${error.message}`)
         recordLoginFailure(error.message)
-        return 'login_failed'
+        return { attempt: 'login_failed', lineStored: false }
       }
       console.error(
         `[router] poll failed: ${error instanceof Error ? error.message : String(error)}`,
       )
-      return 'failed'
+      return { attempt: 'failed', lineStored: false }
     }
   })
 }
@@ -196,8 +251,8 @@ export function startRouterPoller(): Cron | null {
 
   // One poll shortly after boot: it fills the tables right after a deploy and is
   // the fastest honest answer to "is the router reachable from in here".
-  setTimeout(() => void pollGuarded(), FIRST_POLL_DELAY_MS)
-  const cron = new Cron(routerConfig.pollCron, () => void pollGuarded())
+  setTimeout(() => void pollScheduled(), FIRST_POLL_DELAY_MS)
+  const cron = new Cron(routerConfig.pollCron, () => void pollScheduled())
   // Says out loud that the poller exists in *this* process. Its absence from the
   // container log is what a deployment where the password never reached the
   // image looks like, and that went unnoticed once already.

@@ -139,6 +139,12 @@ export interface RouterPollSummary {
   /** The read the poll stopped at, when the session or the device went away mid-poll. */
   abandonedAt: { oid: string; reason: string } | null
   readsOk: number
+  /**
+   * Whether this poll wrote a `router_line_sample` row — the figure the arming
+   * coverage is counted in. A poll can read seven of eight OIDs and still store
+   * nothing for the line, or lose the later reads and still store the line.
+   */
+  lineStored: boolean
   /** Non-fatal problems: a refused OID, a list that failed its count cross-check. */
   warnings: string[]
 }
@@ -513,6 +519,7 @@ export class RouterPoller {
       outcome: answered.size === Object.keys(READS).length ? 'complete' : 'partial',
       abandonedAt,
       readsOk: answered.size,
+      lineStored: hasLineReading,
       sessionRestarts,
       lineStatus: line.status,
       downSyncKbps: line.downSyncKbps,

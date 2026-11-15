@@ -762,29 +762,42 @@ watchdog-arm: ## Clear the disarm file (does NOT arm the agent — that is LINEW
 		echo "  · the agent is in SHADOW mode — it will report what it would do and do nothing"; \
 	fi
 
+# The window the arming conditions are read over, and the app's poll cadence
+# (LINEWATCH_ROUTER_CRON). Coverage is measured against the cadence the app really
+# runs, never a constant: a faster poll that stored every reading must not read as
+# 100% of a slower schedule, and a slower one must not hide behind it.
+READINESS_WINDOW_H ?= 48
+READINESS_POLL_S   ?= 600
+
 watchdog-readiness: ## Measure the conditions for arming: poll coverage, p90 spacing, shadow output
-	$(REQUIRE_UP)
-	@# These are docs/watchdog-spec.md §6's arming conditions, measured rather
-	@# than remembered. The binding one is poll coverage: a watchdog whose
+	$(REQUIRE_DB)
+	@# These are docs/watchdog-spec.md section 6's arming conditions, measured
+	@# rather than remembered. The binding one is poll coverage: a watchdog whose
 	@# authority exceeds its instrumentation fails exactly when the router is
-	@# stressed, which is when it is needed.
-	@echo "  Arming conditions over the last 48h"
+	@# stressed, which is when it is needed. Read-only against the native database,
+	@# the same way `db-counts` is.
+	@echo "  Arming conditions over the last $(READINESS_WINDOW_H)h (poll cadence $(READINESS_POLL_S)s)"
 	@echo "  -----------------------------------"
 	@# One statement, not several: sqlite3 scopes a WITH clause to the statement
 	@# it heads, so a second `select` referencing the CTE fails with "no such
 	@# table" - which it did, silently reporting only the first line.
-	@docker exec linewatch sqlite3 -readonly $(DB) "\
-		with gaps as (select (ts - lag(ts) over (order by ts))/1000 g from router_line_sample where ts > (strftime('%s','now')-172800)*1000), \
+	@sqlite3 -readonly "$(DB_FILE)" "\
+		with win as (select (strftime('%s','now')-$(READINESS_WINDOW_H)*3600)*1000 since), \
+		     s as (select ts from router_line_sample, win where ts > win.since), \
+		     gaps as (select (ts - lag(ts) over (order by ts))/1000 g from s), \
 		     ranked as (select g, row_number() over (order by g) r, count(*) over () n from gaps where g is not null) \
-		select 'poll coverage        ' || round(100.0 * (select count(*) from ranked) / (172800.0/600), 1) || '%  (want >= 80%)' \
+		select 'poll coverage        ' || round(100.0 * (select count(*) from s) / ($(READINESS_WINDOW_H)*3600.0/$(READINESS_POLL_S)), 1) || '%  (want >= 80%)' \
 		union all select 'p90 poll spacing     ' || coalesce((select g from ranked where r = cast(0.9*n as int)), -1) || 's  (want <= 1200s)' \
 		union all select 'worst poll gap       ' || coalesce((select max(g) from ranked), -1) || 's' \
-		union all select 'shadow would_* notes ' || (select count(*) from event where kind='note' and ts > (strftime('%s','now')-172800)*1000 and detail like '%would\_%' escape '\\') || '  (read every one before arming)' \
-		union all select 'watchdog notes       ' || (select count(*) from event where ts > (strftime('%s','now')-172800)*1000 and detail like '%\"source\":\"watchdog\"%') \
-		union all select 'reboots recorded     ' || (select count(*) from event where kind='intervention' and ts > (strftime('%s','now')-172800)*1000 and detail like '%router\_reboot%' escape '\\');"
+		union all select 'record starts        ' || coalesce((select datetime(min(ts)/1000,'unixepoch','localtime') from s), 'no samples in the window') \
+		union all select 'shadow would_* notes ' || (select count(*) from event, win where kind='note' and ts > win.since and detail like '%would\_%' escape '\\') || '  (read every one before arming)' \
+		union all select 'rungs blocked        ' || (select count(*) from event, win where ts > win.since and kind='note' and json_valid(detail) and json_extract(detail,'\$$.action')='watchdog_blocked') || '  (a rung was due and a gate refused it; read the blockers)' \
+		union all select 'watchdog notes       ' || (select count(*) from event, win where ts > win.since and detail like '%\"source\":\"watchdog\"%') \
+		union all select 'reboots recorded     ' || (select count(*) from event, win where kind='intervention' and ts > win.since and detail like '%router\_reboot%' escape '\\');"
 	@echo "  -----------------------------------"
 	@echo "  Still manual: the mini's LAN address pinned by DHCP reservation, and a human"
 	@echo "  agreeing with every would_* trigger. 'make watchdog-state' shows the budgets."
+	@echo "  A shorter look: make watchdog-readiness READINESS_WINDOW_H=24"
 
 
 check: ## Install (frozen), format check, lint, typecheck (API + collector, then the dashboard) + run the test suite

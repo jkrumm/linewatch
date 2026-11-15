@@ -166,7 +166,7 @@ means a crash between write-ahead and acknowledgement — it is counted as
 
 ```bash
 make watchdog-readiness
-docker exec linewatch sqlite3 -readonly -column -header /app/data/linewatch.db "select datetime(started_at/1000,'unixepoch') started, scope, coalesce(duration_s,-1) dur_s, cycles, case when scope='wan' and duration_s >= 240 then 'WOULD TRIGGER' else '-' end from outage order by started_at;"
+sqlite3 -readonly -column -header ~/.local/share/linewatch/linewatch.db "select datetime(started_at/1000,'unixepoch') started, scope, coalesce(duration_s,-1) dur_s, cycles, case when scope='wan' and duration_s >= 240 then 'WOULD TRIGGER' else '-' end from outage order by started_at;"
 ```
 
 Four conditions, and **poll coverage is the binding one**: a watchdog whose
@@ -384,7 +384,11 @@ someone's half-finished dashboard to clear the gate.
 A table per phase: check, measured, verdict (OK / WARN / CRITICAL). Then the
 findings, most severe first, each with the evidence that produced it.
 
-State plainly whether the system is **self-healing**. It is not, while the plist
-carries no `LINEWATCH_WATCHDOG_ARMED` — it observes and reports, and that is the
-designed posture until phase 5's conditions are met. Do not describe shadow mode
-as protection.
+State plainly whether the system is **self-healing**. Since 2026-11-15 the reconnect
+rung is armed (`LINEWATCH_WATCHDOG_ARMED=1` in the watchdog plist, `LINEWATCH_ROUTER_WRITE=1`
+in the app's) and the reboot rung is not (`LINEWATCH_WATCHDOG_REBOOT` absent until poll
+coverage reaches 80%, `docs/watchdog-spec.md` section 6). Self-healing therefore holds
+only while the app reports `writeEnabled` on `GET /api/router`, the watchdog agent is
+loaded with `LINEWATCH_WATCHDOG_ARMED`, and no disarm file stands (`make watchdog-status`
+prints it). Read the three off the running system, never off the templates, and say
+which rungs are live.

@@ -1529,6 +1529,31 @@ describe('the reboot budget, which nothing asserted', () => {
     expect(out.action).toBe('none')
   })
 
+  test('an armed reboot with one earlier reboot inside the day still fires', () => {
+    const input = rebootDue()
+    const earlier = {
+      ts: input.now - 7 * 3_600_000,
+      kind: 'reboot' as const,
+      outageKey: 'wan:earlier',
+      outcome: 'executed' as const,
+    }
+    const inside = decide({ ...input, ledger: { ...input.ledger, actions: [earlier] } })
+    expect(inside.blockedBy).toEqual([])
+    expect(inside.action).toBe('reboot')
+
+    // The same tick one reboot later is the cap: the only difference between
+    // the two inputs is the budget, so this is what the budget alone decides.
+    const spent = decide({
+      ...input,
+      ledger: {
+        ...input.ledger,
+        actions: [earlier, { ...earlier, ts: input.now - 14 * 3_600_000, outageKey: 'wan:older' }],
+      },
+    })
+    expect(spent.blockedBy).toContain('reboot_rate_limit')
+    expect(spent.action).toBe('none')
+  })
+
   test('two reboots closer together than six hours is refused on spacing alone', () => {
     const input = rebootDue()
     const actions = [

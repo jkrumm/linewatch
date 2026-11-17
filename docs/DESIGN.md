@@ -105,8 +105,7 @@ stddev over 30 packets.
 - **Speed test: hourly.** Ookla CLI, ~250 MB–1 GB of traffic per run.
 
 Volume: 4 targets × 2880 cycles/day = 11.5k rows/day, ~4.2M/year. SQLite is
-comfortable there with the right indexes. Rollup and pruning are deferred until
-the table is large enough to matter — noted, not built.
+comfortable there with the right indexes. Pruning is the retention job below (90 days in SQLite, the rest in ClickHouse).
 
 ## Schema
 
@@ -521,6 +520,34 @@ The five sections, in reading order:
   speed is marked as a renegotiation rather than averaged into a rate the link
   never ran at. Then the transition timeline from `GET /api/events`, with the
   observing source in its own column.
+
+## Export and retention
+
+ClickHouse (the estate's ClickStack, reached over OTLP) is the history; SQLite is the 90-day working store of the self-healing chain. The probe, the ingest, SQLite, the API, the router poller, the watchdog and the heartbeat are unchanged: the watchdog and heartbeat read this repo's API, and what they read does not change.
+
+**How it exports.** `src/export/` reads SQLite *back*; it is not called from the write paths. A timer in the app (15 s) reads each exported table past its cursor, maps the rows to OTLP/HTTP JSON and POSTs them to the host agent on loopback (`LINEWATCH_OTLP_ENDPOINT`; the agent holds the key, stamps `host.name` and queues on disk through a line outage). The cursor (`export_cursor`, one row per stream, in the database it indexes) moves only after the agent accepted the batch. So an unreachable agent loses nothing and slows nothing: the rows stay in SQLite and go out on a later tick, with a counted log line (first failure, then every 20th, backoff to 2 min). A rolled-back transaction is never exported, and the ingest cannot fail on the export. Delivery is at-least-once: a crash between the send and the cursor write repeats one batch. With the endpoint unset nothing runs: no timer, no request, no cursor row.
+
+Resource attributes on every point: `service.name=linewatch-app`, `service.namespace=linewatch`, `service.version` = short git SHA of the running checkout, `deployment.environment.name` = `prod` when `LINEWATCH_DEPLOYMENT_ENV=prod` (the launchd plist), else `dev`. Every point carries its row's own timestamp. A null column emits no point (absent is not zero), and a null attribute is absent, so an unknown `on_home_line` stays unknown.
+
+| Source | Metrics (gauges) | Attributes |
+|-|-|-|
+| `probe_sample` + its `probe_cycle` | `line.probe.sent`, `.received` ({packet}), `.loss` (%), `.rtt.min/median/max/avg`, `.jitter` (ms) | `target`, `scope` (gateway, wan), `path_class`, `on_home_line`, `link_mbit` |
+| `router_line_sample` | `line.router.sync_rate`, `.current_rate` (kbit/s), `.noise_margin`, `.attenuation` (dB), `.errored_seconds`, `.severely_errored_seconds`, `.showtime` (s) | `direction`, `carrier`, `status`, `profile` |
+| `router_wan_sample` | `line.wan.session_uptime` (s), `line.wan.connected` (1 = Connected) | `ip_version`, `status`, `conn_type`, `last_conn_error`, `selected_by` |
+| `router_intf_sample` | `line.router.interface.rx_rate`, `.tx_rate` (kbit/s) | `interface`, `role` |
+| `wifi_sample` | `line.wifi.rssi`, `.noise` (dBm), `.tx_rate` (Mbit/s), `.rtt.median` (ms), `.loss` (%) | `iface`, `band`, `status` |
+| `speed_test` (ok) | `line.speedtest.download`, `.upload` (Mbit/s), `.ping`, `.jitter`, `.loaded_latency` (ms, `direction`), `.packet_loss` (%) | `backend` |
+| `outage` | log `line.outage.opened` (at start), log `line.outage.closed` (at end) and gauge `line.outage.duration` (s) | `scope`, `evidence`, `duration_s`, `cycles` |
+| `event` kind `intervention` | log `line.intervention` | `source`, `action`, `outcome`, `note`, `detail` (JSON, ≤ 4 KB) |
+| `speed_test` (failed) | log `line.speedtest.failed` | `backend`, `error`, `duration_s` |
+
+ClickStack keeps metrics 400 days and logs 30: an outage must outlive its log, which is why the close also goes out as the duration gauge. Not exported: `probe_cycle`'s NIC error and byte counters, `router_eth_port`, `router_host`, and the other `event` kinds; all of those stay in SQLite (the last three indefinitely, the counters until retention).
+
+**Backfill.** `make otlp-backfill` replays the history that existed when the export first ran (`export_cursor.start`) with the original timestamps, 500 rows per batch and 250 ms apart (`LINEWATCH_BACKFILL_DELAY_MS`). The live tail owns everything after that line, so no row is sent twice. It is resumable per batch and skips a finished stream. Run once, on the mini, after the export is live.
+
+**Retention.** The daily job (03:30, in the app, `LINEWATCH_RETENTION_DAYS=90`) deletes `probe_sample`, `probe_cycle`, `wifi_sample`, `router_line_sample`, `router_wan_sample` and `router_intf_sample` rows older than the window, 5,000 rows at a time with a pause between, so the single connection the API shares is never held. It keeps `outage`, `event` and `speed_test`. It refuses to run until every stream's backfill has finished, and it never deletes a row the live tail has not exported. The floor is 30 days: the longest lookback anything automatic reads is the watchdog's 48 h arming window over `router_line_sample` (`make watchdog-readiness`) and its 2-day action ledger. `make db-retain` runs the same pass once; `make db-vacuum` is the one VACUUM that returns the space (it stops the service, which is why the job does not do it).
+
+**What shrinks.** The dashboard's long-range views (anything beyond 90 days of probe, router and Wi-Fi history) show 90 days until the Argo page that reads ClickHouse replaces it. Outage, event and speed-test history is unaffected.
 
 ## Ports
 

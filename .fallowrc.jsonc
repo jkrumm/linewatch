@@ -1,4 +1,13 @@
 {
+  // Run by launchd (collector/*.plist.template) or by hand (docs/router-spike.md): nothing imports
+  // them, so fallow reads them as unused files.
+  "entry": [
+    "collector/app.ts",
+    "collector/heartbeat.ts",
+    "collector/watchdog.ts",
+    "docs/router-spike/discover.ts",
+    "docs/router-spike/vx800v.ts"
+  ],
   // web/package.json peers that basalt-ui requires and `basalt-ui doctor` enforces (fonts, Mantine
   // modals/notifications/spotlight, `basalt-ui/content` + `basalt-ui/charts` subpath peers). basalt-ui
   // loads them itself, so nothing under web/src imports them. With web/node_modules installed fallow

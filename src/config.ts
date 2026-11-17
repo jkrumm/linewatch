@@ -97,6 +97,19 @@ export interface Config {
   homeGatewayAddr: string
   /** Per-cycle loss share (0–100) at or above which a cycle counts as degraded. */
   degradedLossPct: number
+  /**
+   * Base URL of the local OTLP/HTTP agent (docs/DESIGN.md "Export"). Unset or empty
+   * = the export is off and nothing else changes. Loopback only by design: the agent
+   * on this host owns durability and the key.
+   */
+  otlpEndpoint: string | null
+  /** `deployment.environment.name` on every exported point: `prod` only when asked for, else `dev`. */
+  deploymentEnv: 'prod' | 'dev'
+  /**
+   * How many days of high-volume samples SQLite keeps (`LINEWATCH_RETENTION_DAYS`).
+   * Null = the daily retention job is off. Anything under 30 is refused at run time.
+   */
+  retentionDays: number | null
   token: string
 }
 
@@ -117,6 +130,18 @@ function resolveHomeGateway(targets: Target[]): string {
 
 const targets = parseTargets(process.env['LINEWATCH_TARGETS'])
 
+function optionalEnv(name: string): string | null {
+  const raw = process.env[name]?.trim()
+  return raw ? raw : null
+}
+
+function optionalPositiveInt(name: string): number | null {
+  const raw = optionalEnv(name)
+  if (raw === null) return null
+  const parsed = Number(raw)
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null
+}
+
 export const config: Config = {
   host: process.env['LINEWATCH_HOST'] ?? '127.0.0.1',
   port: Number(process.env['LINEWATCH_PORT'] ?? 7731),
@@ -131,5 +156,8 @@ export const config: Config = {
   targets,
   homeGatewayAddr: resolveHomeGateway(targets),
   degradedLossPct: Number(process.env['LINEWATCH_DEGRADED_LOSS_PCT'] ?? DEGRADED_LOSS_PCT),
+  otlpEndpoint: optionalEnv('LINEWATCH_OTLP_ENDPOINT'),
+  deploymentEnv: process.env['LINEWATCH_DEPLOYMENT_ENV'] === 'prod' ? 'prod' : 'dev',
+  retentionDays: optionalPositiveInt('LINEWATCH_RETENTION_DAYS'),
   token: resolveToken(),
 }

@@ -3,7 +3,7 @@
 	heartbeat-setup heartbeat-teardown heartbeat-status heartbeat-logs router-reconnect router-reboot \
 	watchdog-setup watchdog-teardown watchdog-status watchdog-logs watchdog-arm watchdog-disarm \
 	watchdog-readiness watchdog-state \
-	db-counts db-shell db-backup db-vacuum db-restore db-move \
+	db-counts db-shell db-backup db-vacuum db-restore db-move otlp-backfill db-retain \
 	volume-counts volume-backup container-env rollback-to-container
 .DEFAULT_GOAL := help
 
@@ -443,6 +443,14 @@ db-vacuum: ## Rebuild the database, reclaiming freed pages (run after a migratio
 		echo "  ✓ vacuumed — $${BEFORE}K → $${AFTER}K" );   STATUS=$$?; \
 	$(SERVICE_START); \
 	exit $$STATUS
+
+otlp-backfill: ## Replay the SQLite history to the OTLP agent once (resumable; the app must have started the export first)
+	$(REQUIRE_DB)
+	@LINEWATCH_DB="$(DB_FILE)" LINEWATCH_OTLP_ENDPOINT="$${LINEWATCH_OTLP_ENDPOINT:-http://127.0.0.1:4417}" LINEWATCH_DEPLOYMENT_ENV=prod bun run scripts/otlp-backfill.ts
+
+db-retain: ## Run the retention pass once now (DAYS=90; refuses until the backfill finished); make db-vacuum returns the space
+	$(REQUIRE_DB)
+	@LINEWATCH_DB="$(DB_FILE)" LINEWATCH_RETENTION_DAYS="$(or $(DAYS),90)" bun run scripts/retention.ts
 
 db-restore: ## Restore the database from a snapshot in ./backups: make db-restore FROM=<file>.db [FORCE=1]
 	@if [ -z "$(FROM)" ]; then \

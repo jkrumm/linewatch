@@ -8,7 +8,9 @@ deploy:
   # only if `make deploy` ever performs the deploy and `make version` exists.
   mode: none
 ship:
-  - { paths: ['**'], via: push }
+  - { via: push }
+# Owner-set cap of one lead at a time (unset is 64). No reason is recorded in this repo;
+# the owner states one or lifts the cap.
 leads: 1
 signals:
   github:

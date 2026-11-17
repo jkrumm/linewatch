@@ -85,6 +85,16 @@ longest self-recovery in the record is 90 s, and two of the three events of that
 class healed themselves in exactly that. Measured on a real outage the day it
 shipped — 135 s of silence, no page, line back on its own.
 
+## Export and retention
+
+The app exports the line history as OpenTelemetry (OTLP/HTTP) to the host's local agent when
+`LINEWATCH_OTLP_ENDPOINT` is set, and unset means off: probe, router, Wi-Fi and speed-test series as
+`line.*` gauges, outages and watchdog interventions as log events, each at the row's own time.
+ClickHouse is the history. SQLite stays as the 90-day working store the watchdog and heartbeat read, and a
+daily job prunes older samples once the one-time backfill (`make otlp-backfill`) has finished. Until the
+dashboard is replaced by a page that reads ClickHouse, its long-range views stop at 90 days.
+The table of series, the cursor design and the retention guards are in [`docs/DESIGN.md`](docs/DESIGN.md).
+
 ## Known limits
 
 - **The mini's NIC is 1 GbE.** Fiber above 1 Gbit will read as ~940 Mbit and look

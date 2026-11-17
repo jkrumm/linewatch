@@ -8,6 +8,7 @@ Before changing anything under a directory, Read its nested file (an Edit or a s
 
 - Under `collector/`, Read [`collector/AGENTS.md`](collector/AGENTS.md): spool, watchdog arming and ledger, bounded pushers.
 - Under `src/`, Read [`src/AGENTS.md`](src/AGENTS.md): API routes and bearer gate, probe, link and wifi records, migrations.
+- Under `src/export/` or `src/services/retention.ts`, Read [`src/export/AGENTS.md`](src/export/AGENTS.md): the cursor tail, the backfill line, the retention guards.
 - Under `src/services/router/`, Read [`src/services/router/AGENTS.md`](src/services/router/AGENTS.md): the router poller and its only write path.
 - Under `web/`, Read [`web/AGENTS.md`](web/AGENTS.md): basalt-ui guards, the lint gate, `USE_MOCK`.
 - Under `web/src/routes/`, Read [`web/src/routes/AGENTS.md`](web/src/routes/AGENTS.md): the one-page dashboard, its store and chrome.
@@ -101,10 +102,13 @@ watchdog are launchd agents with their own `make *-setup` / `make *-teardown`; a
   homelab's different WAN, so a severed push is the home-line outage signature. A
   second push monitor, `Home Line - Watchdog`, carries the watchdog's own liveness.
   `make heartbeat-status` prints the verdict without pushing. How the two pushers are bounded: `collector/AGENTS.md`.
-- **OTel `service.name`:** none — this repo carries no OpenTelemetry
-  instrumentation and exports no traces, metrics or logs. The Uptime Kuma
-  heartbeat above is the whole monitoring surface; there is no OTel resource to key
-  a dashboard on.
+- **OTel `service.name`:** `linewatch-app` (namespace `linewatch`), metrics `line.*` and
+  log events `line.outage.*`, `line.intervention`, `line.speedtest.failed`, exported by the app
+  to the host agent when `LINEWATCH_OTLP_ENDPOINT` is set. ClickHouse is the history; SQLite
+  keeps 90 days of samples as the working store of the self-healing chain. The export reads SQLite back and
+  is never called from a write path — keep it that way: the watchdog's API must not depend on it.
+  What goes out, the backfill and the retention job: [`docs/DESIGN.md`](docs/DESIGN.md) §Export and retention.
+  The Uptime Kuma heartbeat above stays the alert surface.
 
 ## Gotchas
 

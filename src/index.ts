@@ -22,6 +22,8 @@ import { throughputRoutes } from './routes/throughput.js'
 import { startSpeedtestScheduler } from './services/speedtest-runner.js'
 import { startRouterPoller } from './services/router/scheduler.js'
 import { recordServiceStart } from './services/service-start.js'
+import { startExport } from './export/index.js'
+import { startRetention } from './services/retention.js'
 
 // Resolved against this source file, not the process cwd, so it works both for
 // `bun run src/index.ts` from the repo root and for the container's /app.
@@ -147,6 +149,11 @@ startSpeedtestScheduler()
 // Read-only 10-minute router poll. Returns null (and says why) when no router
 // password is configured — the API must serve with or without it.
 startRouterPoller()
+// Off unless LINEWATCH_OTLP_ENDPOINT is set. Reads SQLite back rather than hooking
+// the writers, so nothing it does can fail or slow a write (src/export/).
+startExport()
+// Off unless LINEWATCH_RETENTION_DAYS is set; refuses until the backfill is done.
+startRetention()
 
 // eslint-disable-next-line no-console
 console.log(`linewatch running on port ${config.port}`)

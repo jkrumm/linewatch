@@ -440,3 +440,25 @@ export const routerHost = sqliteTable(
   },
   (t) => [index('router_host_ts').on(t.ts)],
 )
+
+/**
+ * Where the OTLP export has got to, one row per stream (`src/export/`). The
+ * cursor lives in the database it indexes, not in a file: `make db-restore` then
+ * rewinds both together, whereas a file would point past rows the restored
+ * database numbers differently and skip them.
+ *
+ * - `cursor`: the live tail — the last exported key (an `id`, except `outage_close`,
+ *   which keys on `ended_at`). It advances only after the agent accepted the batch.
+ * - `start`: the cursor when the export first ran. Rows at or below it are the
+ *   backfill's, rows above it the live tail's, so no row is exported by both.
+ * - `backfill_cursor` / `backfilled_at`: the backfill's own resumable position, and
+ *   when it reached `start`. Retention refuses to delete until every stream has it.
+ */
+export const exportCursor = sqliteTable('export_cursor', {
+  stream: text('stream').primaryKey(),
+  cursor: integer('cursor').notNull(),
+  start: integer('start').notNull(),
+  backfillCursor: integer('backfill_cursor').notNull().default(0),
+  backfilledAt: integer('backfilled_at'),
+  updatedAt: integer('updated_at').notNull(),
+})

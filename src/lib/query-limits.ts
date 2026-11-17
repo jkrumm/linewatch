@@ -10,13 +10,13 @@ import { config } from '../config.js'
  */
 
 /** Most buckets one range query may produce: `(to - from) / bucket`. */
-export const MAX_BUCKETS = 10_000
+const MAX_BUCKETS = 10_000
 
 /** Rows a list route returns when the caller names no `limit`. */
-export const DEFAULT_LIST_LIMIT = 10_000
+const DEFAULT_LIST_LIMIT = 10_000
 
 /** The ceiling on `limit`. */
-export const MAX_LIST_LIMIT = 50_000
+const MAX_LIST_LIMIT = 50_000
 
 /** The `limit` query parameter shared by every list route. */
 export const limitQuery = z.coerce

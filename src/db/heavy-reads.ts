@@ -20,7 +20,7 @@ import { collectVerdictInput } from '../lib/verdict-queries.js'
  *
  * Nothing here may touch the main thread's connection — the worker has its own.
  */
-export const HEAVY_READS = {
+const HEAVY_READS = {
   bucketProbes,
   bucketVantage,
   bucketThroughput,

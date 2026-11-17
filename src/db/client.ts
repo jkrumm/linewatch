@@ -27,7 +27,7 @@ const CONTAINER_OWNED_DIR = resolve(moduleDir, '../../data')
 const MOVED_MARKER = 'MOVED-TO-DOCKER-VOLUME'
 
 /** Raised when a host process tries to open the container-owned database. */
-export class DatabaseOnVolumeError extends Error {}
+class DatabaseOnVolumeError extends Error {}
 
 function isInside(parent: string, child: string): boolean {
   const rel = relative(parent, child)
@@ -141,7 +141,7 @@ export const db = drizzle(sqlite, { schema })
 // `/app` working directory).
 const migrationsFolder = join(moduleDir, '../../drizzle')
 
-export function runMigrations(): void {
+function runMigrations(): void {
   migrate(db, { migrationsFolder })
 }
 

@@ -400,7 +400,7 @@ function anchorsAnyDown(anchors: readonly AnchorState[]): boolean {
 }
 
 /** The guard against reading "IPv6 was never deployed here" as "IPv6 is down". */
-export function v6Health(input: Pick<LadderInput, 'now' | 'policy' | 'self' | 'ledger'>): V6Health {
+function v6Health(input: Pick<LadderInput, 'now' | 'policy' | 'self' | 'ledger'>): V6Health {
   if (input.self?.v6 == null) return 'unconfigured'
   if (input.ledger.v6.lastUpTs === null) return 'unusable'
   return input.now - input.ledger.v6.lastUpTs > input.policy.v6BaselineMaxAgeS * 1000

@@ -195,8 +195,8 @@ export type ThresholdTint = 'good' | 'bad' | 'warn' | undefined
  *  - above 5%, most interactive use becomes unusable — a "severe" threshold.
  * A `null` reading (nothing measured) is never tinted: absence is not a good reading or a bad one.
  */
-export const WORST_LOSS_WARN_PCT = 1
-export const WORST_LOSS_BAD_PCT = 5
+const WORST_LOSS_WARN_PCT = 1
+const WORST_LOSS_BAD_PCT = 5
 
 export function worstLossTint(worstLossPct: number | null): ThresholdTint {
   if (worstLossPct === null) return undefined
@@ -250,8 +250,8 @@ export function worstLossTint(worstLossPct: number | null): ThresholdTint {
  * 1-hour window that same blip is 1.7% and crosses, which is right: at the 1h range the question
  * being asked is "is it working right now", and it went away inside the hour.
  */
-export const DOWNTIME_BAD_SECONDS = 3_600
-export const DOWNTIME_BAD_FRACTION = 0.005
+const DOWNTIME_BAD_SECONDS = 3_600
+const DOWNTIME_BAD_FRACTION = 0.005
 
 /**
  * Tint for the downtime card.

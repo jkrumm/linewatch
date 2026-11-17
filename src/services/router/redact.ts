@@ -37,10 +37,10 @@ const IPV4 = /^\d{1,3}(\.\d{1,3}){3}$/
 const MAC = /^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/
 const IPV6 = /^[0-9A-Fa-f]*:[0-9A-Fa-f:]*(\/\d{1,3})?$/
 
-export const REDACTED_SECRET = '<redacted:secret>'
-export const REDACTED_IDENTITY = '<redacted:identity>'
-export const REDACTED_PUBLIC_IP = '<redacted:public-ip>'
-export const DROPPED_NESTED = '<dropped:nested>'
+const REDACTED_SECRET = '<redacted:secret>'
+const REDACTED_IDENTITY = '<redacted:identity>'
+const REDACTED_PUBLIC_IP = '<redacted:public-ip>'
+const DROPPED_NESTED = '<dropped:nested>'
 
 /** True for addresses that reveal nothing about the subscriber. */
 function isPrivateIpv4(value: string): boolean {

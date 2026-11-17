@@ -22,7 +22,7 @@ interface OoklaResult {
 const BYTES_PER_SEC_TO_MBPS = 8 / 1e6
 
 /** A normal run takes 10 s to ~1 min; past this the CLI is hung, not slow. */
-export const SPEEDTEST_DEADLINE_MS = 180_000
+const SPEEDTEST_DEADLINE_MS = 180_000
 
 /** The slice of `Bun.Subprocess` the runner uses, so tests can inject a fake. */
 export interface SpeedtestProcess {

@@ -154,7 +154,7 @@ export function resolveOnHomeLine(vantage: CycleVantage, homeGatewayAddr: string
  * `'en0' → null` (the collector losing the ability to report) are both silence.
  * Only a genuine value-to-value difference is a link change.
  */
-export function diffVantage(
+function diffVantage(
   previous: WatchedVantage | null,
   current: WatchedVantage,
 ): LinkChangeDetail['changed'] {

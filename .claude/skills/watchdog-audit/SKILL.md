@@ -266,7 +266,7 @@ python3 - <<'PY'
 import re
 src   = open('collector/watchdog-ladder.ts').read()
 run   = open('collector/watchdog.ts').read()
-body  = src[src.index('export function v6Health'):]   # the decision code only
+body  = src[src.index('function v6Health'):]   # the decision code only
 
 def block(text, header, end):
     s = text.index(header); return text[s:text.index(end, s)]

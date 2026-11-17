@@ -48,6 +48,15 @@
          files the collector uses, so monitoring does not depend on the secrets
          cache being seeded. -->
     <key>LINEWATCH_ROUTER_WRITE</key><string>1</string>
+    <!-- The host's OTLP/HTTP agent on loopback (docs/DESIGN.md "Export"): it holds the
+         key, stamps the host and queues on disk through a line outage. Unset = the
+         export is off and the app behaves exactly as before; removing these two
+         lines is the stand-down. -->
+    <key>LINEWATCH_OTLP_ENDPOINT</key><string>http://127.0.0.1:4417</string>
+    <key>LINEWATCH_DEPLOYMENT_ENV</key><string>prod</string>
+    <!-- SQLite keeps 90 days of samples; the daily job at 03:30 refuses until the
+         backfill has finished. Unset = nothing is ever deleted. -->
+    <key>LINEWATCH_RETENTION_DAYS</key><string>90</string>
   </dict>
   <key>StandardOutPath</key><string>__HOME__/Library/Logs/linewatch-app.log</string>
   <key>StandardErrorPath</key><string>__HOME__/Library/Logs/linewatch-app.log</string>

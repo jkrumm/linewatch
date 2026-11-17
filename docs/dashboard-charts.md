@@ -46,7 +46,8 @@ lesson and names what replaced it.*
   `WidgetHeader tier="widget"` (law C8), which is what makes the bar twelve real `<h3>`s
   a screen reader can list rather than twelve unmarked uppercase strings — the same test
   pins that per label rather than by count, because the cell list renders twice (a
-  `SimpleGrid` below `xl`, a divided `Group` above it).
+  `SimpleGrid` below the bar's own 1368px container width, a divided `Group` above it
+  (`@container basalt-grid` in `status-bar.module.css`)).
 - **The app draws marks, never a plot.** On 1.x `basalt/hand-rolled-plot` failed the build on an
   axis, overlay or crosshair primitive in a file that did not compose `CartesianChart`, and three
   charts carried waivers for three releases (two strips with no y dimension; a throughput chart

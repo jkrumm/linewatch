@@ -10,9 +10,8 @@ import { STREAMS } from '../export/streams.js'
 /**
  * Retention floor. The longest lookback anything automatic reads is the watchdog's
  * 48 h arming window over `router_line_sample` (Makefile `READINESS_WINDOW_H`) and its
- * 2-day action ledger; the verdict rules run over whatever window a caller names,
- * the dashboard's widest being a year that now ends at the retention line. Thirty
- * days is the least that keeps every automatic reader far inside the store.
+ * 2-day action ledger. Thirty days is the least that keeps every automatic
+ * reader far inside the store.
  */
 export const MIN_RETENTION_DAYS = 30
 

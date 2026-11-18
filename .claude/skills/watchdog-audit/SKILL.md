@@ -364,8 +364,7 @@ make check
 Non-negotiable. A finding from phases 1–6 that comes with a code change is not
 reportable until this is green.
 
-`make check` covers the dashboard too, so it can be red on uncommitted work in
-`web/` that this audit never touched — run `git status --short` first so the
+`make check` can be red on uncommitted work that this audit never touched — run `git status --short` first so the
 distinction is evidence rather than assertion. When that happens, say plainly
 that the tree is red, name the file and why, and report the two halves the audit
 does own:
@@ -375,7 +374,7 @@ bun run typecheck && bun test collector/
 ```
 
 Do **not** describe a green subset as a green `make check`, and do not fix
-someone's half-finished dashboard to clear the gate.
+someone's half-finished change to clear the gate.
 
 ---
 

@@ -1,5 +1,3 @@
-import { dirname, join, resolve, sep } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { Elysia } from 'elysia'
 import { z } from 'zod'
 import { openapi } from '@elysiajs/openapi'
@@ -16,34 +14,11 @@ import { eventsRoutes } from './routes/events.js'
 import { interventionsRoutes } from './routes/interventions.js'
 import { routerRoutes } from './routes/router.js'
 import { routerActionRoutes } from './routes/router-actions.js'
-import { verdictRoutes } from './routes/verdict.js'
-import { wifiRoutes } from './routes/wifi.js'
-import { throughputRoutes } from './routes/throughput.js'
 import { startSpeedtestScheduler } from './services/speedtest-runner.js'
 import { startRouterPoller } from './services/router/scheduler.js'
 import { recordServiceStart } from './services/service-start.js'
 import { startExport } from './export/index.js'
 import { startRetention } from './services/retention.js'
-
-// Resolved against this source file, not the process cwd, so it works both for
-// `bun run src/index.ts` from the repo root and for the container's /app.
-const WEB_DIST = resolve(dirname(fileURLToPath(import.meta.url)), '../web/dist')
-const INDEX_HTML = join(WEB_DIST, 'index.html')
-
-/** Whether the last path segment carries an extension, i.e. names a file rather than a view. */
-function namesAFile(path: string): boolean {
-  return path.slice(path.lastIndexOf('/') + 1).includes('.')
-}
-
-/** The file this path maps to inside web/dist, or null if there isn't one. */
-async function openDistFile(path: string) {
-  const candidate = resolve(join(WEB_DIST, path))
-  // A request for /../../etc/passwd must not escape the dist directory.
-  const insideDist = candidate === WEB_DIST || candidate.startsWith(WEB_DIST + sep)
-  if (!insideDist || candidate === WEB_DIST) return null
-  const file = Bun.file(candidate)
-  return (await file.exists()) ? file : null
-}
 
 export const app = new Elysia()
   .use(
@@ -60,10 +35,7 @@ export const app = new Elysia()
             '<token>` is required by the five routes that write to the historical record or act on the line — ' +
             '`POST /api/probes`, `POST /api/interventions`, `POST /api/router/poll`, ' +
             '`POST /api/router/actions/reconnect` and `POST /api/router/actions/reboot` — the last two of which also need ' +
-            '`LINEWATCH_ROUTER_WRITE=1`, an independent switch that is off by default. ' +
-            '`POST /api/speedtests/run` is **not** ' +
-            'one of them: it is a dashboard button with no token to present, so it is rate-limited ' +
-            'instead — a second call inside `minIntervalS` gets a 429 carrying `secondsUntilNext`.',
+            '`LINEWATCH_ROUTER_WRITE=1`, an independent switch that is off by default.',
         },
         components: {
           securitySchemes: {
@@ -101,44 +73,6 @@ export const app = new Elysia()
   .use(interventionsRoutes)
   .use(routerRoutes)
   .use(routerActionRoutes)
-  .use(verdictRoutes)
-  .use(wifiRoutes)
-  .use(throughputRoutes)
-  // Serves the built dashboard: a real file when the path maps to one, and
-  // index.html only for paths shaped like a client-side route. Registered last,
-  // so every API route above still wins.
-  //
-  // The blanket fallback this replaced answered *every* unmatched path with
-  // index.html and a 200 — first via @elysiajs/static with `prefix: ''`, then
-  // via a hand-rolled version of the same mistake. A browser holding a cached
-  // index.html then requests the previous build's hashed asset, receives HTML
-  // with `content-type: text/html`, loads it as JavaScript, and renders a blank
-  // dashboard with a clean 200 and nothing in the log. Only the content type
-  // gives it away, so a miss must be a 404 instead: under /assets/ it is always
-  // a deploy bug (stale index.html vs a renamed chunk) and it has to be loud.
-  .get(
-    '*',
-    async ({ path, status }) => {
-      // Routes above are `.use()`d first, so only genuinely unclaimed /api/
-      // paths get here. Answer them in the shape an API client parses.
-      if (path === '/api' || path.startsWith('/api/')) {
-        return status(404, { error: 'Not Found', path })
-      }
-
-      const file = await openDistFile(path)
-      if (file) return file
-
-      // A request that names a file — a hashed chunk, a stylesheet, a font,
-      // /favicon.ico — asked for that file, not for a page.
-      if (path.startsWith('/assets/') || namesAFile(path)) {
-        return status(404, 'Not Found')
-      }
-
-      // Extensionless: a client-side deep link such as /uptime or /latency.
-      return Bun.file(INDEX_HTML)
-    },
-    { detail: { hide: true } },
-  )
   .listen({ hostname: config.host, port: config.port })
 
 // Written before the schedulers, so a start that crashes on the way up is still

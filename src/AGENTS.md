@@ -10,15 +10,10 @@ has its own file: [`services/router/AGENTS.md`](services/router/AGENTS.md).
   `LINEWATCH_ROUTER_WRITE`, unset by default: the bearer stops someone else
   acting, the capability switch stops *us* — a bad deploy, a watchdog gone
   wrong, a test pointed at the wrong host. Everything
-  else is open on the tailnet — including `POST /api/speedtests/run`, which is a dashboard button
-  with no token to present and is **rate-limited instead** (429 within
-  `speedtestMinIntervalS`, 5 min by default, measured against the newest
-  `speed_test` row so an app restart cannot reset it). Saturating the line
-  is its only abuse and the limit caps that. `grep -rn hasValidBearer src/` is
+  else is open on the tailnet. `grep -rn hasValidBearer src/` is
   the source of truth; keep this list in sync with it.
-- `GET /api/probes` **must** bucket in SQL, and so must any new range route.
+- Range reads **must** bucket in SQL.
   Never return raw rows for a long range — `probe_sample` grows ~4.2M rows/year.
-  The router range routes cap with an explicit `limit` instead.
 - Outages are materialised on write by `services/outage-detector.ts`, not derived
   on read. Single-cycle blips are recorded honestly and filtered in the UI.
 - `probe_cycle` records what each cycle measured **through** — default-route

@@ -6,7 +6,7 @@
  * the Makefile and the `fingerprint` stage of the Dockerfile — keep all three in
  * sync, and COPY whatever is hashed):
  *
- *     bun scripts/codesum.ts src web/src drizzle ...    # host
+ *     bun scripts/codesum.ts src drizzle ...    # host
  *     docker exec linewatch cat /app/.codesum   # baked in at image build time
  *
  * Different hashes mean the container is serving something other than what you
@@ -19,7 +19,7 @@
  * been mistaken for a deploy — and nothing in the stack said so.
  *
  * Path-independent by design: it hashes the *set* of file content digests, not
- * the paths, because the tree is `web/src` on the host and `/app/web/src` in
+ * the paths, because the tree is `src` on the host and `/app/src` in
  * the build stage.
  */
 

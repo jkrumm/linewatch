@@ -12,10 +12,6 @@
     "**/*.md",
     "**/*.json",
     "**/*.jsonc",
-    "**/*.yml",
-    "web/.claude/**",
-    "web/.basalt/**",
-    "web/dist/**",
-    "web/src/routeTree.gen.ts"
+    "**/*.yml"
   ]
 }

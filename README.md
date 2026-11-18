@@ -15,7 +15,7 @@ checks only fire per speed test, so an outage between two hourly tests leaves no
 trace in either. Outage detection wants a 30-second cadence; speed testing at
 that cadence would saturate the line permanently.
 
-Two cadences, one store, one dashboard.
+Two cadences, one store, one API. The dashboard is the Line page in Argo, which reads the history from ClickHouse; this repo is the line's probe, router reader and self-healing.
 
 ## The constraint that shapes the architecture
 
@@ -32,7 +32,7 @@ $ docker run --rm alpine fping -C 4 -q 1.1.1.1 192.0.2.1
 a flawless 100%-uptime graph forever.
 
 So the ping collector runs **natively** under launchd, and everything else — API,
-SQLite, hourly Ookla runs, dashboard — is one native launchd job too (it ran in
+SQLite, hourly Ookla runs — is one native launchd job too (it ran in
 Docker until 2026-11-14; a Colima VM held 4–6 GiB of host memory for ~50 MiB of
 this). Only ICMP *had* to be native; the rest moved to give the memory back.
 
@@ -41,13 +41,13 @@ Full reasoning, schema, and API contract: [`docs/DESIGN.md`](docs/DESIGN.md).
 ## Run it
 
 ```bash
-make up                # build the dashboard, (re)start the launchd job (API + UI on :7731)
+make up                # (re)start the launchd job (API on :7731)
 make collector-setup   # generate the bearer token, load the native LaunchAgent
 make heartbeat-setup   # load the Uptime Kuma heartbeat agent (needs the push URL)
 make logs              # the app's log
 make collector-logs    # collector logs
 make heartbeat-status  # what the heartbeat would report right now, without pushing
-make check             # typecheck + tests
+make check             # format, lint, typecheck + tests
 ```
 
 `make up` generates a bearer token at `~/.config/linewatch/token` (chmod 600) on
@@ -91,8 +91,7 @@ The app exports the line history as OpenTelemetry (OTLP/HTTP) to the host's loca
 `LINEWATCH_OTLP_ENDPOINT` is set, and unset means off: probe, router, Wi-Fi and speed-test series as
 `line.*` gauges, outages and watchdog interventions as log events, each at the row's own time.
 ClickHouse is the history. SQLite stays as the 90-day working store the watchdog and heartbeat read, and a
-daily job prunes older samples once the one-time backfill (`make otlp-backfill`) has finished. Until the
-dashboard is replaced by a page that reads ClickHouse, its long-range views stop at 90 days.
+daily job prunes older samples once the one-time backfill (`make otlp-backfill`) has finished. The dashboard is the Line page in Argo, which reads the long-range history from ClickHouse.
 The table of series, the cursor design and the retention guards are in [`docs/DESIGN.md`](docs/DESIGN.md).
 
 ## Known limits

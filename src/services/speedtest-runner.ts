@@ -44,16 +44,3 @@ export function startSpeedtestScheduler(): Cron {
     setTimeout(() => void runGuarded(), jitterMs)
   })
 }
-
-/**
- * Fires a speed test immediately, outside the schedule. Fire-and-forget: a
- * real run takes 10s–1min+ of network traffic, so the caller (the manual
- * trigger route) gets an immediate ack rather than blocking the HTTP
- * response on it. Returns false without starting anything if a run — cron or
- * manual — is already in progress.
- */
-export function triggerSpeedtestNow(): boolean {
-  if (running) return false
-  void runGuarded()
-  return true
-}

@@ -30,10 +30,7 @@ import { routerConfig } from '../services/router/config.js'
  * wrong, a bad deploy, or a test pointed at the wrong host. It is the switch
  * that matters when the thing that broke is the thing holding the token.
  *
- * None of them is on the dashboard. `POST /api/speedtests/run` is unauthenticated
- * because its only abuse is saturating the line; these can drop the household's
- * internet — the reboot takes the LAN with it, Tailscale included — and there is
- * no such argument to make.
+ * These can drop the household's internet (the reboot takes the LAN with it, Tailscale included), and there is no such argument to make.
  */
 
 /**

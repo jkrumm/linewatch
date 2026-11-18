@@ -620,31 +620,6 @@ describe('POST /api/probes — the Wi-Fi radio sample', () => {
   })
 })
 
-describe('GET /api/probes — the vantage reaches the read path', () => {
-  test('a cellular cycle reads back as `none`, never folded into the home line', async () => {
-    const ts = freshTs()
-    await post(
-      batch(ts, {
-        ...ETHERNET,
-        pathIf: 'en11',
-        pathClass: 'cellular',
-        gatewayAddr: null,
-        onHomeLine: 1,
-      }),
-    )
-
-    const res = await app.handle(
-      new Request(`http://localhost/api/probes?from=${ts - 1000}&to=${ts + 1000}&bucket=3600`),
-    )
-    expect(res.status).toBe(200)
-    const body = (await res.json()) as {
-      vantage: { onHomeLine: string; offHomeLineCycles: number }[]
-    }
-    expect(body.vantage[0]?.onHomeLine).toBe('none')
-    expect(body.vantage[0]?.offHomeLineCycles).toBe(1)
-  })
-})
-
 /** Every target of a cycle with zero replies — the shape that opens an outage. */
 function downSamples() {
   return samples().map((s) => ({
@@ -782,22 +757,5 @@ describe('POST /api/probes — unknown targets', () => {
       .all()
       .filter((o) => o.endedAt === null)
     expect(openAfter).toHaveLength(openBefore.length)
-  })
-})
-
-describe('GET /api/probes — bounded ranges', () => {
-  const get = (query: string) => app.handle(new Request(`http://localhost/api/probes?${query}`))
-
-  test('rejects bucket=1 (below the probe cycle), from > to, and a span of too many buckets', async () => {
-    expect((await get('from=0&to=1000000&bucket=1')).status).toBe(422)
-    expect((await get('from=2000&to=1000&bucket=60')).status).toBe(422)
-    expect((await get(`from=0&to=${10_001 * 60_000}&bucket=60`)).status).toBe(422)
-  })
-
-  test("accepts the dashboard's widest windows", async () => {
-    const day = 86_400_000
-    expect((await get(`from=${-30 * day}&to=0&bucket=14400`)).status).toBe(200)
-    expect((await get(`from=${-365 * day}&to=0&bucket=86400`)).status).toBe(200)
-    expect((await get(`from=${-day}&to=0&bucket=300`)).status).toBe(200)
   })
 })

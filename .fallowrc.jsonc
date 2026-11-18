@@ -1,11 +1,13 @@
 {
-  // Run by launchd (collector/*.plist.template) or by hand (docs/router-spike.md): nothing imports
-  // them, so fallow reads them as unused files.
+  // Run by launchd (collector/*.plist.template), by a Makefile target (scripts/*.ts) or by hand
+  // (docs/router-spike.md): nothing imports them, so fallow reads them as unused files.
   "entry": [
     "collector/app.ts",
     "collector/heartbeat.ts",
     "collector/watchdog.ts",
     "docs/router-spike/discover.ts",
-    "docs/router-spike/vx800v.ts"
+    "docs/router-spike/vx800v.ts",
+    "scripts/otlp-backfill.ts",
+    "scripts/retention.ts"
   ]
 }

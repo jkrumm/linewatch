@@ -1,5 +1,5 @@
 /**
- * The native entrypoint of the API + dashboard + Ookla runner + router poller.
+ * The native entrypoint of the API + Ookla runner + router poller.
  *
  * `src/index.ts` is the whole application and knows nothing about launchd. This
  * file is the only thing the host-side service adds: it bounds the app's own log,

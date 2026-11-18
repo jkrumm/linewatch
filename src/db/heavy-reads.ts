@@ -1,31 +1,24 @@
 import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
 import type * as schema from './schema.js'
-import { bucketProbes, bucketVantage } from './bucket-probes.js'
-import { bucketThroughput } from './bucket-throughput.js'
 import { rangeSummary } from './range-summary.js'
-import { collectVerdictInput } from '../lib/verdict-queries.js'
 
 /**
  * The range reads that scan a window of `probe_sample` / `probe_cycle`.
  *
  * They are synchronous (bun:sqlite) and a 30-day window costs seconds of CPU —
- * measured 2026-11-14: `/api/probes` 7 s, `/api/outages` 3 s, `/api/verdicts`
- * 4 s once the cross join was gone, more on a loaded host. On the main thread
+ * measured 2026-11-14: `/api/outages` 3 s, `/api/probes` 7 s and `/api/verdicts`
+ * 4 s (both routes since removed), more on a loaded host. On the main thread
  * every one of those is a window in which the app answers nothing, including the
- * collector's POST, the heartbeat's read and `/health`, and the dashboard's
- * 30–60 s refetch of six such routes kept the queue full. Twice that night the
- * line monitor went down for a line that was fine. They run in a worker on their
- * own read-only connection instead (`heavy-read-worker.ts`); WAL lets it read
- * while the main thread writes.
+ * collector's POST, the heartbeat's read and `/health`; a dashboard refetching
+ * six such routes once kept the queue full, and twice that night the line monitor
+ * went down for a line that was fine. They run in a worker on their own
+ * read-only connection instead (`heavy-read-worker.ts`); WAL lets it read while
+ * the main thread writes.
  *
  * Nothing here may touch the main thread's connection — the worker has its own.
  */
 const HEAVY_READS = {
-  bucketProbes,
-  bucketVantage,
-  bucketThroughput,
   rangeSummary,
-  collectVerdictInput,
 } as const
 
 export type HeavyReadName = keyof typeof HEAVY_READS

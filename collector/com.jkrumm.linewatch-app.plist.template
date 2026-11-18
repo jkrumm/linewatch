@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
   <key>Label</key><string>com.jkrumm.linewatch-app</string>
-  <!-- The API, SQLite store, Ookla runner, router poller and the built dashboard
+  <!-- The API, SQLite store, Ookla runner and router poller
        (docs/DESIGN.md "Shape"), as one native process on 127.0.0.1:7731 — the port
        the Caddy door proxies. It ran in a Colima container until 2026-11-14; the VM
        held 4-6 GiB of host memory for ~50 MiB of this, and a vz VM never gives

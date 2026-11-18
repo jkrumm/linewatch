@@ -438,7 +438,7 @@ monitoring down with it.
 
 ## Dashboard (removed)
 
-The React dashboard was removed in Issue 2098. Its last state is in git at `420a31f` (`web/`, a basalt-ui app), with its design notes. The Line page in Argo replaces it and reads the history from ClickHouse (see Export and retention). This repo serves no UI; `GET /api/*` is the API of the self-healing chain. The read modules only the removed routes called are kept on purpose until their follow-up lands: `bucket-probes`, `bucket-throughput`, the router range readers and their heavy-read registry entries. None has a production caller now; their removal is follow-up work.
+The React dashboard was removed in Issue 2098. Its last state is in git at `420a31f` (`web/`, a basalt-ui app), with its design notes. The Line page in Argo replaces it and reads the history from ClickHouse (see Export and retention). This repo serves no UI; `GET /api/*` is the API of the self-healing chain. The read code only those routes called went in Issue 2248: the probe and throughput bucket readers, the router range readers and their heavy-read registry entries.
 
 ## Export and retention
 

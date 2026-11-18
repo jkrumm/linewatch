@@ -330,7 +330,7 @@ describe('parseSupportedMedia', () => {
   test('is null — never a fallback — when the only token is unrecognised', () => {
     // The invariant the whole column exists for. A default of 1000 here would
     // invent a cable fault out of a NIC whose capability was never measured,
-    // and the verdict layer would then tell the user to swap a working cable.
+    // and the user would then be told to swap a working cable.
     // No `base` in the token, so MEDIA_TOKEN does not recognise it — the same
     // whole-token rule that keeps `full-duplex` from being read as a speed.
     expect(parseSupportedMedia('\t\tmedia 10GbE\n')).toBeNull()

@@ -43,7 +43,7 @@ export const app = new Elysia()
           },
         },
         tags: [
-          { name: 'Probes', description: 'Ping-cycle ingest and the bucketed latency timeseries.' },
+          { name: 'Probes', description: 'Ping-cycle ingest.' },
           { name: 'Outages', description: 'Materialised outage history.' },
           { name: 'Speed Tests', description: 'Hourly Ookla throughput + loaded-latency runs.' },
           {

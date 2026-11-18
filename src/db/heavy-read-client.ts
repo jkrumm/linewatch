@@ -15,8 +15,8 @@ import {
  * Main-thread side of the heavy-read worker (see `heavy-reads.ts` for why it exists).
  *
  * - One worker, lazily started, so reads queue *there* and the event loop stays free.
- * - Identical in-flight reads share one run: a dashboard refetch that lands while
- *   the same window is still being computed (two tabs, a retry) costs nothing extra.
+ * - Identical in-flight reads share one run: a repeated request that lands while
+ *   the same window is still being computed (two callers, a retry) costs nothing extra.
  * - A worker that dies rejects what it held and is started afresh by the next read.
  * - `:memory:` (every route test) has no file for a second connection to open, so the
  *   read runs inline on the one connection there is.

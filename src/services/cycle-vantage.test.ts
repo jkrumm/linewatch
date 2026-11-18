@@ -303,7 +303,7 @@ describe('recordCycleVantage', () => {
 
   test('an unreported link_watch_s stores null, never 0', () => {
     // 0 is a measurement — "the sampler ran and covered no seconds". Null is
-    // the absence of one, and the verdict layer must refuse rather than assume.
+    // the absence of one, and a reader must refuse rather than assume.
     const db = createTestDb()
     recordCycleVantage(db, { ts: T0, vantage: ETHERNET, homeGatewayAddr: HOME_GW })
 

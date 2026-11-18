@@ -52,7 +52,7 @@ import { parseLiveWan, type LiveWan } from './parse.js'
  * because it is the fix for that one.
  */
 
-export type ActionKind = 'reconnect' | 'reboot'
+type ActionKind = 'reconnect' | 'reboot'
 
 export interface ActionResult {
   ok: boolean

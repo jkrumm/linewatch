@@ -5,7 +5,7 @@ import { STREAMS } from './streams.js'
 import type { Db, MapContext, Stream } from './streams.js'
 
 /** Rows read per batch. A probe row is up to 8 points: 500 rows is ~1 MB of JSON. */
-export const DEFAULT_BATCH_ROWS = 500
+const DEFAULT_BATCH_ROWS = 500
 
 /** A tick that is far behind (the agent was away) catches up this many batches at a time. */
 const MAX_BATCHES_PER_TICK = 20

@@ -52,7 +52,7 @@ const WATCHED = ['pathIf', 'pathClass', 'linkMbit', 'linkDuplex', 'linkMaxMbit']
 type WatchedField = (typeof WATCHED)[number]
 
 /** Just the fields the diff looks at — both `probe_cycle` rows and fresh input satisfy it. */
-export interface WatchedVantage {
+interface WatchedVantage {
   pathIf: string | null
   pathClass: PathClass | null
   linkMbit: number | null

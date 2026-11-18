@@ -58,7 +58,7 @@ function anyValue(value: AttrValue): AnyValue {
   return Number.isInteger(value) ? { intValue: String(value) } : { doubleValue: value }
 }
 
-export function encodeAttrs(attrs: Attrs): KeyValue[] {
+function encodeAttrs(attrs: Attrs): KeyValue[] {
   const out: KeyValue[] = []
   for (const [key, value] of Object.entries(attrs)) {
     if (value === null || value === undefined) continue

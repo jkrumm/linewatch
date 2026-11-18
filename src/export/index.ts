@@ -29,7 +29,7 @@ function shortSha(): string {
   }
 }
 
-export function exportResource(): Resource {
+function exportResource(): Resource {
   return {
     'service.name': 'linewatch-app',
     'service.namespace': 'linewatch',
@@ -38,7 +38,7 @@ export function exportResource(): Resource {
   }
 }
 
-export const mapContext: MapContext = {
+const mapContext: MapContext = {
   // Name first, then address — the same order the ingest route resolves a scope in.
   scopeOf(target, addr) {
     const known =

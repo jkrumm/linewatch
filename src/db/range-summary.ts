@@ -114,7 +114,7 @@ interface VantageRow {
  *    home line. `onHomeLine`/`unknownHomeLineCycles` refuse to fold those in.
  *
  * All three counts are computed in SQL: the same 4.2M-rows/year constraint that
- * forces `GET /api/probes` to bucket server-side applies here.
+ * forbids returning raw rows for a long range applies here.
  */
 export function rangeSummary(
   db: BunSQLiteDatabase<typeof schema>,

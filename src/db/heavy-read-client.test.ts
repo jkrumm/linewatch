@@ -43,34 +43,34 @@ afterAll(() => {
 
 describe('heavy reads leave the main thread', () => {
   const reader = createHeavyReader({ dbPath })
-  const params = { from: T0, to: TO, bucketSeconds: 3600 }
+  const params = { from: T0, to: TO, probeCycleSeconds: 30, degradedLossPct: 20 }
 
   test('a worker read returns the same rows the connection itself would', async () => {
-    const viaWorker = await reader.read('bucketProbes', params)
-    const inline = await createHeavyReader({ inline: writer }).read('bucketProbes', params)
-    expect(viaWorker.length).toBeGreaterThan(0)
+    const viaWorker = await reader.read('rangeSummary', params)
+    const inline = await createHeavyReader({ inline: writer }).read('rangeSummary', params)
+    expect(viaWorker.recordedCycles).toBe(CYCLES)
     expect(viaWorker).toEqual(inline)
   })
 
   test('the event loop keeps ticking while a long read runs', async () => {
     let ticks = 0
     const timer = setInterval(() => ticks++, 5)
-    await reader.read('bucketProbes', { ...params, bucketSeconds: 300 })
+    await reader.read('rangeSummary', params)
     clearInterval(timer)
     // On the main thread the whole read is one blocked stretch: zero or one tick.
     expect(ticks).toBeGreaterThan(5)
   })
 
   test('an identical in-flight read is shared, not run twice', async () => {
-    const a = reader.read('bucketVantage', params)
-    const b = reader.read('bucketVantage', params)
+    const a = reader.read('rangeSummary', params)
+    const b = reader.read('rangeSummary', params)
     expect(a).toBe(b)
     await a
   })
 
   test('an error in the worker rejects the caller and leaves the reader usable', async () => {
     const broken = createHeavyReader({ dbPath: join(dir, 'does-not-exist.db') })
-    await expect(broken.read('bucketProbes', params)).rejects.toThrow()
-    expect((await reader.read('bucketVantage', params)).length).toBeGreaterThan(0)
+    await expect(broken.read('rangeSummary', params)).rejects.toThrow()
+    expect((await reader.read('rangeSummary', params)).recordedCycles).toBe(CYCLES)
   })
 })

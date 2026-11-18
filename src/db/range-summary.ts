@@ -1,7 +1,29 @@
 import { sql } from 'drizzle-orm'
 import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
 import type * as schema from './schema.js'
-import { homeLineVerdict, type HomeLineVerdict } from './bucket-probes.js'
+
+/**
+ * `all`     — every recorded cycle in the range reported `on_home_line = 1`.
+ * `none`    — every cycle reported 0: this range did not measure the home line.
+ * `unknown` — no cycle reported it at all (a collector predating the vantage).
+ * `mixed`   — anything else, including 1s alongside unreported cycles. Never a
+ *   lie: only `all` claims the whole range, so a failover can never be presented
+ *   as the home line.
+ */
+export type HomeLineVerdict = 'all' | 'none' | 'mixed' | 'unknown'
+
+/**
+ * Collapse the per-window counts into one verdict. `all` is the only value that
+ * claims the whole window, and it requires every recorded cycle — not every
+ * *reporting* cycle — to have said 1, so unreported cycles can never be
+ * rounded up into "this was the home line".
+ */
+function homeLineVerdict(cycles: number, home: number, off: number): HomeLineVerdict {
+  if (home === 0 && off === 0) return 'unknown'
+  if (home === cycles) return 'all'
+  if (off === cycles) return 'none'
+  return 'mixed'
+}
 
 export interface RangeSummaryParams {
   from: number

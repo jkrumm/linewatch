@@ -208,7 +208,7 @@ export const DEFAULT_POLICY: WatchdogPolicy = {
   rebootOnV4Only: false,
 }
 
-export type V6Health = 'usable' | 'unusable' | 'unconfigured'
+type V6Health = 'usable' | 'unusable' | 'unconfigured'
 
 export interface AnchorState {
   target: string

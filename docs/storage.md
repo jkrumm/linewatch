@@ -19,7 +19,7 @@ rollback.
 
 | Want to… | Do |
 |-|-|
-| Read the data | the API on `:7731`, or the dashboard |
+| Read the data | the API on `:7731` |
 | Row counts from a script or an agent | `make db-counts` (read-only) |
 | Ad-hoc SQL by hand | `make db-shell` |
 | Take a verified snapshot | `make db-backup` → `./backups/` (gitignored) |
@@ -41,7 +41,7 @@ already native; the API is now too.
 
 | | Before | After |
 |-|-|-|
-| API + dashboard + Ookla + poller | container, `:7731` on loopback | launchd job `com.jkrumm.linewatch-app`, same port, same Caddy door |
+| API + Ookla + poller | container, `:7731` on loopback | launchd job `com.jkrumm.linewatch-app`, same port, same Caddy door |
 | Database | `linewatch-data` volume (inside the VM) | `~/.local/share/linewatch/linewatch.db` |
 | Secrets | `.env` written by `make env` | the app reads `~/.config/linewatch/{token,router-password}` itself, like the collector |
 | Ookla CLI | in the image | `~/.local/bin/speedtest` (`make speedtest-install`, pinned URL) |

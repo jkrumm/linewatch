@@ -5,8 +5,7 @@ import { join } from 'node:path'
 /**
  * The API must bind loopback unless told otherwise. Bun and Elysia default to every
  * interface, and a native process — unlike the container, whose port compose publishes
- * on 127.0.0.1 — has nothing between it and the LAN. `POST /api/speedtests/run` has no
- * bearer, so an all-interfaces bind is a line-saturation button for the whole network.
+ * on 127.0.0.1 — has nothing between it and the LAN. Reads are open on the tailnet, so an all-interfaces bind would put them in front of the whole LAN.
  * A source test on `index.ts`, because `.listen()` cannot run under `bun test`.
  */
 describe('listen address', () => {

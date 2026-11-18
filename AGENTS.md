@@ -1,6 +1,6 @@
 # linewatch — Agent Instructions
 
-Uptime + throughput history for the home internet line. Mac mini only. Read
+Uptime + throughput history for the home internet line. Mac mini only. The dashboard is the Line page in Argo, which reads this history from ClickHouse. Read
 [`docs/DESIGN.md`](docs/DESIGN.md) before changing anything structural — it
 carries the measurements the design rests on, not just the design.
 
@@ -10,9 +10,6 @@ Before changing anything under a directory, Read its nested file (an Edit or a s
 - Under `src/`, Read [`src/AGENTS.md`](src/AGENTS.md): API routes and bearer gate, probe, link and wifi records, migrations.
 - Under `src/export/` or `src/services/retention.ts`, Read [`src/export/AGENTS.md`](src/export/AGENTS.md): the cursor tail, the backfill line, the retention guards.
 - Under `src/services/router/`, Read [`src/services/router/AGENTS.md`](src/services/router/AGENTS.md): the router poller and its only write path.
-- Under `web/`, Read [`web/AGENTS.md`](web/AGENTS.md): basalt-ui guards, the lint gate, `USE_MOCK`.
-- Under `web/src/routes/`, Read [`web/src/routes/AGENTS.md`](web/src/routes/AGENTS.md): the one-page dashboard, its store and chrome.
-- Under `web/src/charts/`, Read [`web/src/charts/AGENTS.md`](web/src/charts/AGENTS.md): chart kinds, tooltips, cursor, axis, loading.
 
 ## The one fact that must not be forgotten
 
@@ -35,7 +32,7 @@ host's own interface and the VM's NAT overhead is out of the number.
 | `collector/{probe,ping-parser,vantage,link-sampler,wifi}.ts` | native, launchd | real ICMP + the host's own vantage + 1 Hz link state + the radio; no npm deps |
 | `collector/heartbeat{,-verdict}.ts` | native, launchd, 60 s | pushes the Uptime Kuma heartbeat; its own agent so a dead collector is still reportable |
 | `collector/watchdog{,-ladder,-state,-report,-poll-request}.ts` | native, launchd, 15 s | decides and acts on a wedged line; **armed for the reconnect rung since 2026-11-15, reboot rung off**. `-poll-request` asks `POST /api/router/poll` (≥120 s apart) only when the reboot rung is otherwise authorised and `no_fresh_poll` is what blocks it; it never permits a rung |
-| `collector/app.ts` → `src/index.ts`: API + SQLite + Ookla + router poll + UI | native, launchd `com.jkrumm.linewatch-app` (`127.0.0.1:7731`) | KeepAlive; the Colima VM held 4–6 GiB of host memory for ~50 MiB of this |
+| `collector/app.ts` → `src/index.ts`: API + SQLite + Ookla + router poll | native, launchd `com.jkrumm.linewatch-app` (`127.0.0.1:7731`) | KeepAlive; the Colima VM held 4–6 GiB of host memory for ~50 MiB of this |
 
 **Alerting is a missed heartbeat, and that is the design.** Uptime Kuma runs on
 the homelab, on a different WAN, and the Tailscale ACL has no `tag:homelab →
@@ -67,8 +64,8 @@ else — nothing on the mini starts the container.
 
 ## Validate
 
-`make check` (typecheck + `bun test`). A fresh worktree has no `node_modules` anywhere: `bun install`
-at the root **and** in `web/` first, or `make check` dies on `tsc: command not found` (exit 127). The ping parser is tested against real
+`make check` (format, lint, typecheck, `bun test`). A fresh worktree has no `node_modules`: `bun install`
+at the root first, or `make check` dies on `tsc: command not found` (exit 127). The ping parser is tested against real
 macOS `ping` output fixtures — including the 100%-loss case, where `ping` **exits
 non-zero and prints no round-trip summary line**. That is a valid measurement,
 not an error; never gate on the exit code.
@@ -82,8 +79,8 @@ because the launchd plist points at the directory it was rendered from.
 
 There is **no CD**: `.github/workflows/` holds only `check.yml`, and no rollhook webhook ships
 this repo (verified 2026-10-15 — a merged fix stayed undeployed until `make up`). The API, SQLite
-store, router poller and dashboard (`docs/DESIGN.md`) ship by **`make up` on the mini from an
-up-to-date `master` checkout of the main clone**: it installs, builds the dashboard, renders and
+store and router poller ship by **`make up` on the mini from an
+up-to-date `master` checkout of the main clone**: it installs, renders and
 restarts the `com.jkrumm.linewatch-app` launchd job, waits for `/health`, and asks the kernel that
 the process on `:7731` runs from this directory and holds the live database. So pull `master`
 first; never `make up` from a feature branch, a linked worktree or a dirty tree. A first deploy

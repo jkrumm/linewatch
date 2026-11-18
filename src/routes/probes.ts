@@ -2,11 +2,9 @@ import { Elysia } from 'elysia'
 import { z } from 'zod'
 import { and, eq } from 'drizzle-orm'
 import { db } from '../db/client.js'
-import { heavyRead } from '../db/heavy-read-client.js'
 import { event, probeSample, wifiSample } from '../db/schema.js'
 import { config } from '../config.js'
 import { hasValidBearer } from '../lib/auth.js'
-import { rangeProblem } from '../lib/query-limits.js'
 import { outageDetector } from '../services/outage-detector-instance.js'
 import type { TargetCycleResult } from '../services/outage-detector.js'
 import { recordCycleVantage } from '../services/cycle-vantage.js'
@@ -137,43 +135,6 @@ const IngestBody = z.object({
   // collector without the sampler sends. Absent means "this cycle did not look
   // at the radio", never "there is no radio".
   wifi: WifiInput.optional(),
-})
-
-const HomeLineVerdictSchema = z
-  .enum(['all', 'none', 'mixed', 'unknown'])
-  .describe(
-    'all = every recorded cycle in the bucket reported on_home_line=1; none = every cycle reported 0; unknown = no cycle reported it; mixed = anything else, including unreported cycles alongside reported ones. Only `all` claims the whole bucket — never treat `unknown` as `all`.',
-  )
-
-const VantageBucketSchema = z.object({
-  bucket: z.number().int(),
-  cycles: z.number().int().describe('Distinct cycle timestamps with probe samples in this bucket'),
-  vantageCycles: z.number().int().describe('…of which this many recorded a vantage at all'),
-  pathClasses: z
-    .array(z.string())
-    .describe('Distinct path classes seen — more than one means the path changed mid-bucket'),
-  linkMbits: z
-    .array(z.number().int())
-    .describe('Distinct negotiated link speeds seen — more than one means the NIC renegotiated'),
-  pathIfs: z.array(z.string()),
-  onHomeLine: HomeLineVerdictSchema,
-  homeLineCycles: z.number().int(),
-  offHomeLineCycles: z.number().int(),
-  unknownHomeLineCycles: z.number().int(),
-})
-
-const ProbeBucketSchema = z.object({
-  bucket: z.number().int(),
-  target: z.string(),
-  medianMs: z.number().nullable(),
-  p5Ms: z.number().nullable(),
-  p95Ms: z.number().nullable(),
-  minMs: z.number().nullable(),
-  maxMs: z.number().nullable(),
-  maxLossPct: z.number(),
-  lossPct: z.number(),
-  downCycles: z.number().int(),
-  count: z.number().int(),
 })
 
 /**
@@ -346,93 +307,52 @@ function ingestCycle(body: IngestBodyT) {
   }
 }
 
-export const probesRoutes = new Elysia()
-  .post(
-    '/api/probes',
-    ({ body, headers, status }) => {
-      if (!hasValidBearer(headers)) return status(401, 'Unauthorized')
+export const probesRoutes = new Elysia().post(
+  '/api/probes',
+  ({ body, headers, status }) => {
+    if (!hasValidBearer(headers)) return status(401, 'Unauthorized')
 
-      // One transaction for the whole cycle. Without it a failure after the
-      // sample insert left the samples committed, so the collector's replay hit
-      // the `existing` check and returned `skipped` — the vantage, link
-      // events, Wi-Fi sample and outage transition were lost for good. Every
-      // writer here shares the one SQLite connection, so the detector's own
-      // writes join this transaction.
-      try {
-        return db.transaction(() => ingestCycle(body))
-      } catch (err) {
-        // The detector's in-memory `open` map was advanced by writes that just
-        // rolled back; rebuild it from what is actually committed.
-        outageDetector.load()
-        throw err
-      }
-    },
-    {
-      body: IngestBody,
-      response: {
-        200: z.object({
-          ok: z.literal(true),
-          inserted: z.number().int(),
-          skipped: z.boolean(),
-          linkChange: z
-            .boolean()
-            .describe(
-              "true when this batch materialised a `link_change` event — either from the 30 s vantage diff or from a sub-cycle transition the collector's 1 Hz sampler reported in `linkEvents`.",
-            ),
-          cycleStored: z
-            .boolean()
-            .describe(
-              'true when this batch carried a `cycle` object AND a probe_cycle row was written for it. false with a cycle present means the server dropped it — the collector is ahead of the API. `skipped: true` reports false too: that vantage was stored on the original ingest, so a spool replay finding false there is correct, not a warning.',
-            ),
-        }),
-        401: z.string(),
-      },
-      detail: {
-        tags: ['Probes'],
-        summary: 'Ingest one probe cycle',
-        description:
-          "Batch ingest from the native collector: one cycle timestamp plus one sample per target, plus an optional `cycle` object recording what the cycle measured *through* (interface, path class, negotiated link, the NIC ceiling, gateway, DHCP lease start, NIC error counters). Idempotent — replaying an already-ingested `ts` is a no-op (`skipped: true`), and `probe_cycle.ts` is UNIQUE so a replayed vantage cannot duplicate either. `cycleStored` reports whether the vantage actually landed: an API predating a `cycle` field parses the batch leniently, drops what it does not know and still answers 200, which once discarded 106 consecutive real vantages while every POST looked healthy. Feeds the outage state machine and materialises `link_change` events — both from the 30 s vantage diff and from the optional `linkEvents` array, the sub-cycle transitions the collector's 1 Hz link sampler observed during the cycle. An absent or empty `linkEvents` means no transition longer than that sampling resolution was seen, never that the link was stable; `cycle.linkWatchS` is what says how much of the cycle was watched at all. The optional `wifi` object is the radio state of an alternate radio path currently attached, sampled every 10th cycle (5 min) because `system_profiler` costs ~4.8 s — it is written to `wifi_sample` with `onConflictDoNothing` on its UNIQUE `ts`, and it deliberately carries no SSID, BSSID or MAC.",
-        security: [{ BearerAuth: [] }],
-      },
-    },
-  )
-  .get(
-    '/api/probes',
-    async ({ query, status }) => {
-      const problem = rangeProblem({ from: query.from, to: query.to, bucket: query.bucket })
-      if (problem) return status(422, problem)
-      const params = {
-        from: query.from,
-        to: query.to,
-        bucketSeconds: query.bucket,
-        ...(query.target !== undefined ? { target: query.target } : {}),
-      }
-      return {
-        buckets: await heavyRead('bucketProbes', params),
-        // Separate series, one row per bucket: the vantage belongs to the cycle,
-        // so folding it into `buckets` would repeat it once per target.
-        vantage: await heavyRead('bucketVantage', params),
-      }
-    },
-    {
-      query: z.object({
-        from: z.coerce.number().int(),
-        to: z.coerce.number().int(),
-        target: z.string().optional(),
-        bucket: z.coerce.number().int().min(1).default(3600),
+    // One transaction for the whole cycle. Without it a failure after the
+    // sample insert left the samples committed, so the collector's replay hit
+    // the `existing` check and returned `skipped` — the vantage, link
+    // events, Wi-Fi sample and outage transition were lost for good. Every
+    // writer here shares the one SQLite connection, so the detector's own
+    // writes join this transaction.
+    try {
+      return db.transaction(() => ingestCycle(body))
+    } catch (err) {
+      // The detector's in-memory `open` map was advanced by writes that just
+      // rolled back; rebuild it from what is actually committed.
+      outageDetector.load()
+      throw err
+    }
+  },
+  {
+    body: IngestBody,
+    response: {
+      200: z.object({
+        ok: z.literal(true),
+        inserted: z.number().int(),
+        skipped: z.boolean(),
+        linkChange: z
+          .boolean()
+          .describe(
+            "true when this batch materialised a `link_change` event — either from the 30 s vantage diff or from a sub-cycle transition the collector's 1 Hz sampler reported in `linkEvents`.",
+          ),
+        cycleStored: z
+          .boolean()
+          .describe(
+            'true when this batch carried a `cycle` object AND a probe_cycle row was written for it. false with a cycle present means the server dropped it — the collector is ahead of the API. `skipped: true` reports false too: that vantage was stored on the original ingest, so a spool replay finding false there is correct, not a warning.',
+          ),
       }),
-      response: {
-        200: z.object({
-          buckets: z.array(ProbeBucketSchema),
-          vantage: z.array(VantageBucketSchema),
-        }),
-        422: z.string(),
-      },
-      detail: {
-        tags: ['Probes'],
-        summary: 'Server-bucketed probe timeseries',
-        description:
-          'Buckets probe_sample rows in SQL — never raw rows — grouping by `floor(ts / (bucket*1000))` per target. Each bucket returns the median-of-medians, a p5/p95 band over those medians, the true min/max round trip for the SmokePing spread band, and the sample count. Two loss figures: `lossPct` is the sent-weighted aggregate (availability = `100 - lossPct`), `maxLossPct` is the worst single cycle, and `downCycles` counts cycles with nothing returned. `bucket` is in seconds (default 3600 = hourly). The parallel `vantage` array carries one row per bucket describing what those cycles measured *through* — distinct path classes and link speeds, and whether the whole bucket was on the home line. A bucket mixing Ethernet and Wi-Fi reports both classes and `onHomeLine: "mixed"`; it is never flattened to a majority.',
-      },
+      401: z.string(),
     },
-  )
+    detail: {
+      tags: ['Probes'],
+      summary: 'Ingest one probe cycle',
+      description:
+        "Batch ingest from the native collector: one cycle timestamp plus one sample per target, plus an optional `cycle` object recording what the cycle measured *through* (interface, path class, negotiated link, the NIC ceiling, gateway, DHCP lease start, NIC error counters). Idempotent — replaying an already-ingested `ts` is a no-op (`skipped: true`), and `probe_cycle.ts` is UNIQUE so a replayed vantage cannot duplicate either. `cycleStored` reports whether the vantage actually landed: an API predating a `cycle` field parses the batch leniently, drops what it does not know and still answers 200, which once discarded 106 consecutive real vantages while every POST looked healthy. Feeds the outage state machine and materialises `link_change` events — both from the 30 s vantage diff and from the optional `linkEvents` array, the sub-cycle transitions the collector's 1 Hz link sampler observed during the cycle. An absent or empty `linkEvents` means no transition longer than that sampling resolution was seen, never that the link was stable; `cycle.linkWatchS` is what says how much of the cycle was watched at all. The optional `wifi` object is the radio state of an alternate radio path currently attached, sampled every 10th cycle (5 min) because `system_profiler` costs ~4.8 s — it is written to `wifi_sample` with `onConflictDoNothing` on its UNIQUE `ts`, and it deliberately carries no SSID, BSSID or MAC.",
+      security: [{ BearerAuth: [] }],
+    },
+  },
+)

@@ -1,7 +1,5 @@
 # syntax=docker/dockerfile:1
-# Five stages: `base` installs the API's bun deps + copies source,
-# `web-build` builds the SPA (owned by web/ — this stage only reads its
-# package.json/build script, never writes into that directory), `ookla`
+# Four stages: `base` installs the API's bun deps + copies source, `ookla`
 # downloads and extracts the speedtest CLI, `fingerprint` hashes the source
 # that went in, `runner` combines them into the final non-root image. Debian, NOT alpine (`oven/bun:1.4.3`, not `-alpine`; the pin matches package.json `packageManager` and CI):
 # the Ookla CLI's aarch64 build is glibc-linked (docs/DESIGN.md "Dockerfile").
@@ -18,14 +16,6 @@ COPY src ./src
 COPY drizzle ./drizzle
 COPY drizzle.config.ts ./
 
-FROM oven/bun:1.4.3 AS web-build
-WORKDIR /app/web
-COPY web/package.json web/bun.lock ./
-RUN --mount=type=cache,target=/root/.bun/install/cache \
-  bun install --frozen-lockfile
-COPY web/ ./
-RUN bun run build
-
 FROM oven/bun:1.4.3 AS ookla
 WORKDIR /tmp/ookla
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -36,7 +26,7 @@ RUN curl -fsSL https://install.speedtest.net/app/cli/ookla-speedtest-1.2.0-linux
   && tar -xzf speedtest.tgz speedtest \
   && chmod +x speedtest
 
-# Everything that shapes the image, hashed together: both source trees, the
+# Everything that shapes the image, hashed together: the source tree, the
 # migrations, both manifests and lockfiles, and this Dockerfile. `make up`
 # compares this against the same command run on the host and fails if they
 # differ (scripts/codesum.ts). Keep the COPY list, the RUN list and the
@@ -45,11 +35,9 @@ FROM oven/bun:1.4.3 AS fingerprint
 WORKDIR /app
 COPY scripts ./scripts
 COPY src ./src
-COPY web/src ./web/src
 COPY drizzle ./drizzle
 COPY package.json bun.lock Dockerfile ./
-COPY web/package.json web/bun.lock ./web/
-RUN bun scripts/codesum.ts src web/src drizzle package.json bun.lock Dockerfile web/package.json web/bun.lock > /app/.codesum
+RUN bun scripts/codesum.ts src drizzle package.json bun.lock Dockerfile > /app/.codesum
 
 FROM oven/bun:1.4.3 AS runner
 WORKDIR /app
@@ -75,7 +63,6 @@ COPY --from=base --chown=app:app /app/src /app/src
 COPY --from=base --chown=app:app /app/drizzle /app/drizzle
 COPY --from=base --chown=app:app /app/package.json /app/package.json
 COPY --from=base --chown=app:app /app/tsconfig.json /app/tsconfig.json
-COPY --from=web-build --chown=app:app /app/web/dist /app/web/dist
 COPY --from=fingerprint --chown=app:app /app/.codesum /app/.codesum
 
 ENV NODE_ENV=production

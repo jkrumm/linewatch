@@ -1,20 +1,7 @@
-# Seeded by `basalt-ui init` into web/.github/workflows/ and moved here, because that is the only
-# place GitHub reads workflows from — the git root, not the package directory. Left where it was
-# placed, this file would have been an enforcement layer that never ran, which is the exact failure
-# adopting basalt was meant to end.
-#
-# Two packages, two installs: the API + collector at the repo root, the dashboard in web/.
-#   - `basalt-ui check-theme` (through `bun run lint`) is the palette guard (raw color literals,
-#     off-identity accents, the card idiom, chart framing).
-#   - `basalt-ui sync --check` fails when the basalt-managed files (rules, skills, the CLAUDE
-#     block) have drifted from the installed basalt-ui version — i.e. when someone upgrades the
-#     package and forgets `basalt-ui sync`.
-#
-# Both go through the LOCAL bin. `bunx basalt-ui` resolves a copy from npm and caches it without
-# re-resolving, so CI can enforce a version the lockfile does not contain.
-#
-# `oxfmt --check` (root `bun run format:check`) covers the API, collector and dashboard sources;
-# `.oxfmtrc.json` ignores docs, JSON/YAML, generated and basalt-managed files.
+# One package: the API, collector and scripts at the repo root.
+#   - `oxfmt --check` (root `bun run format:check`) covers the API, collector and scripts;
+#     `.oxfmtrc.json` ignores docs, JSON/YAML and generated files.
+
 name: check
 on:
   pull_request:
@@ -44,30 +31,4 @@ jobs:
       - run: bun run format:check
       - run: bun run lint
       - run: bun run typecheck
-      # Scoped, because this job installs the root package only and a bare `bun test` at the root
-      # also collects web/src — where the render tests import react-dom, @mantine and
-      # @tanstack/react-query. The dashboard job below runs those, after its own install. The
-      # filters must carry `./`: bun matches a bare `src` as a path substring, which selects
-      # web/src too.
       - run: bun test ./src ./collector
-
-  # ubuntu is correct here: the dashboard is pure TS with no platform-dependent call, and it is
-  # the faster runner.
-  dashboard:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: web
-    steps:
-      - uses: actions/checkout@v7
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.3
-      - run: bun install --frozen-lockfile
-      - run: bun run lint
-      - run: ./node_modules/.bin/basalt-ui sync --check
-      - run: bun run typecheck
-      - run: bun test
-      # The first vite build failure would otherwise surface in the Docker build during `make up`.
-      - run: bun run build

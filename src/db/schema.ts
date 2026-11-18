@@ -77,7 +77,7 @@ export const probeCycle = sqliteTable(
     // Cumulative bytes in/out on path_if, same netstat row as the error counters
     // and stored for the same reason: a counter survives a missed cycle, a
     // per-cycle delta does not. This is the whole basis of the throughput
-    // history — `GET /api/throughput` differences consecutive cycles.
+    // history — the throughput route that differenced consecutive cycles was removed with the dashboard; the counters stay for the record.
     //
     // Two facts a read path must not forget. The counters are **per interface**,
     // so a delta across a path_if change is a comparison between two different

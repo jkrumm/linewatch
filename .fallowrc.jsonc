@@ -7,22 +7,5 @@
     "collector/watchdog.ts",
     "docs/router-spike/discover.ts",
     "docs/router-spike/vx800v.ts"
-  ],
-  // web/package.json peers that basalt-ui requires and `basalt-ui doctor` enforces (fonts, Mantine
-  // modals/notifications/spotlight, `basalt-ui/content` + `basalt-ui/charts` subpath peers). basalt-ui
-  // loads them itself, so nothing under web/src imports them. With web/node_modules installed fallow
-  // sees that; in a fresh worktree (no install) it cannot, and reads all eleven as unused.
-  "ignoreDependencies": [
-    "@fontsource-variable/hubot-sans",
-    "@fontsource-variable/jetbrains-mono",
-    "@fontsource-variable/nunito-sans",
-    "@mantine/modals",
-    "@mantine/notifications",
-    "@mantine/spotlight",
-    "@shikijs/langs",
-    "@shikijs/themes",
-    "d3-scale",
-    "react-markdown",
-    "shiki"
   ]
 }

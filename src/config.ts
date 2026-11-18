@@ -59,19 +59,10 @@ function resolveToken(): string {
  */
 const DEGRADED_LOSS_PCT = 20
 
-/**
- * Minimum spacing between manual speed-test triggers, in seconds. `POST
- * /api/speedtests/run` is unauthenticated (tailnet-only, like every read): the
- * only abuse it enables is saturating the line, and this interval caps that.
- * Enforced against the last `speed_test` row's `ts`, not an in-memory clock, so
- * restarting the container cannot reset the budget.
- */
-const SPEEDTEST_MIN_INTERVAL_S = 300
-
 export interface Config {
   /**
    * The interface the API binds. Loopback by default: the Caddy door is the only
-   * way in, and `POST /api/speedtests/run` has no bearer. The container needs
+   * way in. The container needs
    * `0.0.0.0` to be reachable through its published port — docker-compose.yml sets
    * `LINEWATCH_HOST` for exactly that, and the native job must never inherit it.
    */
@@ -86,8 +77,6 @@ export interface Config {
   pingIntervalSeconds: number
   /** croner pattern for the speed-test schedule (jittered at runtime — see speedtest-runner.ts). */
   speedtestCron: string
-  /** Rate limit for the manual speed-test trigger, in seconds. */
-  speedtestMinIntervalS: number
   targets: Target[]
   /**
    * The gateway that *is* the home line. A cycle whose default route points
@@ -150,9 +139,6 @@ export const config: Config = {
   pingCount: Number(process.env['LINEWATCH_PING_COUNT'] ?? 20),
   pingIntervalSeconds: Number(process.env['LINEWATCH_PING_INTERVAL_S'] ?? 0.2),
   speedtestCron: process.env['LINEWATCH_SPEEDTEST_CRON'] ?? '0 * * * *',
-  speedtestMinIntervalS: Number(
-    process.env['LINEWATCH_SPEEDTEST_MIN_INTERVAL_S'] ?? SPEEDTEST_MIN_INTERVAL_S,
-  ),
   targets,
   homeGatewayAddr: resolveHomeGateway(targets),
   degradedLossPct: Number(process.env['LINEWATCH_DEGRADED_LOSS_PCT'] ?? DEGRADED_LOSS_PCT),

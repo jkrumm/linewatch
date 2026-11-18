@@ -14,7 +14,7 @@ uptime half: Speedtest Tracker's ping monitoring is still on its roadmap, and
 MySpeed's health checks only fire per speed test — an outage between two hourly
 tests leaves no trace in either. Outage detection needs a 30-second cadence;
 speed testing at that cadence would saturate the line permanently. Two
-cadences, one store, one dashboard.
+cadences, one store, one API.
 
 SmokePing has the right data model for the uptime half and it is copied here
 directly: N rapid samples per cycle, stored as median + spread + loss fraction,
@@ -56,7 +56,7 @@ launchd (native, macOS)              launchd (native, macOS)
 │  ping ×20 per target   │ ───────► │  ingest → outage state machine│
 │  30s cycle + vantage   │  batch   │  Ookla CLI, hourly            │
 │  spools on failure     │          │  SQLite (Drizzle)             │
-└────────────────────────┘          │  static UI (basalt-ui + TanStack) │
+└────────────────────────┘          │                                    │
                                     └───────────────────────────────────┘
 ```
 
@@ -64,7 +64,7 @@ The collector is the only piece that *needs* to be native (the API became native
 `ping-parser.ts` and `vantage.ts`, no npm dependencies, and nothing shelled out
 to beyond the system `ping`, `route`, `ifconfig`, `netstat` and `networksetup`.
 Most of it is parsing their output, kept in pure modules with fixture tests.
-Everything with a reason to change — schema, detection logic, API, dashboard,
+Everything with a reason to change — schema, detection logic, API,
 and the 10-minute read-only router poll — stays in the second native job
 (`collector/app.ts`), restarted by launchd KeepAlive and deployed by `make up`.
 
@@ -398,40 +398,30 @@ line itself: `POST /api/probes`, `POST /api/interventions`, `POST
 second, independent gate — `LINEWATCH_ROUTER_WRITE`, unset by default — because
 the two stop different people: the bearer stops someone else acting, the
 capability switch stops *us*.
-Everything else is open on the tailnet, including `POST /api/speedtests/run`: it
-is a dashboard button with no token to present, and its only abuse is saturating
-the line, which a 5-minute rate limit caps more usefully than a shared secret
-would. The limit is enforced against the newest `speed_test` row, not an
-in-process timer, so restarting the container cannot reset the budget.
+Everything else is open on the tailnet.
 
 | Route | Purpose |
 |-|-|
 | `GET /health` | `make verify`, the deploy wait, the old container healthcheck |
 | `POST /api/probes` | batch ingest from the collector: one cycle, one sample per target, plus the optional `cycle` vantage (bearer) |
 | `GET /api/status` | now: up/down, ongoing outage, last sample per target, last speed test, latest vantage (negotiated link, the NIC's supported ceiling, DHCP bind time) |
-| `GET /api/probes?from&to&target&bucket` | server-bucketed timeseries: median of medians, max loss, p5/p95 band, plus a parallel per-bucket `vantage` series |
 | `GET /api/outages?from&to&minDuration` | list, plus a range `summary` when both bounds are given |
-| `GET /api/speedtests?from&to` | list |
-| `GET /api/speedtests/summary?days` | p50/p95 down/up, best, worst. **Not used by the dashboard** — `days` is whole days against the server's own clock, so it cannot answer for the page's selected window; the Speed section computes its percentiles from the run list above. Kept for API consumers that want a fixed-day figure. |
-| `POST /api/speedtests/run` | trigger one now (no bearer; 429 within 5 min of the last run) |
+| `GET /api/speedtests/summary?days` | p50/p95 down/up, best, worst. No caller today. `days` is whole days against the server's clock, so it cannot answer for an arbitrary window; kept for consumers that want a fixed-day figure. |
 | `GET /api/events?from&to&kind` | timeline overlay, plus `linkSamplingSince` — without it an empty array reads as "the link held" |
 | `POST /api/interventions` | record a manual action — power-cycle, cable swap — as an `intervention` event (bearer) |
 | `GET /api/router` | latest line sample, WAN/LAN throughput, the collector host's presence and medium, LAN ports |
-| `GET /api/router/line?from&to&limit` | carrier line history: sync rates, noise margin in real dB, attenuation, showtime |
-| `GET /api/router/throughput?from&to&role&limit` | per-interface rates, `role=wan` for the live internet-facing one |
 | `POST /api/router/poll` | run one read-only poll now (bearer; 429 within 60 s of the last poll attempt, in-process; answers the poll's real outcome) |
 | `POST /api/router/actions/reconnect` | re-dial the WAN (bearer **and** `LINEWATCH_ROUTER_WRITE=1`; 403 without it) |
 | `POST /api/router/actions/reboot` | snapshot WAN state, then reboot the router (bearer **and** `LINEWATCH_ROUTER_WRITE=1`; 403 without it). Outcome is `executed`, `failed` or `unknown` |
-| `GET /api/wifi?from&to&bucket` | radio history, bucketed in SQL: signal/noise, SNR derived on read, PHY rate (not throughput), interface-bound RTT |
 
-Bucketing happens in SQL. The dashboard must never pull 4M rows to draw a year.
+Bucketing happens in SQL. No read route may return 4M rows to draw a year.
 
 Ingest is idempotent on the cycle `ts`, because the spool replays batches
 verbatim: an already-ingested `ts` returns `skipped: true` and writes nothing,
 and `probe_cycle.ts` is UNIQUE so a replayed vantage cannot duplicate either.
 
-Two read shapes exist because a bucket can lie by omission. The `vantage` series
-on `GET /api/probes` reports, per bucket, every distinct path class and link
+Two read shapes existed because a bucket can lie by omission; the vantage one went with the dashboard. The `vantage` series
+(`GET /api/probes`, removed with the dashboard) reported, per bucket, every distinct path class and link
 speed seen and an `onHomeLine` verdict of `all` / `none` / `mixed` / `unknown` —
 never a majority vote, so a bucket that mixed Ethernet and Wi-Fi says so. The
 `summary` on `GET /api/outages` reports `recordedCycles` against
@@ -446,80 +436,9 @@ The token lives in a chmod-600 `~/.config/linewatch/token`, generated at setup
 must not depend on the secrets cache being seeded, or a stale cache takes
 monitoring down with it.
 
-## Dashboard
+## Dashboard (removed)
 
-basalt-ui (Mantine v9) + TanStack Charts. The visual law is `web/.claude/rules/basalt-*.md` + `web/DESIGN.md`, worked through `/basalt-design` — not the generic `/dataviz` skill.
-
-**One page, one range control, no navigation chrome.** This was five routes, then
-one route with four tabs, then one route with five stacked sections each hiding a
-second screenful behind a disclosure. What each attempt bought and cost is in
-`web/src/routes/index.tsx`'s docblock; what settled is worth stating here because
-it constrains everything below.
-
-- **Every figure on the page is taken over the window the range control selects.**
-  The one exception is the 30-day availability heatmap, whose shape is a fixed
-  hour × day grid, and it says so on itself. The speed percentiles are computed
-  client-side from the runs inside the window (`web/src/lib/speed-stats.ts`)
-  rather than read from `GET /api/speedtests/summary`, whose `days` parameter is
-  anchored to the server's clock and takes whole days — on the 1 h range it
-  answered for a day while every other number answered for an hour.
-- **A section's evidence lives behind a named view switch, never behind a chevron
-  saying "Details".** The reader can see what each cut contains without opening
-  it, and the *primary* view is the one a verdict's "see the Uptime section" link
-  lands on.
-- **No conclusion is ever behind a switch.** Every rule the engine fires renders
-  in the verdict band above every section, unconditionally.
-- **The three anchors are folded.** The primary latency chart is one band over
-  the median-across-anchors of each statistic, with the router's own median drawn
-  over it — see `foldInternetBuckets` for what each field folds by and why
-  `down_cycles` takes a provable lower bound rather than a plausible guess. Every
-  anchor is still drawn separately in the section's other view.
-
-The five sections, in reading order:
-
-- **Now** (the strip above the sections) — current state, ongoing outage if any, the verdict set, last speed
-  test, 24 h availability strip. Two states are not derived from the absence of an outage
-  row: a collector that stopped reporting is its own non-green banner (no cycle
-  ingested means no outage row can ever open, so "no outage" is not "up"), and a
-  target whose newest sample is older than two probe cycles goes neutral instead
-  of green. The strip is one column per bucket over the whole window, because a
-  sparkline over a dense array closes over every unmeasured bucket and draws a
-  guaranteed-healthy trend. The verdict set comes from `GET /api/verdicts` and
-  is rendered whole, `uncertainty` included: that sentence is where a rule says
-  why it withheld a cause, and dropping it turns a deliberate refusal into
-  apparent silence, which reads as health. An empty result renders as "no
-  verdicts for this window", never as a green all-clear — no rule firing
-  includes every rule that fell silent for want of inputs.
-- **Uptime** — outage list plus a day/hour availability heatmap. The headline
-  number is total downtime per period, not a 99.x% figure; on a home line the
-  percentage flatters and the minute count informs. It counts an ongoing
-  outage from its start (`duration_s` is null while one is open, and reading
-  that as 0 printed "0 min" under a live outage banner) and clips an outage
-  straddling the window to its time inside it. Directly under it sits the
-  `GET /api/outages` range summary — coverage, degraded cycles and the vantage
-  verdict — because the headline is only true to the extent the window was
-  measured.
-- **Latency** — SmokePing-style band: median line, p5–p95 shaded, loss as colour.
-  Drawn once over the folded internet series with the router overlaid, and again
-  per target in the section's other view.
-- **Speed** — download/upload over time, hourly heatmap, loaded-vs-idle latency.
-  Runs are plotted oldest-first: `GET /api/speedtests` answers newest-first,
-  which is right for a list and backwards for a time axis.
-- **Throughput** — what the line actually carried, differenced from the interface
-  counters. A different question from Speed, and the two must never be read as
-  one: a quiet night reads as near-zero here and says nothing about capacity.
-- **Path & hardware** — what the line is being measured *through*. The current cycle's
-  interface, path class, negotiated media/speed/duplex, the NIC's supported
-  ceiling, gateway and DHCP bind time, with `on_home_line: null` rendered as an
-  "unknown" chip and never a check mark. Then the carrier's sync rate beside the
-  host's negotiated link beside the last measured throughput, each with its own
-  age — and **no ratio at all while either side is stale**, because
-  `GET /api/router`'s parts age independently and dividing a 25-minute-old sync
-  figure by a 30-second-old link speed manufactures a disagreement between two
-  moments. Then link speed per bucket, where a bucket holding more than one
-  speed is marked as a renegotiation rather than averaged into a rate the link
-  never ran at. Then the transition timeline from `GET /api/events`, with the
-  observing source in its own column.
+The React dashboard was removed in Issue 2098. Its last state is in git at `420a31f` (`web/`, a basalt-ui app), with its design notes. The Line page in Argo replaces it and reads the history from ClickHouse (see Export and retention). This repo serves no UI; `GET /api/*` is the API of the self-healing chain. The read modules only the removed routes called are kept on purpose until their follow-up lands: `bucket-probes`, `bucket-throughput`, the router range readers and their heavy-read registry entries. None has a production caller now; their removal is follow-up work.
 
 ## Export and retention
 
@@ -547,11 +466,11 @@ ClickStack keeps metrics 400 days and logs 30: an outage must outlive its log, w
 
 **Retention.** The daily job (03:30, in the app, `LINEWATCH_RETENTION_DAYS=90`) deletes `probe_sample`, `probe_cycle`, `wifi_sample`, `router_line_sample`, `router_wan_sample` and `router_intf_sample` rows older than the window, 5,000 rows at a time with a pause between, so the single connection the API shares is never held. It keeps `outage`, `event` and `speed_test`. It refuses to run until every stream's backfill has finished, and it never deletes a row the live tail has not exported. The floor is 30 days: the longest lookback anything automatic reads is the watchdog's 48 h arming window over `router_line_sample` (`make watchdog-readiness`) and its 2-day action ledger. `make db-retain` runs the same pass once; `make db-vacuum` is the one VACUUM that returns the space (it stops the service, which is why the job does not do it).
 
-**What shrinks.** The dashboard's long-range views (anything beyond 90 days of probe, router and Wi-Fi history) show 90 days until the Argo page that reads ClickHouse replaces it. Outage, event and speed-test history is unaffected.
+**What shrinks.** SQLite keeps probe, router and Wi-Fi history for 90 days; the Argo Line page reads the longer history from ClickHouse. Outage, event and speed-test history is unaffected.
 
 ## Ports
 
-`7731` — service (API + built UI, one launchd job). `7732` — Vite dev only.
+`7731` — the API, one launchd job.
 
 ## Known limits, stated rather than discovered later
 

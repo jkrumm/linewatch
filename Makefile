@@ -223,7 +223,7 @@ speedtest-install: ## Install the Ookla CLI to ~/.local/bin (idempotent; `up` do
 		|| { echo "  ✗ $(SPEEDTEST_BIN) does not run"; exit 1; }; \
 	echo "  ✓ speedtest installed at $(SPEEDTEST_BIN)"
 
-up: guard-deploy env speedtest-install ## THE deploy: build the dashboard, render + (re)start the launchd job, wait for health, prove it runs this checkout. Safe to re-run any time.
+up: guard-deploy env speedtest-install ## THE deploy: render + (re)start the launchd job, wait for health, prove it runs this checkout. Safe to re-run any time.
 	@# Refuse to start an EMPTY record while the old one is still in the Docker
 	@# volume: the app would migrate a fresh database, the collector's spool would
 	@# fill it, and the history would look lost. `db-move` is the one-time move.
@@ -233,7 +233,6 @@ up: guard-deploy env speedtest-install ## THE deploy: build the dashboard, rende
 		echo "  ✗ no database at $(LIVE_DB), but the $(LIVE_VOLUME) volume still holds the record — run 'make db-move' once. (FRESH=1 starts empty on purpose.)"; exit 1; \
 	fi
 	bun install --frozen-lockfile
-	cd web && bun install --frozen-lockfile && bun run build
 	@mkdir -p "$(DB_DIR)"
 	$(call install_agent,$(APP_LABEL),$(APP_LOG))
 	@printf "  waiting for /health… "
@@ -817,23 +816,9 @@ watchdog-readiness: ## Measure the conditions for arming: poll coverage, p90 spa
 	@echo "  A shorter look: make watchdog-readiness READINESS_WINDOW_H=24"
 
 
-check: ## Install (frozen), format check, lint, typecheck (API + collector, then the dashboard) + run the test suite
+check: ## Install (frozen), format check, lint, typecheck + run the test suite
 	bun install --frozen-lockfile
-	cd web && bun install --frozen-lockfile
 	bun run format:check
 	bun run lint
-	cd web && bun run lint
 	bun run typecheck
-	@# The root tsconfig's `include` is src/collector only, so the dashboard needs
-	@# its own pass — it has different lib/jsx settings and a generated route tree.
-	@# Without this, a broken web/ typechecks clean and only fails at image build.
-	cd web && bun run typecheck
-	@# Two packages, two installs, so two scoped runs. A bare `bun test` at the root
-	@# walks into web/ as well, which passes here only because a previous `cd web &&
-	@# bun install` left web/node_modules on this machine — CI's api job installs the
-	@# root package alone, and the dashboard's render tests import react-dom, @mantine
-	@# and @tanstack/react-query. Scope the filter with `./src ./collector`, not
-	@# `src collector`: bun matches those as path substrings and `src` also selects
-	@# web/src.
 	bun test ./src ./collector
-	cd web && bun test

@@ -9,9 +9,6 @@ deploy:
   mode: none
 ship:
   - { via: push }
-# Owner-set cap of one lead at a time (unset is 64). No reason is recorded in this repo;
-# the owner states one or lifts the cap.
-leads: 1
 signals:
   github:
     author: jkrumm

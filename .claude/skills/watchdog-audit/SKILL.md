@@ -385,9 +385,9 @@ findings, most severe first, each with the evidence that produced it.
 
 State plainly whether the system is **self-healing**. Since 2026-11-15 the reconnect
 rung is armed (`LINEWATCH_WATCHDOG_ARMED=1` in the watchdog plist, `LINEWATCH_ROUTER_WRITE=1`
-in the app's) and the reboot rung is not (`LINEWATCH_WATCHDOG_REBOOT` absent until poll
-coverage reaches 80%, `docs/watchdog-spec.md` section 6). Self-healing therefore holds
+in the app's) and since 2026-11-22 the reboot rung too (`LINEWATCH_WATCHDOG_REBOOT=1`, after
+poll coverage reached 80%, `docs/watchdog-spec.md` section 6). Self-healing therefore holds
 only while the app reports `writeEnabled` on `GET /api/router`, the watchdog agent is
-loaded with `LINEWATCH_WATCHDOG_ARMED`, and no disarm file stands (`make watchdog-status`
+loaded with `LINEWATCH_WATCHDOG_ARMED` and `LINEWATCH_WATCHDOG_REBOOT`, and no disarm file stands (`make watchdog-status`
 prints it). Read the three off the running system, never off the templates, and say
 which rungs are live.

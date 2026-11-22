@@ -33,6 +33,19 @@ let poller: RouterPoller | null = null
 let client: RouterClient | null = null
 let executor: RouterActionExecutor = new NullExecutor()
 
+/**
+ * The one place the executor is built, so the wiring of the reconnect's
+ * known-connection selector has a test that fails when it is dropped.
+ */
+export function buildExecutor(input: {
+  client: RouterClient
+  writeEnabled: boolean
+}): RouterActionExecutor {
+  return input.writeEnabled
+    ? new LiveExecutor(input.client, undefined, lastStoredWan)
+    : new NullExecutor()
+}
+
 /** The newest stored WAN connection, the reconnect's selector when no instance is connected. */
 export function lastStoredWan(): KnownWan | null {
   const row = db
@@ -254,9 +267,7 @@ export function startRouterPoller(): Cron | null {
     collectorHostIp: () =>
       resolveCollectorHostIp({ db, override: routerConfig.collectorHostIpOverride }),
   })
-  executor = routerConfig.writeEnabled
-    ? new LiveExecutor(client, undefined, lastStoredWan)
-    : new NullExecutor()
+  executor = buildExecutor({ client, writeEnabled: routerConfig.writeEnabled })
   console.log(
     routerConfig.writeEnabled
       ? '[router] WRITE CAPABILITY ENABLED (LINEWATCH_ROUTER_WRITE=1) — the action routes can reach the device'

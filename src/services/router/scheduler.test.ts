@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test'
 
 /**
  * The retry rule of the scheduled poll. `pollWithRetry` takes its poll and its
@@ -8,9 +8,14 @@ import { describe, expect, test } from 'bun:test'
 process.env['LINEWATCH_DB'] = ':memory:'
 process.env['LINEWATCH_TOKEN'] ??= 'test-token-not-the-real-one'
 
-const { pollWithRetry, lastStoredWan } = await import('./scheduler.js')
+const { pollWithRetry, lastStoredWan, buildExecutor } = await import('./scheduler.js')
 const { db } = await import('../../db/client.js')
 const { routerWanSample } = await import('../../db/schema.js')
+const { resetSharedDb } = await import('../../db/test-reset.js')
+const { ADT_WAN_ROWS } = await import('./fixtures.js')
+
+beforeAll(resetSharedDb)
+afterAll(resetSharedDb)
 
 type Run = Awaited<ReturnType<typeof pollWithRetry>>
 
@@ -87,5 +92,33 @@ describe('lastStoredWan', () => {
       ])
       .run()
     expect(lastStoredWan()).toEqual({ name: 'ipoe_ptm_0_0_d', stack: '3,0,0,0,0,0' })
+  })
+
+  /** The production wiring: drop the selector from buildExecutor and every wedge refuses again. */
+  test('buildExecutor wires it, so a reconnect with every instance disconnected is sent', async () => {
+    const sent: string[] = []
+    const client = {
+      startSession: () => Promise.resolve(),
+      read: () =>
+        Promise.resolve(
+          ADT_WAN_ROWS.map((row) => ({
+            ...row,
+            connStatusV4: 'Disconnected',
+            connStatusV6: 'Disconnected',
+          })),
+        ),
+      sendAction: (input: { intent: string }) => {
+        sent.push(input.intent)
+        return Promise.resolve({ ok: true, errorcode: '0', httpStatus: 200, oid: input.intent })
+      },
+    }
+    const live = buildExecutor({
+      client: client as unknown as Parameters<typeof buildExecutor>[0]['client'],
+      writeEnabled: true,
+    })
+    const result = await live.reconnect()
+    expect(result.outcome).toBe('executed')
+    expect(sent).toEqual(['ppp_disconnect', 'ppp_connect'])
+    expect(buildExecutor({ client: client as never, writeEnabled: false }).capability).toBe('null')
   })
 })

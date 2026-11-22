@@ -245,7 +245,7 @@ T0+900    exhausted, escalate to a human
 
 | Constant | Value | Why |
 |-|-|-|
-| `observeS` | 180 s | The longest self-heal in the 15-outage record: nine healed themselves, all within 180 s; none recorded at 181–240 s. One ran 420 s; the five human-ended outages ran 720–2160 s |
+| `observeS` | 180 s | Of the ten self-heals in the 15-outage record, nine ended within 180 s and none at 181–240 s. The tenth ran 420 s; no action reached the line, and the router re-dialled itself at 150 s. The five outages of 720–2160 s were human-ended |
 | `rebootAtS` | 270 s | `observeS` + `reconnectSettleS`: due as the reconnect settle window closes; fires 60 s after the announce |
 | `reconnectSettleS` | 90 s | Three probe cycles. The action itself is 13 s; seeing the recovery is the constraint |
 | `rebootAtSv4Only` | 600 s | A reachable v6 anchor proves the line, the session and the ISP's forwarding all work. Every layer a reboot could fix is demonstrably fine |

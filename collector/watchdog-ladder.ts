@@ -152,9 +152,9 @@ export const DEFAULT_POLICY: WatchdogPolicy = {
   // The class must hold across two independent self-probes before a clock runs.
   // Costs no ladder time — T0 comes from the outage row, not from confirmation.
   confirmTicks: 2,
-  // Just past the longest self-heal in the 15-outage record: nine healed
-  // themselves, all within 180 s, none recorded at 181–240 s. One ran
-  // 420 s; the five of 720–2160 s were all ended by a human.
+  // Ten outages in the record healed themselves: nine within 180 s, none at
+  // 181–240 s, and one at 420 s that no action reached (the router re-dialled
+  // itself at 150 s). The five of 720–2160 s were all ended by a human.
   observeS: 180,
   // Three probe cycles. The measured reconnect took 13 s and lost no packets, so
   // this is bounded by how long it takes to *see* a recovery, not to cause one.

@@ -571,7 +571,7 @@ describe('replaying the record', () => {
     ])
   })
 
-  /** Nine of the fifteen recorded outages healed themselves, the longest within 180 s. None may reach a rung. */
+  /** Nine of the ten self-healed outages in the record ended within 180 s. A 180 s self-heal must not reach a rung. */
   test('a 180s self-healing outage triggers no action', () => {
     expect(walk(180)).toEqual([])
   })

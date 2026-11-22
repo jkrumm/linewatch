@@ -724,10 +724,10 @@ heartbeat-logs: ## Tail the heartbeat log (the previous generation is the same p
 # Watchdog
 # ---------------------------------------------------------------------------
 
-watchdog-setup: ## Render + load the watchdog LaunchAgent (ARMED for the reconnect rung since 2026-11-15)
-	@# The rendered plist carries LINEWATCH_WATCHDOG_ARMED=1, so loading it means an
-	@# authorised reconnect is performed (docs/watchdog-spec.md section 6). The
-	@# reboot rung is a separate switch the plist leaves out. `make watchdog-disarm`
+watchdog-setup: ## Render + load the watchdog LaunchAgent (ARMED since 2026-11-15, reboot rung since 2026-11-22)
+	@# The rendered plist carries LINEWATCH_WATCHDOG_ARMED=1 and
+	@# LINEWATCH_WATCHDOG_REBOOT=1, so loading it means authorised rungs, the reboot
+	@# included, are performed (docs/watchdog-spec.md section 6). `make watchdog-disarm`
 	@# is the stand-down.
 	@if [ ! -s "$(WATCHDOG_URL_FILE)" ]; then \
 		echo "  ! no watchdog push URL at $(WATCHDOG_URL_FILE)"; \

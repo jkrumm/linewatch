@@ -5,7 +5,8 @@
   <key>Label</key><string>com.jkrumm.linewatch-watchdog</string>
   <!-- Evaluates the ladder every 15 s and acts on it (collector/watchdog.ts).
        ARMED since 2026-11-15 (Issue 1380): the reconnect rung is performed. The
-       reboot rung is NOT enabled, see the environment block below. Without
+       reboot rung has been enabled since 2026-11-22, see the environment block
+       below. Without
        LINEWATCH_WATCHDOG_ARMED the machine still walks the whole ladder and
        writes notes without touching the line, which is the shadow mode it ran
        in from 2026-08-01; `make watchdog-disarm` stands it down at once.
@@ -47,21 +48,22 @@
          file by truncating it in place, and collector/log-rotate.ts refuses to
          touch anything unless fd 1 is provably this path. -->
     <key>LINEWATCH_WATCHDOG_LOG_PATH</key><string>__HOME__/Library/Logs/linewatch-watchdog.log</string>
-    <!-- Arming. ARMED is on; the other two are deliberately absent, and adding
-         one here is the whole procedure for each:
+    <!-- Arming. ARMED and REBOOT are on; REBOOT_V4_ONLY is deliberately absent,
+         and adding it is the whole procedure:
 
            LINEWATCH_WATCHDOG_ARMED           perform authorised rungs       (ON)
-           LINEWATCH_WATCHDOG_REBOOT          allow the destructive rung at all
+           LINEWATCH_WATCHDOG_REBOOT          allow the destructive rung at all (ON)
            LINEWATCH_WATCHDOG_REBOOT_V4_ONLY  ...even when IPv6 still works
 
-         REBOOT stays off until the router poll stores at least 80% of its due
-         polls: the rung needs a line reading no older than 60 s, and its
-         announce step needs one in a second window, so at a 10-minute cadence it
-         takes two successful polls. The numbers are in docs/watchdog-spec.md
-         section 6. Arming is necessary but not sufficient: the executor lives in
+         REBOOT was enabled on 2026-11-22, when the router poll had stored 100% of
+         its due polls over 72 h (the gate is 80%): the rung needs a line reading no
+         older than 60 s, and its announce step needs one in a second window, so at
+         a 10-minute cadence it takes two successful polls. The numbers are in
+         docs/watchdog-spec.md section 6. Arming is necessary but not sufficient: the executor lives in
          the app behind LINEWATCH_ROUTER_WRITE, and the watchdog reads that
          capability from the API rather than assuming it. -->
     <key>LINEWATCH_WATCHDOG_ARMED</key><string>1</string>
+    <key>LINEWATCH_WATCHDOG_REBOOT</key><string>1</string>
   </dict>
   <key>StandardOutPath</key><string>__HOME__/Library/Logs/linewatch-watchdog.log</string>
   <key>StandardErrorPath</key><string>__HOME__/Library/Logs/linewatch-watchdog.log</string>

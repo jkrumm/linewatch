@@ -3,11 +3,11 @@
 *Why an automated control path was considered, what the record does and does not
 support, and the conditions under which any of it may be armed.*
 
-STATUS (2026-08-01, still current 2026-09-07): the measurement, the alerting,
-the write path and the decision function are built and tested, and the runner
-has been ticking in shadow mode since 2026-08-01 (§6). **`LINEWATCH_WATCHDOG_ARMED`
-is still unset in the plist, so nothing has ever acted on its own** — every
-rung is a logged `would_*` note, not a real one.
+STATUS (updated 2026-11-22): the measurement, the alerting, the write path and the
+decision function are built and tested. The runner ran in shadow mode from
+2026-08-01 (§6). **Armed:** the reconnect rung since 2026-11-15 and the reboot rung
+since 2026-11-22 (`LINEWATCH_WATCHDOG_ARMED` and `LINEWATCH_WATCHDOG_REBOOT` in the
+plist). A rung that fires is a real action; the arming numbers are in §6.
 
 **All times are UTC, which is how they are stored.** The container sets no `TZ`,
 so SQLite's `localtime` renders UTC too. Local wall clock is CEST = UTC+2.
@@ -298,14 +298,14 @@ These are why the switches exist. Ordered by what they cost.
 ## 6. What is built, and what arming still needs
 
 Everything in the original "what is left" list now exists. It ran in shadow
-mode from 2026-08-01 and has been armed for the reconnect rung since 2026-11-15.
+mode from 2026-08-01, armed for the reconnect rung since 2026-11-15 and for the reboot rung since 2026-11-22.
 
 | Piece | Where |
 |-|-|
 | Runner — tick, gather, `decide()`, dispatch, record | `collector/watchdog.ts` |
 | Ledger, 0600, tmp → fsync → rename → fsync(dir) | `collector/watchdog-state.ts` |
 | Report mapping and notification text | `collector/watchdog-report.ts` |
-| LaunchAgent, `KeepAlive`, `LINEWATCH_WATCHDOG_ARMED` | `collector/com.jkrumm.linewatch-watchdog.plist.template` |
+| LaunchAgent, `KeepAlive`, `LINEWATCH_WATCHDOG_ARMED` and `LINEWATCH_WATCHDOG_REBOOT` | `collector/com.jkrumm.linewatch-watchdog.plist.template` |
 | `make watchdog-{setup,teardown,status,state,logs,arm,disarm,readiness}` | `Makefile` |
 | Two spools — events against localhost, notifications across the WAN | `collector/watchdog.ts` |
 | A second Kuma push monitor for the watchdog's own health | `homelab/uptime-kuma/monitors.yaml` |
@@ -346,11 +346,11 @@ triggers that this section used to ask for.
 |-|-|
 | `LINEWATCH_ROUTER_WRITE=1` in the app's plist | on, 2026-11-15 |
 | `LINEWATCH_WATCHDOG_ARMED=1` in the watchdog's plist | on, 2026-11-15 — the reconnect rung is performed |
-| `LINEWATCH_WATCHDOG_REBOOT` | **off** |
+| `LINEWATCH_WATCHDOG_REBOOT=1` in the watchdog's plist | on, 2026-11-22 — the reboot rung is performed when its gates hold |
 | Budget, latch, announce step, post-action cooldown | unchanged |
 
-The reboot rung stays off because its precondition is not met, and what it needs is
-the next section.
+The reboot rung was armed on 2026-11-22, once the readiness gate in the next section held
+over 72 h. Its budget (2 per 24 h) and latch are unchanged.
 
 ### The reconnect rung refused in both real outages, 2026-11-22
 
@@ -406,10 +406,11 @@ that change is deployed**, and whether it clears one is still unobserved (§7).
     `not_armed` or a disarm is among the blockers. It cannot help while the router
     answers its carrier objects empty: the poll then stores no line reading either,
     and the rung correctly stays blocked.
-  - **To arm the reboot rung:** `make watchdog-readiness READINESS_WINDOW_H=6` at
-    or above 80% over a window that starts after 2026-11-15 10:12 (the deploy that
-    carries the retry), then add `LINEWATCH_WATCHDOG_REBOOT` to the watchdog plist
-    and `make watchdog-setup`.
+  - **Armed 2026-11-22:** `make watchdog-readiness READINESS_WINDOW_H=72` read 100.0%
+    coverage, p90 spacing 630 s, worst gap 631 s and 0 reboots recorded, over a record
+    that starts 2026-11-19 (after the 2026-11-15 10:12 deploy that carries the retry).
+    `LINEWATCH_WATCHDOG_REBOOT=1` was then added to the watchdog plist and
+    `make watchdog-setup` run. To re-read the gate: the same target, at 80% or better.
 - **Shadow mode produced triggers a human agrees with.** Read on 2026-11-15, every
   due-rung note the shadow run wrote (`watchdog_blocked`, 2026-08-01 to 2026-11-15)
   falls in two groups. Three are real WAN outages — `full_wan_down` on 2026-08-27
@@ -423,7 +424,7 @@ that change is deployed**, and whether it clears one is still unobserved (§7).
   answer success with no data through its API (checked: the pool, the static
   address list, the server), so the reservation cannot be read back; it was
   confirmed by the owner in the router's web UI on 2026-11-15.
-- **The reboot rung stays behind `LINEWATCH_WATCHDOG_REBOOT`.** The action itself
+- **The reboot rung sits behind `LINEWATCH_WATCHDOG_REBOOT`** (on since 2026-11-22). The action itself
   is implemented and its failure is distinguishable from its success (§3 item 6).
 
 ---

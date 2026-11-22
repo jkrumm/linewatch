@@ -11,13 +11,14 @@ into the record. The logic lives in `collector/spool.ts` (pure, tested): torn li
 and non-retryable 4xx batches (all but 401/408/429) go to `spool.rejected.jsonl`
 instead of blocking the queue, and replay is capped at 200 entries per cycle.
 
-**The watchdog is armed for the reconnect rung only (2026-11-15), and its switches are
-load-bearing.** `LINEWATCH_WATCHDOG_ARMED` in the plist decides whether an authorised
+**The watchdog is armed for the reconnect rung (2026-11-15) and the reboot rung (2026-11-22),
+and its switches are load-bearing.** `LINEWATCH_WATCHDOG_ARMED` in the plist decides whether an authorised
 rung is *performed*; without it the machine still walks the whole ladder and writes
 notes, which is what shadow mode was. `LINEWATCH_WATCHDOG_REBOOT` is a separate switch
-and is **off**: the reboot needs a line reading under 60 s old and, at a 10-minute poll
-cadence, two successful polls, so it waits for coverage ≥80%
-(`docs/watchdog-spec.md` section 6 has the numbers and the procedure).
+and is **on** since 2026-11-22: the reboot needs a line reading under 60 s old and, at a
+10-minute poll cadence, two successful polls, so it waits on coverage ≥80%
+(`docs/watchdog-spec.md` section 6 has the numbers). The reboot budget, the latch and
+`make watchdog-disarm` are unchanged by it.
 `LINEWATCH_ROUTER_WRITE` in the app's plist decides whether the executor
 can reach the device at all, and the watchdog **reads that capability from
 `GET /api/router` rather than assuming it** — the two processes are configured

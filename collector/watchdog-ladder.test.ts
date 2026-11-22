@@ -321,7 +321,7 @@ describe('decide', () => {
     const decision = decide(
       armedInput({
         ledger: ledger({
-          pending: { ts: T0 + 240_000, kind: 'reconnect', outageKey: 'wan:1' },
+          pending: { ts: T0 + 180_000, kind: 'reconnect', outageKey: 'wan:1' },
         }),
       }),
     )
@@ -523,10 +523,63 @@ describe('replaying the record', () => {
     }
   }
 
+  /**
+   * The ladder walked tick by tick, each tick's ledger fed into the next, so the
+   * rungs are reached the way the running process reaches them. Returns every
+   * action it would have taken, with the elapsed second it took it.
+   */
+  function walk(outageEndS: number): Array<[number, string]> {
+    const policy: WatchdogPolicy = { ...DEFAULT_POLICY, armed: true, rebootEnabled: true }
+    const carrier = { stale: false, lineStatus: 'Up', showtimeStartS: 4000, freshPollAgeS: 10 }
+    let state = ledger({ v6: { lastUpTs: T0 - 60_000, lastCheckedTs: T0 - 60_000 } })
+    const fired: Array<[number, string]> = []
+    for (let elapsed = 0; elapsed <= 330; elapsed += 15) {
+      const now = T0 + elapsed * 1000
+      const input =
+        elapsed < outageEndS
+          ? atOutage(T0, elapsed, { policy, carrier, ledger: state })
+          : armedInput({
+              now,
+              policy,
+              carrier,
+              ledger: state,
+              record: record({ newestSampleTs: now - 10_000 }),
+              self: self({ probeTs: now }),
+              heldTicks: 0,
+            })
+      const out = decide(input)
+      if (out.action !== 'none') fired.push([elapsed, out.action])
+      state =
+        out.action === 'reconnect' || out.action === 'reboot'
+          ? recordOutcome(out.ledger, {
+              ts: now,
+              kind: out.action,
+              outageKey: out.outageKey ?? `wan:${T0}`,
+              outcome: 'executed',
+            })
+          : out.ledger
+    }
+    return fired
+  }
+
+  /** The spec's timeline for a full WAN outage: reconnect at 180 s, announce at 270 s, reboot at 330 s. */
+  test('a full WAN outage walks reconnect at 180s, announce at 270s, reboot at 330s', () => {
+    expect(walk(Infinity)).toEqual([
+      [180, 'reconnect'],
+      [270, 'announce'],
+      [330, 'reboot'],
+    ])
+  })
+
+  /** Nine of the fifteen recorded outages healed themselves, the longest within 180 s. None may reach a rung. */
+  test('a 180s self-healing outage triggers no action', () => {
+    expect(walk(180)).toEqual([])
+  })
+
   /** 2026-08-01 10:09:04 → 10:30:34. 1290 s. Ended only when a human rebooted the router. */
-  test('fires on the 2026-08-01 outage, at 240s of a 1290s event', () => {
-    expect(decide(atOutage(T0, 239)).action).toBe('none')
-    const armed = decide(atOutage(T0, 245))
+  test('fires on the 2026-08-01 outage, at 180s of a 1290s event', () => {
+    expect(decide(atOutage(T0, 179)).action).toBe('none')
+    const armed = decide(atOutage(T0, 185))
     expect(armed.blockedBy).toEqual([])
     expect(armed.action).toBe('reconnect')
   })
@@ -542,7 +595,7 @@ describe('replaying the record', () => {
   /**
    * 2026-08-01 12:28:35 → 12:30:05. 90 s, ppp0's counters reset 4.74 GB → 2.4 MB,
    * recovered on its own. Recorded while this watchdog was being written, which
-   * is the third independent confirmation that 240 s is not too long a wait.
+   * is the third independent confirmation that 180 s is not too long a wait.
    */
   test('does not fire on the 08-01 12:28 outage, which also healed itself in 90s', () => {
     for (const elapsed of [30, 60, 90]) {
@@ -868,7 +921,7 @@ describe('the ledger the decision writes', () => {
           ladder: laddered,
           healthySince: held,
           actions: [
-            { ts: T0 + 240_000, kind: 'reconnect', outageKey: `wan:${T0}`, outcome: 'executed' },
+            { ts: T0 + 180_000, kind: 'reconnect', outageKey: `wan:${T0}`, outcome: 'executed' },
           ],
         }),
       }),
@@ -886,15 +939,15 @@ describe('the ledger the decision writes', () => {
   })
 
   test('the cooldown is armed at the recovery, not at the action, or it vetoes its own next rung', () => {
-    // A reconnect at 240s with a 900s cooldown armed on the spot would block the
-    // reboot that becomes due at 330s. The ladder would stall at the cheap rung
+    // A reconnect at 180s with a 900s cooldown armed on the spot would block the
+    // reboot that becomes due at 270s. The ladder would stall at the cheap rung
     // for the entire event it exists for.
     const out = decide(armedInput())
     expect(out.ledger.postActionCooldownUntil).toBeNull()
   })
 
   test('a pending action freezes everything else in the ledger', () => {
-    const pending = { ts: T0 + 240_000, kind: 'reconnect' as const, outageKey: `wan:${T0}` }
+    const pending = { ts: T0 + 180_000, kind: 'reconnect' as const, outageKey: `wan:${T0}` }
     const out = decide(armedInput({ ledger: ledger({ pending, consecutiveActions: 1 }) }))
     expect(out.state).toBe('settling')
     expect(out.blockedBy).toEqual(['action_pending'])
@@ -1142,7 +1195,7 @@ describe('what is worth waking a human for', () => {
 })
 
 describe('closing a write-ahead entry', () => {
-  const pending = { ts: T0 + 240_000, kind: 'reconnect' as const, outageKey: `wan:${T0}` }
+  const pending = { ts: T0 + 180_000, kind: 'reconnect' as const, outageKey: `wan:${T0}` }
   const written = ledger({
     pending,
     consecutiveActions: 1,
@@ -1151,7 +1204,7 @@ describe('closing a write-ahead entry', () => {
       t0: T0,
       rung: 'reconnect',
       enteredAt: T0,
-      settleUntil: T0 + 330_000,
+      settleUntil: T0 + 270_000,
       announcedAt: null,
     },
   })
@@ -1161,7 +1214,7 @@ describe('closing a write-ahead entry', () => {
     expect(after.pending).toBeNull()
     expect(after.actions).toHaveLength(1)
     expect(after.consecutiveActions).toBe(1)
-    expect(after.ladder.settleUntil).toBe(T0 + 330_000)
+    expect(after.ladder.settleUntil).toBe(T0 + 270_000)
   })
 
   test('an action that never reached the line gives the latch increment back', () => {
@@ -1204,7 +1257,7 @@ describe('closing a write-ahead entry', () => {
  * wrote `self_recovery` into the record for a line that had not recovered.
  *
  * The false attribution is the smaller half. The larger one is that a wedge
- * flapping a single reply every couple of minutes restarts the 240 s observe
+ * flapping a single reply every couple of minutes restarts the 180 s observe
  * window every time, so the ladder never advances on exactly the failure it
  * exists for.
  */
@@ -1629,7 +1682,7 @@ describe('the windows that hold a rung shut', () => {
     expect(out.state).toBe('confirmed')
     expect(out.rung).toBe('observe')
     expect(out.action).toBe('none')
-    expect(out.note).toContain('observing until 240s')
+    expect(out.note).toContain('observing until 180s')
   })
 
   test('the reboot rung is not reachable before its due time', () => {

@@ -237,15 +237,16 @@ restart mid-outage does not restart the clock:
 
 ```
 T0        first failing cycle
-T0+240    reconnect
-T0+330    reboot due; announce
-T0+390    reboot fires
+T0+180    reconnect
+T0+270    reboot due; announce
+T0+330    reboot fires
 T0+900    exhausted, escalate to a human
 ```
 
 | Constant | Value | Why |
 |-|-|-|
-| `observeS` | 240 s | 2.7× the 90 s that two of three recorded events took to heal themselves |
+| `observeS` | 180 s | The longest self-heal in the 15-outage record: nine healed themselves, all within 180 s; none recorded at 181–240 s. The five human-ended outages ran 720–2160 s |
+| `rebootAtS` | 270 s | `observeS` + `reconnectSettleS`: due as the reconnect settle window closes; fires 60 s after the announce |
 | `reconnectSettleS` | 90 s | Three probe cycles. The action itself is 13 s; seeing the recovery is the constraint |
 | `rebootAtSv4Only` | 600 s | A reachable v6 anchor proves the line, the session and the ISP's forwarding all work. Every layer a reboot could fix is demonstrably fine |
 | `exhaustAtS` | 900 s | Strictly after every rung's fire time. The human on 08-01 intervened at 18m17s; the ladder is done escalating before that |
@@ -449,7 +450,7 @@ that change is deployed**, and whether it clears one is still unobserved (§7).
   (`INCLUDE_REBOOT_WAIT_TIME` on the device) and the record's worst measured
   reboot-to-IPv4 is 193 s, which is what `rebootSettleS: 300` is scaled from.
   Both are one observation each.
-- **The base rate is one qualifying event in three days**, and with a 240 s
+- **The base rate is one qualifying event in three days**, and with a 180 s
   trigger this would have fired **once** in the entire history of the database.
   Everything here — shadow mode, dry-run every tick, the replayed windows, the
   latch — exists because code that runs monthly is code that is stale when it

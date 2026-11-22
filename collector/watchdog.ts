@@ -941,6 +941,8 @@ async function main(): Promise<void> {
     armed: policy.armed,
     rebootEnabled: policy.rebootEnabled,
     rebootOnV4Only: policy.rebootOnV4Only,
+    observeS: policy.observeS,
+    rebootAtS: policy.rebootAtS,
     tickMs: policy.tickMs,
     ledgerPath: config.ledgerPath,
     once: config.once,

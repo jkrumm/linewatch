@@ -114,7 +114,7 @@ export interface WatchdogPolicy {
    * that had not recovered.
    *
    * The attribution lie is the smaller half. The larger one is that a wedge
-   * flapping a single reply every couple of minutes would restart the 240 s
+   * flapping a single reply every couple of minutes would restart the 180 s
    * observe window every time, so the ladder would never advance on exactly the
    * failure this exists for.
    */
@@ -137,9 +137,9 @@ export interface WatchdogPolicy {
  * timeline they compose, for a `full_wan_down`:
  *
  *     T0        first failing cycle, from outage.started_at
- *     T0+240    reconnect
- *     T0+330    reboot becomes due; announce
- *     T0+390    reboot fires
+ *     T0+180    reconnect
+ *     T0+270    reboot becomes due; announce
+ *     T0+330    reboot fires
  *     T0+900    exhausted, escalate to a human
  *
  * The human on 2026-08-01 started rebooting at T0+18m17s. The ladder is designed
@@ -152,12 +152,15 @@ export const DEFAULT_POLICY: WatchdogPolicy = {
   // The class must hold across two independent self-probes before a clock runs.
   // Costs no ladder time — T0 comes from the outage row, not from confirmation.
   confirmTicks: 2,
-  // 2.7x the 90 s that two of the three recorded events took to heal themselves.
-  observeS: 240,
+  // Just past the longest self-heal in the 15-outage record: nine healed
+  // themselves, all within 180 s, none recorded at 181–240 s. The five
+  // outages of 720–2160 s were all ended by a human.
+  observeS: 180,
   // Three probe cycles. The measured reconnect took 13 s and lost no packets, so
   // this is bounded by how long it takes to *see* a recovery, not to cause one.
   reconnectSettleS: 90,
-  rebootAtS: 330,
+  // observeS + reconnectSettleS: due as the reconnect's settle window closes.
+  rebootAtS: 270,
   // Deferred, not disabled: a reachable IPv6 anchor proves the line is in
   // showtime, the session is established and the ISP is forwarding. Every layer
   // a reboot could fix is demonstrably working, and a reboot is a household-wide
@@ -1038,7 +1041,7 @@ function advance(input: LadderInput, decision: LadderDecision): Ledger {
       // laundered into a fresh independent outage with a fresh action budget.
       // Armed at the recovery rather than at the action, deliberately: arming it
       // when the action fires would block the ladder's own next rung — the
-      // reconnect at 240 s would veto the reboot at 330 s.
+      // reconnect at 180 s would veto the reboot at 270 s.
       const acted = ledger.actions.some((action) => action.outageKey === ledger.ladder.outageKey)
       if (acted) next.postActionCooldownUntil = now + policy.postActionCooldownS * 1000
       next.ladder = {

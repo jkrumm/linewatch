@@ -245,7 +245,7 @@ T0+900    exhausted, escalate to a human
 
 | Constant | Value | Why |
 |-|-|-|
-| `observeS` | 180 s | The longest self-heal in the 15-outage record: nine healed themselves, all within 180 s; none recorded at 181–240 s. The five human-ended outages ran 720–2160 s |
+| `observeS` | 180 s | The longest self-heal in the 15-outage record: nine healed themselves, all within 180 s; none recorded at 181–240 s. One ran 420 s; the five human-ended outages ran 720–2160 s |
 | `rebootAtS` | 270 s | `observeS` + `reconnectSettleS`: due as the reconnect settle window closes; fires 60 s after the announce |
 | `reconnectSettleS` | 90 s | Three probe cycles. The action itself is 13 s; seeing the recovery is the constraint |
 | `rebootAtSv4Only` | 600 s | A reachable v6 anchor proves the line, the session and the ISP's forwarding all work. Every layer a reboot could fix is demonstrably fine |
@@ -396,8 +396,9 @@ that change is deployed**, and whether it clears one is still unobserved (§7).
     60 s (`no_fresh_poll`), and the announce step fires only on a tick where that
     precondition and everything else already hold. The fire then waits 60 s more,
     outside the freshness window. At a 10-minute cadence that is two successful
-    polls after T0+330 s: the 08:10 poll would have announced, and the 08:20 poll
-    — the one that was missed — would have fired. Coverage is therefore not a
+     polls: one after T0+270 s to announce, and one at T0+330 s or later to fire.
+     On 08-01 the 08:10 poll would have announced, and the 08:20 poll — the one
+     that was missed — would have fired. Coverage is therefore not a
     nicety here but the reboot's latency. So the watchdog now asks for one
     (`collector/watchdog-poll-request.ts`): when the reboot rung is otherwise fully
     authorised and `no_fresh_poll` (plus the `not_announced` it unblocks) is all that

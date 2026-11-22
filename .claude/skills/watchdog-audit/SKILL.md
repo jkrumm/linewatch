@@ -166,7 +166,7 @@ means a crash between write-ahead and acknowledgement — it is counted as
 
 ```bash
 make watchdog-readiness
-sqlite3 -readonly -column -header ~/.local/share/linewatch/linewatch.db "select datetime(started_at/1000,'unixepoch') started, scope, coalesce(duration_s,-1) dur_s, cycles, case when scope='wan' and duration_s >= 240 then 'WOULD TRIGGER' else '-' end from outage order by started_at;"
+sqlite3 -readonly -column -header ~/.local/share/linewatch/linewatch.db "select datetime(started_at/1000,'unixepoch') started, scope, coalesce(duration_s,-1) dur_s, cycles, case when scope='wan' and duration_s >= 180 then 'WOULD TRIGGER' else '-' end from outage order by started_at;"
 ```
 
 Four conditions, and **poll coverage is the binding one**: a watchdog whose

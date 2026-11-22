@@ -153,8 +153,8 @@ export const DEFAULT_POLICY: WatchdogPolicy = {
   // Costs no ladder time — T0 comes from the outage row, not from confirmation.
   confirmTicks: 2,
   // Just past the longest self-heal in the 15-outage record: nine healed
-  // themselves, all within 180 s, none recorded at 181–240 s. The five
-  // outages of 720–2160 s were all ended by a human.
+  // themselves, all within 180 s, none recorded at 181–240 s. One ran
+  // 420 s; the five of 720–2160 s were all ended by a human.
   observeS: 180,
   // Three probe cycles. The measured reconnect took 13 s and lost no packets, so
   // this is bounded by how long it takes to *see* a recovery, not to cause one.

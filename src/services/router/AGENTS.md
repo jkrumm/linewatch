@@ -26,6 +26,10 @@ Read this before changing anything under `src/services/router/`. The bearer rule
   Do not add `act(oid: string)`; it would put all eight read call sites one
   argument from an action, and the factory-reset constants are declared five
   lines from the PPP ones in the router's own JavaScript.
+- **`reconnect` acts on the live row only.** With no connected instance it falls back to the one
+  row whose name and stack equal the newest `router_wan_sample` (PPPoE down, line up is
+  exactly that state); zero or several matches refuse. The stored value selects, it never
+  supplies the stack. `parseLiveWan`'s poller semantics stay as they are.
 - **The `ACT_*` names in that JavaScript are identifiers, not the strings they
   stand for.** `var ACT_OP_PPP_CONN = "ACT_PPP_CONN"` — the whole family drops
   `_OP` between name and value. Sending the identifier gets HTTP 200 with

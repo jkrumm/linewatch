@@ -194,6 +194,20 @@ naming rule. So:
    reboot that worked, because the device dies before answering; the probe record
    over the settle window decides, never the reply.
 
+7. **`reconnect` acts on the known connection when no instance is connected.**
+   The read-then-act rule above still holds: the stack that goes out is the live
+   row's. But `parseLiveWan` (poller semantics, unchanged) yields nothing when
+   every instance reports `Disconnected`, which is exactly the PPPoE-session-down
+   wedge, so the first version of this rung refused in 2 of 2 real outages (§6).
+   Now, with no connected instance, the executor takes the one `DEV2_ADT_WAN` row
+   whose `connType` has a reconnect plan, with a stack, and whose name and stack
+   both equal the newest stored `router_wan_sample`. Zero or several matches, or
+   no stored sample, is still a refusal. The stored value selects, it never
+   addresses. The verb is unchanged (`ppp_disconnect` then `ppp_connect`; the
+   disconnect on a down session is harmless), and the result's `detail` says which
+   path was used: "selected by connection status" or "selected by the last known
+   connection (name and stack)".
+
 ### Would a reconnect have helped on 08-01?
 
 Almost certainly not. At 10:10:01, 23 s after the resync, `ppp0`'s counters had
@@ -338,6 +352,20 @@ triggers that this section used to ask for.
 The reboot rung stays off because its precondition is not met, and what it needs is
 the next section.
 
+### The reconnect rung refused in both real outages, 2026-11-22
+
+The 2026-11-15 outage was not the only one the armed rung met. On 2026-11-22
+17:46–18:17 UTC the line was down for 31 minutes until the owner rebooted the
+router by hand. The watchdog fired its reconnect at T0+250 s and
+`LiveExecutor.doReconnect` refused: "the router reports no connected WAN instance
+— nothing was sent". The G.fast line stayed Up throughout (sync about 820/229
+Mbit/s); the PPPoE session was down (`lastConnError` `ERROR_ISP_TIME_OUT`). The
+2026-11-15 outage refused the same way. The precondition (an instance that is v4
+not `Disconnected` or v6 `Connected`) excluded the wedge it exists for, so the
+rung has refused in 2 of 2 real outages and has never been sent at a wedge. §3
+item 7 is the fix. **A reconnect has been tried against a real wedge only after
+that change is deployed**, and whether it clears one is still unobserved (§7).
+
 ### Conditions for arming, as measured
 
 - **Poll coverage ≥80% of due polls over 48 h, p90 spacing ≤20 min.** Read on
@@ -412,9 +440,10 @@ the next section.
 - **What was the 4.4 GB transfer at 09:20–09:29, and did it matter?** The
   precursor loss cluster starts inside it.
 - **What was `outage` id 3?**
-- **Does a reconnect ever clear a wedge?** It has now been proven to work and to
-  be cheap. It has never been observed to *fix* anything, because it has only
-  ever been fired at a healthy line.
+- **Does a reconnect ever clear a wedge?** It has been proven to work and to be
+  cheap. It has never been observed to *fix* anything: it was fired at a healthy
+  line, then refused in both real outages (§6) until the known-connection
+  selection (§3 item 7) shipped.
 - **What is the reboot's real recovery curve?** The firmware budgets 130 s
   (`INCLUDE_REBOOT_WAIT_TIME` on the device) and the record's worst measured
   reboot-to-IPv4 is 193 s, which is what `rebootSettleS: 300` is scaled from.

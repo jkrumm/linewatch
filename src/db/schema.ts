@@ -336,8 +336,9 @@ export const routerWanSample = sqliteTable(
      * integer `router_intf_sample.stack` keeps. Stored whole because it is the
      * addressing a write against this connection would use, and the trap is
      * that it is *not* the interface's: `DEV2_IP_INTF`'s `ppp0` is stack 4 while
-     * this connection is stack 3. Evidence only — an action path must re-read it
-     * live and take the value it finds, never a stored one.
+     * this connection is stack 3. Evidence, and the selector for the reconnect
+     * when no instance is connected: an action path takes the stack from the
+     * live row, which must equal this one, and never sends a stored value.
      */
     stack: text('stack'),
     connStatusV4: text('conn_status_v4'),

@@ -1,11 +1,12 @@
 import { Cron } from 'croner'
 import { db } from '../../db/client.js'
-import { event } from '../../db/schema.js'
+import { desc } from 'drizzle-orm'
+import { event, routerWanSample } from '../../db/schema.js'
 import { RouterClient, RouterSessionLostError, RouterUnreachableError } from './client.js'
 import { resolveCollectorHostIp } from './collector-address.js'
 import { routerConfig } from './config.js'
 import { RouterPoller } from './poll.js'
-import { LiveExecutor, NullExecutor, type RouterActionExecutor } from './actions.js'
+import { LiveExecutor, NullExecutor, type KnownWan, type RouterActionExecutor } from './actions.js'
 import { isRouterBusy, runExclusive } from './lock.js'
 
 /**
@@ -31,6 +32,17 @@ let lastPollAttemptAt: number | null = null
 let poller: RouterPoller | null = null
 let client: RouterClient | null = null
 let executor: RouterActionExecutor = new NullExecutor()
+
+/** The newest stored WAN connection, the reconnect's selector when no instance is connected. */
+function lastStoredWan(): KnownWan | null {
+  const row = db
+    .select({ name: routerWanSample.connName, stack: routerWanSample.stack })
+    .from(routerWanSample)
+    .orderBy(desc(routerWanSample.ts))
+    .limit(1)
+    .all()[0]
+  return row ?? null
+}
 
 /**
  * The poller, for the on-demand poll route. Null when no router is configured —
@@ -242,7 +254,9 @@ export function startRouterPoller(): Cron | null {
     collectorHostIp: () =>
       resolveCollectorHostIp({ db, override: routerConfig.collectorHostIpOverride }),
   })
-  executor = routerConfig.writeEnabled ? new LiveExecutor(client) : new NullExecutor()
+  executor = routerConfig.writeEnabled
+    ? new LiveExecutor(client, undefined, lastStoredWan)
+    : new NullExecutor()
   console.log(
     routerConfig.writeEnabled
       ? '[router] WRITE CAPABILITY ENABLED (LINEWATCH_ROUTER_WRITE=1) — the action routes can reach the device'

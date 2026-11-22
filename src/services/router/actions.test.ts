@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import { readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { LiveExecutor, NullExecutor } from './actions.js'
+import { LiveExecutor, NullExecutor, type KnownWan } from './actions.js'
 import { RouterSessionLostError, RouterUnreachableError } from './client.js'
 import { isRouterBusy, runExclusive } from './lock.js'
 import type { RouterActionIntent, RouterActionResponse } from './client.js'
@@ -218,6 +218,84 @@ describe('LiveExecutor.reconnect', () => {
     const result = await executor(fake).reconnect()
     expect(result.outcome).toBe('refused')
     expect(fake.sent).toEqual([])
+  })
+
+  describe('when no instance is connected — the PPPoE session down, the line up', () => {
+    const allDown: Array<Record<string, string>> = ADT_WAN_ROWS.map((row) => ({
+      ...row,
+      connStatusV4: 'Disconnected',
+      connStatusV6: 'Disconnected',
+    }))
+    const known: KnownWan = { name: 'ipoe_ptm_0_0_d', stack: '3,0,0,0,0,0' }
+    const withKnown = (fake: FakeClient, last: KnownWan | null) =>
+      new LiveExecutor(
+        asClient(fake),
+        () => Promise.resolve(),
+        () => last,
+      )
+
+    it('acts on the row matching the last known connection by name and stack', async () => {
+      const fake = new FakeClient(allDown)
+      const result = await withKnown(fake, known).reconnect()
+      expect(result.outcome).toBe('executed')
+      expect(fake.sent).toEqual([
+        { intent: 'ppp_disconnect', stack: '3,0,0,0,0,0' },
+        { intent: 'ppp_connect', stack: '3,0,0,0,0,0' },
+      ])
+      expect(result.before?.selectedBy).toBe('continuity')
+      expect(result.detail).toContain('last known connection')
+    })
+
+    it('says the status path was used when an instance is connected', async () => {
+      const fake = new FakeClient()
+      const result = await withKnown(fake, known).reconnect()
+      expect(result.detail).toContain('selected by connection status')
+    })
+
+    it('refuses when no row matches the last known connection', async () => {
+      const fake = new FakeClient(allDown)
+      for (const last of [
+        { name: 'ipoe_ptm_0_0_d', stack: '9,0,0,0,0,0' },
+        { name: 'renamed_profile', stack: '3,0,0,0,0,0' },
+      ]) {
+        const result = await withKnown(fake, last).reconnect()
+        expect(result.outcome).toBe('refused')
+        expect(result.detail).toContain('0 rows match')
+      }
+      expect(fake.sent).toEqual([])
+    })
+
+    it('refuses when two rows match the last known connection', async () => {
+      const dup = allDown.flatMap((row) => (row['name'] === known.name ? [row, { ...row }] : [row]))
+      const fake = new FakeClient(dup)
+      const result = await withKnown(fake, known).reconnect()
+      expect(result.outcome).toBe('refused')
+      expect(result.detail).toContain('2 rows match')
+      expect(fake.sent).toEqual([])
+    })
+
+    it('refuses without a stored connection, or one with no stack', async () => {
+      const fake = new FakeClient(allDown)
+      for (const last of [
+        null,
+        { name: known.name, stack: null },
+        { name: null, stack: known.stack },
+      ]) {
+        const result = await withKnown(fake, last).reconnect()
+        expect(result.outcome).toBe('refused')
+      }
+      expect(fake.sent).toEqual([])
+    })
+
+    it('refuses a matching row whose connType has no reconnect plan', async () => {
+      const odd = allDown.map((row) =>
+        row['name'] === known.name ? { ...row, connType: 'L2TP' } : row,
+      )
+      const fake = new FakeClient(odd)
+      const result = await withKnown(fake, known).reconnect()
+      expect(result.outcome).toBe('refused')
+      expect(fake.sent).toEqual([])
+    })
   })
 
   /** Half a disconnect/connect pair is a state nobody asked for. */

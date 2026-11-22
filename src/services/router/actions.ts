@@ -6,6 +6,7 @@ import {
 } from './client.js'
 import { runExclusive } from './lock.js'
 import { parseLiveWan, type LiveWan } from './parse.js'
+import type { RouterRow } from './redact.js'
 
 /**
  * The only place in this codebase that writes to the router.
@@ -132,6 +133,16 @@ const RECONNECT_PLAN: Readonly<Record<string, readonly RouterActionIntent[]>> = 
   DHCP: ['dhcp_renew'],
 })
 
+/**
+ * The connection the record last saw, from the newest `router_wan_sample`. It
+ * is a *selector*, never an address: the stack that goes out is the live row's,
+ * and the row is only acted on when its name and stack both equal these.
+ */
+export interface KnownWan {
+  name: string | null
+  stack: string | null
+}
+
 /** Between the disconnect and the connect. The firmware's own page reloads 1.5 s after a click. */
 const STEP_SPACING_MS = 1_500
 
@@ -143,12 +154,45 @@ const STEP_SPACING_MS = 1_500
  */
 const DEVICE_STACK = '0,0,0,0,0,0'
 
+type KnownWanPick = { wan: LiveWan; reason?: never } | { wan: null; reason: string }
+
+/**
+ * The fallback row when no instance is connected: exactly one row whose connType
+ * has a reconnect plan, with a stack, and whose name and stack both equal the
+ * last stored connection. Zero or several is a refusal — no guessing. Parsed
+ * through `parseLiveWan` on that single row, so the poller's semantics stay
+ * untouched.
+ */
+function pickKnownWan(rows: readonly RouterRow[], known: KnownWan | null): KnownWanPick {
+  const none = 'the router reports no connected WAN instance — nothing was sent'
+  if (known === null || known.name === null || known.stack === null) {
+    return { wan: null, reason: `${none} (and no known connection to fall back to)` }
+  }
+  const matches = rows.filter(
+    (row) =>
+      row['name'] === known.name &&
+      row['stack'] === known.stack &&
+      typeof row['connType'] === 'string' &&
+      Object.hasOwn(RECONNECT_PLAN, row['connType']),
+  )
+  if (matches.length !== 1) {
+    return {
+      wan: null,
+      reason: `${none}; ${matches.length} rows match the last known connection — refusing to guess`,
+    }
+  }
+  const wan = parseLiveWan(matches, { previousName: known.name })
+  if (wan === null) return { wan: null, reason: `${none} (the matching row did not parse)` }
+  return { wan }
+}
+
 export class LiveExecutor implements RouterActionExecutor {
   readonly capability = 'live' as const
 
   constructor(
     private readonly client: RouterClient,
     private readonly sleep: (ms: number) => Promise<void> = (ms) => Bun.sleep(ms),
+    private readonly lastKnownWan: () => KnownWan | null = () => null,
   ) {}
 
   /** Serialised against the poller: both log in, and a login evicts the other's session. */
@@ -168,20 +212,23 @@ export class LiveExecutor implements RouterActionExecutor {
     // looked like before the action — which the action then destroys, since a
     // re-dial resets the session uptime and the interface byte counters that
     // diagnose everything downstream of it.
-    // Deliberately without the poller's `previousName` continuity fallback. The
-    // poller carries a connection forward so the *record* does not go blind
-    // through an outage; acting on a stack nothing currently vouches for is a
-    // different proposition entirely. So when the router reports every instance
-    // disconnected this returns null, and the refusal below is the answer.
+    // Deliberately without the poller's `previousName` continuity fallback: a
+    // name alone carries no stack and no connType check. When the router reports
+    // every instance disconnected — the PPPoE session down while the line stays
+    // up, which is the wedge this rung exists for and refused it in 2 of 2 real
+    // outages — `pickKnownWan` takes the one row that is, by name AND stack, the
+    // connection the record last saw. Anything less exact is a refusal.
     const rows = await this.client.read('DEV2_ADT_WAN', 'gl')
-    const wan = parseLiveWan(rows)
+    let wan = parseLiveWan(rows)
+    let selection = 'selected by connection status'
     if (wan === null || wan.stack === null) {
-      return this.refused(
-        'reconnect',
-        null,
-        'the router reports no connected WAN instance — nothing was sent',
-      )
+      const known = pickKnownWan(rows, this.lastKnownWan())
+      if (known.wan === null) return this.refused('reconnect', null, known.reason)
+      wan = known.wan
+      selection = 'no instance connected — selected by the last known connection (name and stack)'
     }
+    // `pickKnownWan` and the status path both guarantee a stack; this narrows the type.
+    if (wan.stack === null) return this.refused('reconnect', wan, 'the connection has no stack')
 
     const plan = wan.connType === null ? undefined : RECONNECT_PLAN[wan.connType]
     if (plan === undefined) {
@@ -209,7 +256,7 @@ export class LiveExecutor implements RouterActionExecutor {
           outcome: 'failed',
           steps,
           before: wan,
-          detail: `reconnect interrupted at ${intent} after ${steps.length} of ${plan.length} steps (${message})${steps.length > 0 ? ' — the line may be left disconnected' : ''}`,
+          detail: `reconnect interrupted (${selection}) at ${intent} after ${steps.length} of ${plan.length} steps (${message})${steps.length > 0 ? ' — the line may be left disconnected' : ''}`,
         }
       }
       steps.push({
@@ -231,8 +278,8 @@ export class LiveExecutor implements RouterActionExecutor {
       steps,
       before: wan,
       detail: ok
-        ? `reconnected ${wan.connType} on stack ${wan.stack} (${steps.map((s) => s.oid).join(' then ')})`
-        : `reconnect did not complete: ${steps.map((s) => `${s.oid}=${s.ok ? 'ok' : (s.errorcode ?? s.httpStatus ?? 'no answer')}`).join(', ')}`,
+        ? `reconnected ${wan.connType} on stack ${wan.stack}, ${selection} (${steps.map((s) => s.oid).join(' then ')})`
+        : `reconnect did not complete (${selection}): ${steps.map((s) => `${s.oid}=${s.ok ? 'ok' : (s.errorcode ?? s.httpStatus ?? 'no answer')}`).join(', ')}`,
     }
   }
 

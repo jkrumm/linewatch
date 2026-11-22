@@ -221,14 +221,20 @@ export class LiveExecutor implements RouterActionExecutor {
     const rows = await this.client.read('DEV2_ADT_WAN', 'gl')
     let wan = parseLiveWan(rows)
     let selection = 'selected by connection status'
-    if (wan === null || wan.stack === null) {
+    if (wan === null) {
       const known = pickKnownWan(rows, this.lastKnownWan())
       if (known.wan === null) return this.refused('reconnect', null, known.reason)
       wan = known.wan
       selection = 'no instance connected — selected by the last known connection (name and stack)'
     }
-    // `pickKnownWan` and the status path both guarantee a stack; this narrows the type.
-    if (wan.stack === null) return this.refused('reconnect', wan, 'the connection has no stack')
+    // A connected instance with no stack is a refusal, never a cue to look elsewhere.
+    if (wan.stack === null) {
+      return this.refused(
+        'reconnect',
+        wan,
+        'the connected WAN instance has no stack — nothing was sent',
+      )
+    }
 
     const plan = wan.connType === null ? undefined : RECONNECT_PLAN[wan.connType]
     if (plan === undefined) {

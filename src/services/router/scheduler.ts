@@ -34,7 +34,7 @@ let client: RouterClient | null = null
 let executor: RouterActionExecutor = new NullExecutor()
 
 /** The newest stored WAN connection, the reconnect's selector when no instance is connected. */
-function lastStoredWan(): KnownWan | null {
+export function lastStoredWan(): KnownWan | null {
   const row = db
     .select({ name: routerWanSample.connName, stack: routerWanSample.stack })
     .from(routerWanSample)

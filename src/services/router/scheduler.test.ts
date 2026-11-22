@@ -8,7 +8,9 @@ import { describe, expect, test } from 'bun:test'
 process.env['LINEWATCH_DB'] = ':memory:'
 process.env['LINEWATCH_TOKEN'] ??= 'test-token-not-the-real-one'
 
-const { pollWithRetry } = await import('./scheduler.js')
+const { pollWithRetry, lastStoredWan } = await import('./scheduler.js')
+const { db } = await import('../../db/client.js')
+const { routerWanSample } = await import('../../db/schema.js')
 
 type Run = Awaited<ReturnType<typeof pollWithRetry>>
 
@@ -73,4 +75,17 @@ describe('pollWithRetry', () => {
       expect(h.sleeps).toEqual([])
     },
   )
+})
+
+describe('lastStoredWan', () => {
+  test('is null on an empty record, then the newest stored connection by name and stack', () => {
+    expect(lastStoredWan()).toBeNull()
+    db.insert(routerWanSample)
+      .values([
+        { ts: 1_000, connName: 'old_profile', stack: '9,0,0,0,0,0' },
+        { ts: 2_000, connName: 'ipoe_ptm_0_0_d', stack: '3,0,0,0,0,0' },
+      ])
+      .run()
+    expect(lastStoredWan()).toEqual({ name: 'ipoe_ptm_0_0_d', stack: '3,0,0,0,0,0' })
+  })
 })

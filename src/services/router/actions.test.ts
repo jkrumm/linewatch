@@ -287,6 +287,18 @@ describe('LiveExecutor.reconnect', () => {
       expect(fake.sent).toEqual([])
     })
 
+    it('refuses a connected instance with no stack instead of falling back', async () => {
+      const noStack = allDown.map((row) => {
+        if (row['name'] === 'pppoe_40_2') return { ...row, connStatusV6: 'Connected', stack: '' }
+        return row
+      })
+      const fake = new FakeClient(noStack)
+      const result = await withKnown(fake, known).reconnect()
+      expect(result.outcome).toBe('refused')
+      expect(result.detail).toContain('no stack')
+      expect(fake.sent).toEqual([])
+    })
+
     it('refuses a matching row whose connType has no reconnect plan', async () => {
       const odd = allDown.map((row) =>
         row['name'] === known.name ? { ...row, connType: 'L2TP' } : row,

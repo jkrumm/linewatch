@@ -47,7 +47,7 @@ describe('the ledger on disk', () => {
     const {
       outageClass: _c,
       gatewayLostAt: _l,
-      gatewayLastSeenAt: _s,
+      gatewayLastLostAt: _s,
       ...oldLadder
     } = emptyLedger().ladder
     writeFileSync(

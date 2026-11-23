@@ -1916,6 +1916,41 @@ describe('replaying the 2026-11-22 outage', () => {
     expect(closedTick?.out.note).toBe('recovered after an action in this ladder')
   })
 
+  test('scattered single-probe gateway drops over a long outage are not a router restart', () => {
+    // One unreachable tick near the start and one near the end: the span between
+    // them is 28 minutes, and none of it was a sustained loss.
+    const drops = new Set([27, 117])
+    // Shadow, so no action fires and none can be credited with the recovery.
+    const policy = { ...DEFAULT_POLICY, armed: false }
+    let current = ledger({ v6: { lastUpTs: START - 60_000, lastCheckedTs: START } })
+    for (let atS = 12; atS <= 900; atS += 15) {
+      const now = START + atS * 1000
+      const lost = drops.has((atS - 12) / 15)
+      const out = decide(
+        armedInput({
+          now,
+          policy,
+          processStartedAt: START - 3_600_000,
+          ledger: current,
+          record: record({
+            newestSampleTs: now - 5_000,
+            wanAnchors: ALL_WAN_DOWN,
+            ongoingWanOutage: { startedAt: START, cycles: 30 },
+          }),
+          self: self({
+            probeTs: now,
+            wanAnchors: ALL_WAN_DOWN,
+            v6: { target: 'v6', received: 0 },
+            gateway: { target: 'gateway', received: lost ? 0 : 5 },
+          }),
+        }),
+      )
+      current = out.ledger
+    }
+    expect(current.ladder.gatewayLostAt ?? null).toBeNull()
+    expect(attribute(current).endedBy).toBe('self')
+  })
+
   test('no action and an unbroken gateway is the line fixing itself', () => {
     // Reconnect refused and nothing else disturbed: nobody ended it but the line.
     const { closedTick } = replay({ manualRestart: false })
@@ -1940,7 +1975,7 @@ describe('attributing a recovery', () => {
     ladder: {
       ...base.ladder,
       gatewayLostAt: 1_000,
-      gatewayLastSeenAt: 1_000 + ms,
+      gatewayLastLostAt: 1_000 + ms,
     },
   })
 

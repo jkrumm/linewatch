@@ -13,7 +13,7 @@
 import type { Ledger, LedgerOutcome } from './watchdog-ladder.js'
 
 /** What the two action routes can answer. Mirrors `ActionResult['outcome']`. */
-export type ActionOutcome = 'executed' | 'failed' | 'not_executed' | 'refused' | 'unknown'
+export type ActionOutcome = LedgerOutcome
 
 /** What the ledger records. Mirrors `LedgerAction['outcome']`. */
 export type RecordedOutcome = LedgerOutcome

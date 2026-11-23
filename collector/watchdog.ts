@@ -77,6 +77,7 @@ import {
 } from './watchdog-ladder.js'
 import {
   actionFault,
+  type ActionOutcome,
   eventKindFor,
   ledgerOutcome,
   markDelay,
@@ -664,7 +665,7 @@ async function notify(
 interface ActionAnswer {
   ok: boolean
   capability: 'live' | 'null'
-  outcome: 'executed' | 'failed' | 'not_executed' | 'refused' | 'unknown'
+  outcome: ActionOutcome
   detail: string
   steps: unknown[]
 }

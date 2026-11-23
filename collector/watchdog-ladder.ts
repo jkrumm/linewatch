@@ -344,7 +344,7 @@ export interface Ledger {
      * reached the line was restarted by someone else.
      */
     gatewayLostAt?: number | null
-    gatewayLastSeenAt?: number | null
+    gatewayLastLostAt?: number | null
   }
   actions: LedgerAction[]
   pending: {
@@ -631,7 +631,7 @@ export function attribute(ledger: Ledger): {
   if (last !== undefined) return { endedBy: last.kind, externalAt: null }
 
   const lostAt = ledger.ladder.gatewayLostAt ?? null
-  const seenAt = ledger.ladder.gatewayLastSeenAt ?? null
+  const seenAt = ledger.ladder.gatewayLastLostAt ?? null
   if (lostAt !== null && seenAt !== null && seenAt - lostAt >= EXTERNAL_MIN_GATEWAY_LOSS_MS) {
     return { endedBy: 'external', externalAt: lostAt }
   }
@@ -1107,7 +1107,7 @@ export function emptyLedger(): Ledger {
       announcedAt: null,
       outageClass: null,
       gatewayLostAt: null,
-      gatewayLastSeenAt: null,
+      gatewayLastLostAt: null,
     },
     actions: [],
     pending: null,
@@ -1209,7 +1209,7 @@ function advance(input: LadderInput, decision: LadderDecision): Ledger {
         announcedAt: null,
         outageClass: null,
         gatewayLostAt: null,
-        gatewayLastSeenAt: null,
+        gatewayLastLostAt: null,
       }
     }
     return next
@@ -1221,14 +1221,29 @@ function advance(input: LadderInput, decision: LadderDecision): Ledger {
     next.ladder.enteredAt = now
     next.ladder.outageClass = decision.outageClass
     next.ladder.gatewayLostAt = null
-    next.ladder.gatewayLastSeenAt = null
+    next.ladder.gatewayLastLostAt = null
   }
 
   // Only inside a ladder: a gateway that drops while nothing is wrong is not
-  // an outage this machine is tracking.
-  if (next.ladder.t0 !== null && gatewayUnreachable(input)) {
-    next.ladder.gatewayLostAt = next.ladder.gatewayLostAt ?? now
-    next.ladder.gatewayLastSeenAt = now
+  // an outage this machine is tracking. `gatewayLostAt` is where the current
+  // unreachable run began, so a reachable tick ends a run that never lasted
+  // long enough to be a restart — scattered single-probe drops over a 30-minute
+  // outage must not add up to one. A run that did last that long is kept for
+  // the rest of the ladder: the router came back, which is the whole signal.
+  if (next.ladder.t0 !== null) {
+    const lostAt = next.ladder.gatewayLostAt ?? null
+    const lastLostAt = next.ladder.gatewayLastLostAt ?? null
+    if (gatewayUnreachable(input)) {
+      next.ladder.gatewayLostAt = lostAt ?? now
+      next.ladder.gatewayLastLostAt = now
+    } else if (
+      lostAt === null ||
+      lastLostAt === null ||
+      lastLostAt - lostAt < EXTERNAL_MIN_GATEWAY_LOSS_MS
+    ) {
+      next.ladder.gatewayLostAt = null
+      next.ladder.gatewayLastLostAt = null
+    }
   }
 
   if (RUNG_RANK[decision.rung] > RUNG_RANK[ledger.ladder.rung]) {
@@ -1339,10 +1354,10 @@ function foldStalePending(input: LadderInput): LadderInput {
  * runner immediately after performing, and it is the only thing that clears
  * `pending`.
  *
- * `not_executed` gives the latch increment back, and that asymmetry is the
- * point: it means the executor read the router and declined — no connected WAN
- * instance, an unrecognised `connType`, the capability switch off — so nothing
- * reached the line. Letting two pre-flight refusals self-disarm the watchdog
+ * `refused` and `not_executed` give the latch increment back, and that
+ * asymmetry is the point: the executor read the router and declined (no
+ * connected WAN instance, an unrecognised `connType` — `refused`) or the
+ * capability switch is off (`not_executed`), so nothing reached the line. Letting two pre-flight refusals self-disarm the watchdog
  * would turn a transient read hiccup into a permanent stand-down needing a
  * human. `failed` and `unknown` both count, because in each of those a verb
  * went out and the state of the line afterwards is not something this process

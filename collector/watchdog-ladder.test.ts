@@ -1916,16 +1916,19 @@ describe('replaying the 2026-11-22 outage', () => {
     expect(closedTick?.out.note).toBe('recovered after an action in this ladder')
   })
 
-  test('scattered single-probe gateway drops over a long outage are not a router restart', () => {
-    // One unreachable tick near the start and one near the end: the span between
-    // them is 28 minutes, and none of it was a sustained loss.
-    const drops = new Set([27, 117])
-    // Shadow, so no action fires and none can be credited with the recovery.
+  /**
+   * Shadow-mode walk over an outage with the gateway read as `reading` per tick
+   * (index 0 is the first tick), so nothing fires and nothing can be credited.
+   */
+  function walkGateway(
+    reading: (index: number) => 'lost' | 'ok' | 'unknown',
+    ticks: number,
+  ): Ledger {
     const policy = { ...DEFAULT_POLICY, armed: false }
     let current = ledger({ v6: { lastUpTs: START - 60_000, lastCheckedTs: START } })
-    for (let atS = 12; atS <= 900; atS += 15) {
-      const now = START + atS * 1000
-      const lost = drops.has((atS - 12) / 15)
+    for (let index = 0; index < ticks; index += 1) {
+      const now = START + (12 + index * 15) * 1000
+      const seen = reading(index)
       const out = decide(
         armedInput({
           now,
@@ -1936,19 +1939,47 @@ describe('replaying the 2026-11-22 outage', () => {
             newestSampleTs: now - 5_000,
             wanAnchors: ALL_WAN_DOWN,
             ongoingWanOutage: { startedAt: START, cycles: 30 },
+            // An unmeasured tick has no gateway reading from either source.
+            gateway:
+              seen === 'unknown' ? null : { target: 'gateway', received: seen === 'lost' ? 0 : 20 },
           }),
           self: self({
             probeTs: now,
-            wanAnchors: ALL_WAN_DOWN,
+            wanAnchors:
+              seen === 'unknown' ? [{ target: 'cloudflare', received: null }] : ALL_WAN_DOWN,
             v6: { target: 'v6', received: 0 },
-            gateway: { target: 'gateway', received: lost ? 0 : 5 },
+            gateway: { target: 'gateway', received: seen === 'lost' ? 0 : 5 },
           }),
         }),
       )
       current = out.ledger
     }
-    expect(current.ladder.gatewayLostAt ?? null).toBeNull()
-    expect(attribute(current).endedBy).toBe('self')
+    return current
+  }
+
+  test('scattered single-probe gateway drops over a long outage are not a router restart', () => {
+    const drops = new Set([3, 40, 110])
+    const final = walkGateway((index) => (drops.has(index) ? 'lost' : 'ok'), 120)
+    expect(final.ladder.externalRestartAt ?? null).toBeNull()
+    expect(attribute(final).endedBy).toBe('self')
+  })
+
+  test('a run that lasted 30 s is remembered, and a later single drop neither moves nor extends it', () => {
+    // Unreachable on ticks 4-6 (30 s from first to last), reachable for 20 minutes, one more drop.
+    const lost = new Set([4, 5, 6, 100])
+    const final = walkGateway((index) => (lost.has(index) ? 'lost' : 'ok'), 110)
+    expect(final.ladder.externalRestartAt).toBe(START + (12 + 4 * 15) * 1000)
+    expect(attribute(final)).toEqual({
+      endedBy: 'external',
+      externalAt: START + (12 + 4 * 15) * 1000,
+    })
+  })
+
+  test('a tick that measured nothing neither ends a run nor extends it', () => {
+    // lost, lost, unmeasured, lost, lost: one 45 s run, not two 15 s ones.
+    const readings = ['lost', 'lost', 'unknown', 'lost', 'lost'] as const
+    const final = walkGateway((index) => readings[index] ?? 'ok', 5)
+    expect(final.ladder.externalRestartAt).toBe(START + 12_000)
   })
 
   test('no action and an unbroken gateway is the line fixing itself', () => {
@@ -1970,23 +2001,16 @@ describe('attributing a recovery', () => {
       announcedAt: null,
     },
   })
-  const withLoss = (ms: number) => ({
-    ...base,
-    ladder: {
-      ...base.ladder,
-      gatewayLostAt: 1_000,
-      gatewayLastLostAt: 1_000 + ms,
-    },
-  })
+  const restarted = { ...base, ladder: { ...base.ladder, externalRestartAt: 1_000 } }
 
-  test('one failed gateway ping is a dropped frame, not a router restart', () => {
-    expect(attribute(withLoss(15_000)).endedBy).toBe('self')
-    expect(attribute(withLoss(30_000)).endedBy).toBe('external')
+  test('a remembered restart is external; without one the line fixed itself', () => {
+    expect(attribute(base).endedBy).toBe('self')
+    expect(attribute(restarted)).toEqual({ endedBy: 'external', externalAt: 1_000 })
   })
 
   test('an action that reached the line outranks a gateway that went away', () => {
     const acted = {
-      ...withLoss(120_000),
+      ...restarted,
       actions: [
         {
           ts: 5,

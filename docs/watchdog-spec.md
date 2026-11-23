@@ -381,7 +381,9 @@ recorded on its own:
 - **Recovery is attributed to an action only when one reached the line** (outcome
   `executed` or `unknown`). With none, a gateway unreachable for ≥30 s inside the ladder
   and then back is recorded as `router restarted outside the watchdog (likely manual)`:
-  an `intervention` with source `external`, dated at the first tick the gateway was lost.
+  an `intervention` with source `external`, dated at the start of the first run of consecutive
+  unreachable ticks that lasted that long. A tick that measured the gateway reachable, or measured
+  nothing, ends a run, so scattered single-probe misses never add up to one.
   Carrier showtime is deliberately not the signal: the ISP re-syncing a wedged line moves
   it too. `external` never opens the human quiet period, because it is an inference and
   not a person saying they are at the box. Anything else is `recovered on its own`.

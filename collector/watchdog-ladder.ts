@@ -467,6 +467,18 @@ function v6Health(input: Pick<LadderInput, 'now' | 'policy' | 'self' | 'ledger'>
 }
 
 /**
+ * The record, or null when it is too old to describe now. One definition for
+ * everything that reads the record, so a stale record is ignored by all of them
+ * or by none.
+ */
+function freshRecord(input: Pick<LadderInput, 'record' | 'policy' | 'now'>): RecordEvidence | null {
+  const { record, policy, now } = input
+  return record !== null && now - record.newestSampleTs <= policy.staleSampleS * 1000
+    ? record
+    : null
+}
+
+/**
  * First match wins. Order is the whole meaning: `off_home_line` outranks every
  * WAN class because a mini measuring a hotspot is not measuring this line, and
  * `local_link_down` outranks them because an unreachable gateway takes every
@@ -476,8 +488,7 @@ export function classify(input: LadderInput): OutageClass {
   const { record, policy, now } = input
   const self = measuredSelf(input.self)
 
-  const recordFresh = record !== null && now - record.newestSampleTs <= policy.staleSampleS * 1000
-  const usableRecord = recordFresh ? record : null
+  const usableRecord = freshRecord(input)
 
   if (usableRecord === null && self === null) return 'no_evidence'
 
@@ -596,15 +607,16 @@ function reachedTheLine(action: LedgerAction): boolean {
 }
 
 /**
- * What this tick says about the gateway: `unreachable`, `reachable`, or
- * `unknown` when nothing measured it. Unknown is neither — a reading with a hole
- * in it must not end a run of misses any more than it may extend one.
+ * What this tick says about the gateway, from the same inputs `classify` uses —
+ * the measured self probe and the *fresh* record — and with the same precedence:
+ * either source reading zero is `unreachable`, as it is for `local_link_down`.
+ * `unknown` is a tick nothing measured.
  */
 function gatewayReading(
-  input: Pick<LadderInput, 'self' | 'record'>,
+  input: Pick<LadderInput, 'self' | 'record' | 'policy' | 'now'>,
 ): 'unreachable' | 'reachable' | 'unknown' {
   const self = measuredSelf(input.self)
-  const record = input.record
+  const record = freshRecord(input)
   const recordGateway = record?.gateway ?? null
   if (
     (self !== null && self.gateway.received === 0) ||
@@ -1194,6 +1206,31 @@ function advance(input: LadderInput, decision: LadderDecision): Ledger {
     next.healthySince = null
   }
 
+  // Which ticks count has to be decided once, before any branch can return
+  // early: a healthy-looking tick inside a ladder is exactly the tick that
+  // proves the gateway came back, and it used to skip this.
+  //
+  // `gatewayLostAt` is where the current run of consecutive unreachable ticks
+  // began. Anything else — a measured reachable tick or one that measured
+  // nothing — ends it, so unmeasured time is never counted as lost time and
+  // scattered single-probe misses never add up to a run. A run that reaches the
+  // minimum is remembered in `externalRestartAt` for the rest of the ladder: the
+  // router went away long enough to have been restarted.
+  if (ledger.ladder.t0 !== null || decision.t0 !== null) {
+    if (gatewayReading(input) === 'unreachable') {
+      const lostAt = next.ladder.gatewayLostAt ?? now
+      next.ladder.gatewayLostAt = lostAt
+      if (
+        (next.ladder.externalRestartAt ?? null) === null &&
+        now - lostAt >= EXTERNAL_MIN_GATEWAY_LOSS_MS
+      ) {
+        next.ladder.externalRestartAt = lostAt
+      }
+    } else {
+      next.ladder.gatewayLostAt = null
+    }
+  }
+
   // A pending action owns the ledger until `recordOutcome` closes it. Advancing
   // anything else here would be writing over a write-ahead entry that has not
   // been resolved, which is the one state the crash reconciliation depends on.
@@ -1231,31 +1268,6 @@ function advance(input: LadderInput, decision: LadderDecision): Ledger {
     next.ladder.outageKey = decision.outageKey
     next.ladder.enteredAt = now
     next.ladder.outageClass = decision.outageClass
-    next.ladder.gatewayLostAt = null
-    next.ladder.externalRestartAt = null
-  }
-
-  // Only inside a ladder: a gateway that drops while nothing is wrong is not
-  // an outage this machine is tracking. `gatewayLostAt` is where the current
-  // unreachable run began, and only a tick that *measured* the gateway reachable
-  // ends it — a tick that observed nothing says nothing. A run that reaches the
-  // minimum is remembered in `externalRestartAt` for the rest of the ladder (the
-  // router went away long enough to have been restarted), and later drops start
-  // fresh runs of their own, so scattered single-probe misses never add up to one.
-  if (next.ladder.t0 !== null) {
-    const reading = gatewayReading(input)
-    if (reading === 'unreachable') {
-      const lostAt = next.ladder.gatewayLostAt ?? now
-      next.ladder.gatewayLostAt = lostAt
-      if (
-        (next.ladder.externalRestartAt ?? null) === null &&
-        now - lostAt >= EXTERNAL_MIN_GATEWAY_LOSS_MS
-      ) {
-        next.ladder.externalRestartAt = lostAt
-      }
-    } else if (reading === 'reachable') {
-      next.ladder.gatewayLostAt = null
-    }
   }
 
   if (RUNG_RANK[decision.rung] > RUNG_RANK[ledger.ladder.rung]) {

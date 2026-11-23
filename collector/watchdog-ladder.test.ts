@@ -1923,33 +1923,52 @@ describe('replaying the 2026-11-22 outage', () => {
   function walkGateway(
     reading: (index: number) => 'lost' | 'ok' | 'unknown',
     ticks: number,
+    options: { wanUpWhenOk?: boolean; staleRecordShowsGatewayDown?: boolean } = {},
   ): Ledger {
     const policy = { ...DEFAULT_POLICY, armed: false }
     let current = ledger({ v6: { lastUpTs: START - 60_000, lastCheckedTs: START } })
     for (let index = 0; index < ticks; index += 1) {
       const now = START + (12 + index * 15) * 1000
       const seen = reading(index)
+      // Opening tick aside, `wanUpWhenOk` makes a reachable gateway come with a line that
+      // reads healthy: the tick that returns early from advance().
+      const lineUp = options.wanUpWhenOk === true && seen === 'ok' && index > 0
+      const stale = options.staleRecordShowsGatewayDown === true
       const out = decide(
         armedInput({
           now,
           policy,
           processStartedAt: START - 3_600_000,
           ledger: current,
-          record: record({
-            newestSampleTs: now - 5_000,
-            wanAnchors: ALL_WAN_DOWN,
-            ongoingWanOutage: { startedAt: START, cycles: 30 },
-            // An unmeasured tick has no gateway reading from either source.
-            gateway:
-              seen === 'unknown' ? null : { target: 'gateway', received: seen === 'lost' ? 0 : 20 },
-          }),
-          self: self({
-            probeTs: now,
-            wanAnchors:
-              seen === 'unknown' ? [{ target: 'cloudflare', received: null }] : ALL_WAN_DOWN,
-            v6: { target: 'v6', received: 0 },
-            gateway: { target: 'gateway', received: seen === 'lost' ? 0 : 5 },
-          }),
+          record: stale
+            ? record({
+                newestSampleTs: now - 200_000,
+                wanAnchors: ALL_WAN_DOWN,
+                ongoingWanOutage: { startedAt: START, cycles: 30 },
+                gateway: { target: 'gateway', received: 0 },
+                ongoingGatewayOutage: { startedAt: START },
+              })
+            : lineUp
+              ? record({ newestSampleTs: now - 5_000 })
+              : record({
+                  newestSampleTs: now - 5_000,
+                  wanAnchors: ALL_WAN_DOWN,
+                  ongoingWanOutage: { startedAt: START, cycles: 30 },
+                  // An unmeasured tick has no gateway reading from either source.
+                  gateway:
+                    seen === 'unknown'
+                      ? null
+                      : { target: 'gateway', received: seen === 'lost' ? 0 : 20 },
+                }),
+          self: lineUp
+            ? self({ probeTs: now })
+            : self({
+                probeTs: now,
+                wanAnchors:
+                  seen === 'unknown' ? [{ target: 'cloudflare', received: null }] : ALL_WAN_DOWN,
+                v6: { target: 'v6', received: 0 },
+                gateway: { target: 'gateway', received: seen === 'lost' ? 0 : 5 },
+              }),
         }),
       )
       current = out.ledger
@@ -1975,11 +1994,30 @@ describe('replaying the 2026-11-22 outage', () => {
     })
   })
 
-  test('a tick that measured nothing neither ends a run nor extends it', () => {
-    // lost, lost, unmeasured, lost, lost: one 45 s run, not two 15 s ones.
+  test('a tick that measured nothing ends the run, so unmeasured time is never counted as lost', () => {
+    // lost, lost, unmeasured, lost, lost: two 15 s runs, not one 45 s run.
     const readings = ['lost', 'lost', 'unknown', 'lost', 'lost'] as const
     const final = walkGateway((index) => readings[index] ?? 'ok', 5)
-    expect(final.ladder.externalRestartAt).toBe(START + 12_000)
+    expect(final.ladder.externalRestartAt ?? null).toBeNull()
+    // Three consecutive observed misses do qualify.
+    const three = ['lost', 'lost', 'lost'] as const
+    expect(walkGateway((index) => three[index] ?? 'ok', 3).ladder.externalRestartAt).toBe(
+      START + 12_000,
+    )
+  })
+
+  test('a gateway that reads reachable while the line looks healthy ends the run too', () => {
+    // The healthy-looking tick returns early from advance(); it still has to end the run.
+    const final = walkGateway((index) => (index === 0 || index === 2 ? 'lost' : 'ok'), 3, {
+      wanUpWhenOk: true,
+    })
+    expect(final.ladder.externalRestartAt ?? null).toBeNull()
+    expect(final.ladder.gatewayLostAt).toBe(START + (12 + 2 * 15) * 1000)
+  })
+
+  test('a stale record is not evidence about the gateway', () => {
+    const final = walkGateway(() => 'ok', 6, { staleRecordShowsGatewayDown: true })
+    expect(final.ladder.externalRestartAt ?? null).toBeNull()
   })
 
   test('no action and an unbroken gateway is the line fixing itself', () => {

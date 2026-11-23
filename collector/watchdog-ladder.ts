@@ -468,8 +468,9 @@ function v6Health(input: Pick<LadderInput, 'now' | 'policy' | 'self' | 'ledger'>
 
 /**
  * The record, or null when it is too old to describe now. One definition for
- * everything that reads the record, so a stale record is ignored by all of them
- * or by none.
+ * `classify`, the gateway reading and the shared blockers, so a stale record is
+ * ignored by all of them or by none. (`recordedOutageStart` reads the raw record
+ * on purpose: it dates T0, which a stale row still describes correctly.)
  */
 function freshRecord(input: Pick<LadderInput, 'record' | 'policy' | 'now'>): RecordEvidence | null {
   const { record, policy, now } = input
@@ -610,6 +611,9 @@ function reachedTheLine(action: LedgerAction): boolean {
  * What this tick says about the gateway, from the same inputs `classify` uses —
  * the measured self probe and the *fresh* record — and with the same precedence:
  * either source reading zero is `unreachable`, as it is for `local_link_down`.
+ * The record's open gateway-outage row is deliberately not consulted: `classify`
+ * does not, and a row that outlives the gateway's return must not hold a run open
+ * past a tick that measured it reachable.
  * `unknown` is a tick nothing measured.
  */
 function gatewayReading(
@@ -620,8 +624,7 @@ function gatewayReading(
   const recordGateway = record?.gateway ?? null
   if (
     (self !== null && self.gateway.received === 0) ||
-    (recordGateway !== null && recordGateway.received === 0) ||
-    (record !== null && record.ongoingGatewayOutage !== null)
+    (recordGateway !== null && recordGateway.received === 0)
   ) {
     return 'unreachable'
   }
@@ -750,7 +753,7 @@ function sharedBlockers(input: LadderInput, outageClass: OutageClass): string[] 
   if (self !== null && record !== null && self.gatewayAddr !== record.gatewayAddr)
     blocked.push('gateway_addr_mismatch')
 
-  const recordFresh = record !== null && now - record.newestSampleTs <= policy.staleSampleS * 1000
+  const recordFresh = freshRecord(input) !== null
   if (!recordFresh && self === null) blocked.push('no_evidence')
 
   // "No recorded transition" means none above the 1 Hz sampling resolution was

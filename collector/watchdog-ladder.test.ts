@@ -1923,7 +1923,11 @@ describe('replaying the 2026-11-22 outage', () => {
   function walkGateway(
     reading: (index: number) => 'lost' | 'ok' | 'unknown',
     ticks: number,
-    options: { wanUpWhenOk?: boolean; staleRecordShowsGatewayDown?: boolean } = {},
+    options: {
+      wanUpWhenOk?: boolean
+      staleRecordShowsGatewayDown?: boolean
+      lingeringOutageRow?: boolean
+    } = {},
   ): Ledger {
     const policy = { ...DEFAULT_POLICY, armed: false }
     let current = ledger({ v6: { lastUpTs: START - 60_000, lastCheckedTs: START } })
@@ -1959,6 +1963,11 @@ describe('replaying the 2026-11-22 outage', () => {
                     seen === 'unknown'
                       ? null
                       : { target: 'gateway', received: seen === 'lost' ? 0 : 20 },
+                  // The app's own gateway-outage row can outlive the gateway's return.
+                  ongoingGatewayOutage:
+                    options.lingeringOutageRow === true && seen !== 'lost'
+                      ? { startedAt: START }
+                      : null,
                 }),
           self: lineUp
             ? self({ probeTs: now })
@@ -2013,6 +2022,12 @@ describe('replaying the 2026-11-22 outage', () => {
     })
     expect(final.ladder.externalRestartAt ?? null).toBeNull()
     expect(final.ladder.gatewayLostAt).toBe(START + (12 + 2 * 15) * 1000)
+  })
+
+  test('an open outage row does not hold a run open past a tick that measured the gateway up', () => {
+    const readings = ['lost', 'lost', 'ok', 'lost'] as const
+    const final = walkGateway((index) => readings[index] ?? 'ok', 4, { lingeringOutageRow: true })
+    expect(final.ladder.externalRestartAt ?? null).toBeNull()
   })
 
   test('a stale record is not evidence about the gateway', () => {

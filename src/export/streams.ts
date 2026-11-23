@@ -1,4 +1,4 @@
-import { and, asc, gt, inArray, isNotNull, lte, max, eq } from 'drizzle-orm'
+import { and, asc, eq, gt, inArray, isNotNull, lte, max, or, sql } from 'drizzle-orm'
 import type { SQL } from 'drizzle-orm'
 import type { SQLiteColumn, SQLiteTable } from 'drizzle-orm/sqlite-core'
 import type { BunSQLiteDatabase } from 'drizzle-orm/bun-sqlite'
@@ -404,7 +404,7 @@ const outageClose = makeStream({
   },
 })
 
-// --- event (interventions only) -------------------------------------------------
+// --- event (interventions, and the watchdog's one-row outage summary) -----------
 
 function parseDetail(text: string): Record<string, unknown> {
   try {
@@ -417,21 +417,67 @@ function parseDetail(text: string): Record<string, unknown> {
   }
 }
 
+/**
+ * The summary is a `note`, because nothing touched the line, so it rides this
+ * stream instead of getting its own: a new stream starts with an unfinished
+ * backfill and retention refuses to run until one is made. Its ids sit above the
+ * cursor, so the live tail picks it up with no replay. Every other note stays in
+ * SQLite — they are per-tick transitions, and exporting them would put the
+ * watchdog's whole chatter into a 30-day log.
+ */
+const SUMMARY_ACTION = 'watchdog_outage_summary'
+const exported = or(
+  eq(event.kind, 'intervention'),
+  and(
+    eq(event.kind, 'note'),
+    sql`json_valid(${event.detail}) AND json_extract(${event.detail}, '$.action') = ${SUMMARY_ACTION}`,
+  ),
+)
+
 const interventions = makeStream({
   name: 'intervention',
   read: (db, args) =>
     db
       .select()
       .from(event)
-      .where(and(eq(event.kind, 'intervention'), inRange(event.id, args)))
+      .where(and(exported, inRange(event.id, args)))
       .orderBy(asc(event.id))
       .limit(args.limit)
       .all(),
   key: (row) => row.id,
-  head: (db) => maxOf(db, event, event.id, eq(event.kind, 'intervention')),
+  head: (db) => maxOf(db, event, event.id, exported),
   map(rows, _db, _ctx, batch) {
     for (const row of rows) {
       const detail = parseDetail(row.detail)
+      if (row.kind === 'note') {
+        const count = (key: string): number | null => {
+          const value = detail[key]
+          return typeof value === 'number' && Number.isFinite(value) ? value : null
+        }
+        const text = (key: string): string | null => {
+          const value = detail[key]
+          return typeof value === 'string' ? clip(value, 100) : null
+        }
+        const duration = count('durationS')
+        batch.logs.push({
+          name: 'line.watchdog.outage_summary',
+          tsMs: row.ts,
+          severity: 'WARN',
+          attrs: {
+            outage_class: text('outageClass'),
+            ended_by: text('endedBy'),
+            duration_s: duration,
+            t0_ms: count('t0'),
+            refused: count('refused'),
+            rungs: clip(JSON.stringify(detail['rungs'] ?? []), 2000),
+            note: clip(typeof detail['note'] === 'string' ? detail['note'] : '', 500),
+          },
+        })
+        gauge(batch, 'line.watchdog.outage.duration', 's', row.ts, duration, {
+          ended_by: text('endedBy'),
+        })
+        continue
+      }
       const text = (key: string, limit: number): string | null => {
         const value = detail[key]
         return typeof value === 'string' ? clip(value, limit) : null

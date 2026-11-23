@@ -6,6 +6,8 @@ Read this before changing `src/export/`, `src/services/retention.ts` or `scripts
 - **The export reads SQLite back; no write path calls it.** The probe ingest, the outage detector, the router poller and the
   speed-test runner know nothing of it, because the watchdog's API sits on those writes. Do not add an `export(...)` call
   next to an insert "to make it faster": a hook inside the ingest transaction exports rows that roll back and can fail the write.
+- **The watchdog's `watchdog_outage_summary` note rides the `intervention` stream** (`line.watchdog.outage_summary`), not a stream of its own:
+  a new stream starts with an unfinished backfill, and retention refuses to run until one is made. Every other note stays in SQLite.
 - **The cursor moves only after the agent accepted the batch**, and lives in the `export_cursor` table so `make db-restore`
   rewinds it with the rows. Delivery is at-least-once; a stream's key is its `id`, except `outage_close`, which keys on `ended_at`
   because outages of different scopes close out of id order.

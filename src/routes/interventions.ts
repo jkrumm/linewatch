@@ -32,10 +32,10 @@ import { hasValidBearer } from '../lib/auth.js'
 const InterventionBody = z.object({
   action: z.string().min(1).describe('What was done, e.g. "power-cycled the router"'),
   source: z
-    .enum(['manual', 'watchdog'])
+    .enum(['manual', 'watchdog', 'external'])
     .default('manual')
     .describe(
-      'Who did it. The whole point of the route: a machine action recorded as a human one destroys the attribution it exists to preserve.',
+      'Who did it. The whole point of the route: a machine action recorded as a human one destroys the attribution it exists to preserve. `external` is the watchdog recording a restart it inferred but did not cause and cannot attribute to a person.',
     ),
   kind: z
     .enum(['intervention', 'note'])

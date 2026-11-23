@@ -73,6 +73,18 @@ describe('POST /api/interventions', () => {
     })
   })
 
+  test('records an inferred outside restart as external, never as a person or as the watchdog', async () => {
+    await post({
+      source: 'external',
+      action: 'router_restart_external',
+      detail: { source: 'manual' },
+    })
+
+    const [row] = rows()
+    expect(row?.kind).toBe('intervention')
+    expect(row?.detail).toMatchObject({ source: 'external', action: 'router_restart_external' })
+  })
+
   test('records a machine action as one, with its evidence', async () => {
     await post({
       source: 'watchdog',

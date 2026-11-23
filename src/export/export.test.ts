@@ -344,6 +344,52 @@ describe('the live tail', () => {
   })
 })
 
+describe('the watchdog outage summary', () => {
+  test('is the one note that leaves the event table, as a log and a duration gauge', async () => {
+    const { db, sink, exporter } = setup()
+    exporter.ensureCursors()
+    db.insert(event)
+      .values({
+        ts: T0,
+        kind: 'note',
+        detail: JSON.stringify({ source: 'watchdog', action: 'watchdog_blocked' }),
+      })
+      .run()
+    db.insert(event)
+      .values({
+        ts: T0 + 10,
+        kind: 'note',
+        detail: JSON.stringify({
+          source: 'watchdog',
+          action: 'watchdog_outage_summary',
+          outageClass: 'full_wan_down',
+          endedBy: 'external',
+          durationS: 1962,
+          t0: T0 - 1_962_000,
+          refused: 1,
+          rungs: [{ rung: 'reconnect', ts: T0, atS: 192, outcome: 'refused' }],
+        }),
+      })
+      .run()
+    await exporter.tick()
+
+    expect(sink.logs).toHaveLength(1)
+    expect(sink.logs[0]).toMatchObject({
+      name: 'line.watchdog.outage_summary',
+      tsMs: T0 + 10,
+      attrs: { outage_class: 'full_wan_down', ended_by: 'external', duration_s: 1962, refused: 1 },
+    })
+    expect(String(sink.logs[0]?.attrs['rungs'])).toContain('"outcome":"refused"')
+    expect(sink.points).toEqual([
+      expect.objectContaining({
+        name: 'line.watchdog.outage.duration',
+        value: 1962,
+        attrs: { ended_by: 'external' },
+      }),
+    ])
+  })
+})
+
 describe('the backfill', () => {
   test('replays exactly what the live tail did not, once, and is resumable', async () => {
     const { db, sink, exporter } = setup()

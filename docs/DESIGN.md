@@ -457,10 +457,11 @@ Resource attributes on every point: `service.name=linewatch-app`, `service.names
 | `wifi_sample` | `line.wifi.rssi`, `.noise` (dBm), `.tx_rate` (Mbit/s), `.rtt.median` (ms), `.loss` (%) | `iface`, `band`, `status` |
 | `speed_test` (ok) | `line.speedtest.download`, `.upload` (Mbit/s), `.ping`, `.jitter`, `.loaded_latency` (ms, `direction`), `.packet_loss` (%) | `backend` |
 | `outage` | log `line.outage.opened` (at start), log `line.outage.closed` (at end) and gauge `line.outage.duration` (s) | `scope`, `evidence`, `duration_s`, `cycles` |
-| `event` kind `intervention` | log `line.intervention` | `source`, `action`, `outcome`, `note`, `detail` (JSON, ≤ 4 KB) |
+| `event` kind `intervention` | log `line.intervention` | `source` (`manual`, `watchdog`, `api`, `external`), `action`, `outcome`, `note`, `detail` (JSON, ≤ 4 KB) |
+| `event` note `watchdog_outage_summary` | log `line.watchdog.outage_summary`, gauge `line.watchdog.outage.duration` (s) | `outage_class`, `ended_by` (`self`/`reconnect`/`reboot`/`external`), `duration_s`, `t0_ms`, `refused`, `rungs` (JSON) |
 | `speed_test` (failed) | log `line.speedtest.failed` | `backend`, `error`, `duration_s` |
 
-ClickStack keeps metrics 400 days and logs 30: an outage must outlive its log, which is why the close also goes out as the duration gauge. Not exported: `probe_cycle`'s NIC error and byte counters, `router_eth_port`, `router_host`, and the other `event` kinds; all of those stay in SQLite (the last three indefinitely, the counters until retention).
+ClickStack keeps metrics 400 days and logs 30: an outage must outlive its log, which is why the close also goes out as the duration gauge. Not exported: `probe_cycle`'s NIC error and byte counters, `router_eth_port`, `router_host`, and the other `event` kinds and notes; all of those stay in SQLite (the last three indefinitely, the counters until retention).
 
 **Backfill.** `make otlp-backfill` replays the history that existed when the export first ran (`export_cursor.start`) with the original timestamps, 500 rows per batch and 250 ms apart (`LINEWATCH_BACKFILL_DELAY_MS`). The live tail owns everything after that line, so no row is sent twice. It is resumable per batch and skips a finished stream. Run once, on the mini, after the export is live.
 

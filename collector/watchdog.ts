@@ -70,11 +70,13 @@ import {
   type CarrierEvidence,
   type LadderOutcome,
   type Ledger,
+  type OutageSummary,
   type RecordEvidence,
   type SelfEvidence,
   type WatchdogPolicy,
 } from './watchdog-ladder.js'
 import {
+  actionFault,
   eventKindFor,
   ledgerOutcome,
   markDelay,
@@ -227,8 +229,16 @@ interface StatusPayload {
   up: boolean
   newestSampleTs: number | null
   speedtestRunning: boolean
-  ongoingOutages: Array<{ scope: 'gateway' | 'wan'; startedAt: number; cycles: number }>
-  lastSamples: Array<{ target: string; scope: 'gateway' | 'wan'; received: number }>
+  ongoingOutages: Array<{
+    scope: 'gateway' | 'wan'
+    startedAt: number
+    cycles: number
+  }>
+  lastSamples: Array<{
+    target: string
+    scope: 'gateway' | 'wan'
+    received: number
+  }>
   vantage: {
     onHomeLine: boolean | null
     gatewayAddr: string | null
@@ -353,7 +363,10 @@ interface RouterPayload {
  * the one event this exists for. Silence here is not evidence of anything, and
  * a failed read returns null rather than a pessimistic reading.
  */
-async function fetchCarrier(): Promise<{ carrier: CarrierEvidence | null; writeEnabled: boolean }> {
+async function fetchCarrier(): Promise<{
+  carrier: CarrierEvidence | null
+  writeEnabled: boolean
+}> {
   const router = await getJson<RouterPayload>('/api/router')
   if (router === null) return { carrier: null, writeEnabled: false }
   const writeEnabled = router.writeEnabled
@@ -386,8 +399,11 @@ async function fetchLastHumanIntervention(now: number): Promise<number | null> {
   const from = now - policy.humanQuietS * 1000
   const payload = await getJson<EventsPayload>(`/api/events?kind=intervention&from=${from}`)
   if (payload === null) return null
+  // `external` is the watchdog's own inference ("a router restart none of our
+  // actions explain"), not a person saying they are at the box, so it must not
+  // open a quiet period: the gates stay exactly as they were.
   const human = payload.events
-    .filter((entry) => entry.source !== 'watchdog')
+    .filter((entry) => entry.source !== 'watchdog' && entry.source !== 'external')
     .map((entry) => entry.ts)
   return human.length === 0 ? null : Math.max(...human)
 }
@@ -398,6 +414,8 @@ async function fetchLastHumanIntervention(now: number): Promise<number | null> {
 
 interface SpooledEvent {
   ts: number
+  /** Who is speaking. Absent means the watchdog; `external` marks an inferred outside intervention. */
+  source?: 'watchdog' | 'external'
   action: string
   kind: 'intervention' | 'note'
   note: string
@@ -500,8 +518,10 @@ async function postEvent(entry: SpooledEvent): Promise<boolean> {
         // Never `manual`. A machine action recorded as a human one destroys the
         // attribution the route exists to preserve — six months of "does
         // rebooting actually fix this?" is unanswerable if three real human
-        // interventions and forty machine ones are indistinguishable.
-        source: 'watchdog',
+        // interventions and forty machine ones are indistinguishable. A restart
+        // the ladder can only infer is `external`: neither ours nor confirmed
+        // as a person's.
+        source: entry.source ?? 'watchdog',
         kind: entry.kind,
         note: entry.note,
         detail: entry.detail,
@@ -587,9 +607,16 @@ async function notify(
   if (!force && now - lastNotifyAt < config.notifyIntervalMs) return
   lastNotifyAt = now
 
+  // From the ledger, so it holds for as long as the ladder is open and survives
+  // a restart: a refused rung is down until something answers it.
+  const fault = actionFault(ledger)
   const notification: Notification = {
     ts: now,
-    status: notificationStatus(outcome),
+    status: notificationStatus({
+      state: outcome.state,
+      action: outcome.action,
+      fault,
+    }),
     msg: notificationMessage({
       state: outcome.state,
       outageClass: outcome.outageClass,
@@ -597,6 +624,7 @@ async function notify(
       note: outcome.note,
       armed: policy.armed,
       consecutiveActions: ledger.consecutiveActions,
+      fault,
     }),
   }
 
@@ -760,6 +788,10 @@ async function tick(): Promise<void> {
   // as a trusted, full-budget ledger on the next tick.
   if (outcome.persist) writeLedger(ledger, config.ledgerPath)
 
+  // After the ledger is durable: the ladder is already torn down, so this is the
+  // only tick that can write the account of the outage.
+  if (outcome.closed !== null) recordClosure(outcome.closed)
+
   if (outcome.action === 'reconnect' || outcome.action === 'reboot') {
     const answer = await perform(outcome.action)
     const resolved = ledgerOutcome(answer)
@@ -768,6 +800,7 @@ async function tick(): Promise<void> {
       kind: outcome.action,
       outageKey: outcome.outageKey ?? `wan:${now}`,
       outcome: resolved,
+      ...(answer?.detail ? { detail: answer.detail.slice(0, 160) } : {}),
     })
     writeLedger(ledger, config.ledgerPath)
 
@@ -776,7 +809,9 @@ async function tick(): Promise<void> {
       action: `watchdog_${outcome.action}`,
       // Only something that reached the line is an intervention. A refusal is a
       // note, or the dashboard would credit the watchdog for a line that fixed
-      // itself — the same lie, told about a machine.
+      // itself — the same lie, told about a machine. Its outcome stays
+      // `refused` in the detail, apart from `not_executed`: one is a choice,
+      // the other a defect during a real outage.
       kind: eventKindFor(resolved),
       note: answer?.detail ?? 'no answer from the action route',
       detail: {
@@ -801,6 +836,53 @@ async function tick(): Promise<void> {
   )
   await drainEvents()
   await requestPollIfWaiting(outcome, now)
+}
+
+/**
+ * The one-row account of an outage, plus — when the only thing that explains the
+ * recovery is a router restart none of our actions caused — the intervention
+ * that restart was. Both are recorded on the tick the ladder closes.
+ */
+function recordClosure(summary: OutageSummary): void {
+  const refused = summary.rungs.filter((rung) => rung.outcome === 'refused').length
+  const ended: Record<OutageSummary['endedBy'], string> = {
+    self: 'it recovered on its own',
+    reconnect: 'it recovered after the reconnect',
+    reboot: 'it recovered after the reboot',
+    external: 'the router was restarted outside the watchdog (likely manual)',
+  }
+  record({
+    ts: summary.endedAt,
+    action: 'watchdog_outage_summary',
+    kind: 'note',
+    note: `${summary.outageClass ?? 'outage'} lasted ${summary.durationS}s; ${ended[summary.endedBy]}${
+      refused > 0 ? `; ${refused} rung(s) refused` : ''
+    }`,
+    detail: {
+      outageKey: summary.outageKey,
+      outageClass: summary.outageClass,
+      t0: summary.t0,
+      endedAt: summary.endedAt,
+      durationS: summary.durationS,
+      endedBy: summary.endedBy,
+      refused,
+      rungs: summary.rungs,
+    },
+  })
+
+  if (summary.endedBy !== 'external' || summary.externalAt === null) return
+  record({
+    ts: summary.externalAt,
+    source: 'external',
+    action: 'router_restart_external',
+    kind: 'intervention',
+    note: 'router restarted outside the watchdog (likely manual)',
+    detail: {
+      outageKey: summary.outageKey,
+      evidence:
+        'gateway unreachable inside the ladder, then back with no action of ours reaching the line',
+    },
+  })
 }
 
 let lastPollRequestedAt: number | null = null

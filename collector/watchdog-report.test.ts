@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  actionFault,
   eventKindFor,
   ledgerOutcome,
   markDelay,
@@ -15,8 +16,10 @@ describe('what an attempt costs the latch', () => {
    * strict and two pre-flight refusals self-disarm a watchdog that never sent a
    * verb; too loose and a reboot whose reply never came is forgotten.
    */
-  test('nothing that was refused or suppressed counts', () => {
-    expect(ledgerOutcome({ outcome: 'refused' })).toBe('not_executed')
+  test('nothing that was refused or suppressed counts, and the two stay distinguishable', () => {
+    // A refusal is a defect during a real outage; `not_executed` is a switch we
+    // set. One value for both is what hid the 2026-11-22 refusal.
+    expect(ledgerOutcome({ outcome: 'refused' })).toBe('refused')
     expect(ledgerOutcome({ outcome: 'not_executed' })).toBe('not_executed')
   })
 
@@ -33,6 +36,7 @@ describe('what an attempt costs the latch', () => {
 
   test('only what reached the line is recorded as an intervention', () => {
     expect(eventKindFor('not_executed')).toBe('note')
+    expect(eventKindFor('refused')).toBe('note')
     expect(eventKindFor('executed')).toBe('intervention')
     expect(eventKindFor('failed')).toBe('intervention')
     // A reboot with no acknowledgement is still a reboot. Recording it as a
@@ -93,6 +97,26 @@ describe('what turns the watchdog monitor red', () => {
     expect(notificationStatus({ ...subject, state: 'armed' })).toBe('up')
   })
 
+  test('a refused or failed rung in the open ladder is down, and the message leads with why', () => {
+    const fault = {
+      kind: 'reconnect',
+      outcome: 'refused',
+      detail: 'no connected WAN instance',
+    } as const
+    expect(
+      notificationStatus({
+        ...subject,
+        action: 'reconnect',
+        state: 'armed',
+        fault,
+      }),
+    ).toBe('down')
+    expect(notificationMessage({ ...subject, fault, note: 'x' })).toStartWith(
+      'reconnect refused: no connected WAN instance · blocked',
+    )
+    expect(notificationStatus({ ...subject, fault: null })).toBe('up')
+  })
+
   test('the message leads with the state and names the mode', () => {
     expect(notificationMessage({ ...subject, note: 'observing' })).toBe(
       'blocked · full_wan_down · armed · observing',
@@ -110,5 +134,71 @@ describe('what turns the watchdog monitor red', () => {
 
   test('a long note is truncated rather than allowed to be dropped by Kuma', () => {
     expect(notificationMessage({ ...subject, note: 'x'.repeat(500) })).toHaveLength(240)
+  })
+})
+
+describe('the fault the open ladder carries', () => {
+  const open = {
+    ladder: {
+      outageKey: 'wan:1',
+      t0: 1,
+      rung: 'reconnect' as const,
+      enteredAt: 1,
+      settleUntil: null,
+      announcedAt: null,
+    },
+    actions: [] as Array<{
+      ts: number
+      kind: 'reconnect' | 'reboot'
+      outageKey: string
+      outcome: 'executed' | 'failed' | 'not_executed' | 'refused' | 'unknown'
+    }>,
+  }
+
+  test('the latest action decides, so a rung that went out answers an earlier refusal', () => {
+    const refused = {
+      ts: 5,
+      kind: 'reconnect' as const,
+      outageKey: 'wan:1',
+      outcome: 'refused' as const,
+    }
+    expect(actionFault({ ...open, actions: [refused] })).toEqual({
+      kind: 'reconnect',
+      outcome: 'refused',
+      detail: null,
+    })
+    const reboot = {
+      ts: 9,
+      kind: 'reboot' as const,
+      outageKey: 'wan:1',
+      outcome: 'executed' as const,
+    }
+    expect(actionFault({ ...open, actions: [refused, reboot] })).toBeNull()
+  })
+
+  test('a switch that is off is a choice, not a fault', () => {
+    const off = {
+      ts: 5,
+      kind: 'reconnect' as const,
+      outageKey: 'wan:1',
+      outcome: 'not_executed' as const,
+    }
+    expect(actionFault({ ...open, actions: [off] })).toBeNull()
+  })
+
+  test('nothing is carried once the ladder has closed or for another outage', () => {
+    const refused = {
+      ts: 5,
+      kind: 'reconnect' as const,
+      outageKey: 'wan:1',
+      outcome: 'refused' as const,
+    }
+    expect(
+      actionFault({
+        ladder: { ...open.ladder, t0: null, outageKey: null },
+        actions: [refused],
+      }),
+    ).toBeNull()
+    expect(actionFault({ ...open, actions: [{ ...refused, outageKey: 'wan:0' }] })).toBeNull()
   })
 })

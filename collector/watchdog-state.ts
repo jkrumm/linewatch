@@ -119,7 +119,10 @@ export function readLedger(path: string = DEFAULT_LEDGER_PATH): LoadedLedger {
     }
   }
 
-  return { ledger: parsed, trusted: true, reason: null }
+  // Fields added after the first ledger was written read as absent, never as a
+  // reason to distrust the file: the budgets and the latch are all intact.
+  const ladder = { ...emptyLedger().ladder, ...parsed.ladder }
+  return { ledger: { ...parsed, ladder }, trusted: true, reason: null }
 }
 
 /**

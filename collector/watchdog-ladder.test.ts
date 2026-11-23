@@ -1,9 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 import {
+  attribute,
   classify,
   decide,
   DEFAULT_POLICY,
   recordOutcome,
+  type LadderOutcome,
   type CarrierEvidence,
   type LadderInput,
   type Ledger,
@@ -11,6 +13,12 @@ import {
   type SelfEvidence,
   type WatchdogPolicy,
 } from './watchdog-ladder.js'
+import {
+  actionFault,
+  ledgerOutcome,
+  notificationMessage,
+  notificationStatus,
+} from './watchdog-report.js'
 
 /**
  * Table-driven over the pure decision, which is the only place this system has
@@ -1736,5 +1744,233 @@ describe('the windows that hold a rung shut', () => {
     // One action is nowhere near the six-per-day cap, so a test that could not
     // tell the two limits apart would pass with either one deleted.
     expect(out.blockedBy).not.toContain('reconnect_rate_limit')
+  })
+})
+
+/**
+ * The 2026-11-22 outage, replayed through the real decision loop.
+ *
+ * 17:46 the WAN went away with the gateway clean. At 180 s the reconnect was
+ * refused ("no connected WAN instance"); the reboot rung stayed blocked; the
+ * ladder escalated at 900 s; and at about 1700 s the owner power-cycled the
+ * router by hand — the gateway vanished for ~130 s, then everything came back at
+ * 1962 s. Nothing the watchdog did reached the line, and the record said it had
+ * recovered "after an action".
+ */
+describe('replaying the 2026-11-22 outage', () => {
+  const START = Date.UTC(2026, 10, 22, 17, 46, 10)
+  const REFUSAL = 'the router reports no connected WAN instance — nothing was sent'
+
+  interface Replay {
+    ledger: Ledger
+    ticks: Array<{ atS: number; out: LadderOutcome; ledger: Ledger }>
+    refusalTick: { atS: number; out: LadderOutcome; ledger: Ledger } | null
+    closedTick: { atS: number; out: LadderOutcome } | null
+  }
+
+  function replay(over: { refuse?: boolean; manualRestart?: boolean } = {}): Replay {
+    const refuse = over.refuse ?? true
+    const manualRestart = over.manualRestart ?? true
+    let current = ledger({
+      v6: { lastUpTs: START - 60_000, lastCheckedTs: START },
+    })
+    const result: Replay = {
+      ledger: current,
+      ticks: [],
+      refusalTick: null,
+      closedTick: null,
+    }
+
+    // Ticks 15 s apart, offset so one lands exactly on 1962 s.
+    for (let atS = 12; atS <= 2100; atS += 15) {
+      const now = START + atS * 1000
+      const healthy = atS >= 1962
+      const gatewayLost = manualRestart && atS >= 1700 && atS < 1830
+      const wan = healthy ? undefined : ALL_WAN_DOWN
+      const gateway = { target: 'gateway', received: gatewayLost ? 0 : 5 }
+      const out = decide(
+        armedInput({
+          now,
+          processStartedAt: START - 3_600_000,
+          carrier: null,
+          ledger: current,
+          record: record({
+            newestSampleTs: now - 5_000,
+            ...(wan === undefined
+              ? {}
+              : {
+                  wanAnchors: wan,
+                  ongoingWanOutage: {
+                    startedAt: START,
+                    cycles: Math.floor(atS / 30),
+                  },
+                }),
+            gateway: { target: 'gateway', received: gatewayLost ? 0 : 20 },
+            ongoingGatewayOutage: gatewayLost ? { startedAt: START + 1700_000 } : null,
+          }),
+          self: self({
+            probeTs: now,
+            gateway,
+            ...(wan === undefined ? {} : { wanAnchors: wan, v6: { target: 'v6', received: 0 } }),
+          }),
+        }),
+      )
+      current = out.ledger
+
+      if (out.action === 'reconnect' || out.action === 'reboot') {
+        const answer = {
+          outcome: refuse ? ('refused' as const) : ('executed' as const),
+        }
+        current = recordOutcome(current, {
+          ts: now,
+          kind: out.action,
+          outageKey: out.outageKey ?? 'x',
+          outcome: ledgerOutcome(answer),
+          ...(refuse ? { detail: REFUSAL } : {}),
+        })
+        if (result.refusalTick === null) result.refusalTick = { atS, out, ledger: current }
+      }
+      if (out.closed !== null && result.closedTick === null) result.closedTick = { atS, out }
+      result.ticks.push({ atS, out, ledger: current })
+    }
+    result.ledger = current
+    return result
+  }
+
+  test('the reconnect is recorded as refused, not as something we chose not to do', () => {
+    const { refusalTick } = replay()
+    expect(refusalTick?.out.action).toBe('reconnect')
+    // The first tick past 180 s of the outage.
+    expect(refusalTick?.atS).toBe(192)
+    expect(refusalTick?.ledger.actions[0]).toMatchObject({
+      kind: 'reconnect',
+      outcome: 'refused',
+    })
+    // Nothing reached the line, so the latch increment comes back.
+    expect(refusalTick?.ledger.consecutiveActions).toBe(0)
+  })
+
+  test('an alert goes out at the refusal tick, naming the reason, and holds until it is answered', () => {
+    const { refusalTick, ticks } = replay()
+    const fault = actionFault(refusalTick!.ledger)
+    expect(notificationStatus({ state: 'armed', action: 'reconnect', fault })).toBe('down')
+    expect(
+      notificationMessage({
+        state: refusalTick!.out.state,
+        outageClass: refusalTick!.out.outageClass,
+        action: refusalTick!.out.action,
+        note: refusalTick!.out.note,
+        armed: true,
+        consecutiveActions: 0,
+        fault,
+      }),
+    ).toContain('reconnect refused: ' + REFUSAL)
+    // Every later tick, read from the ledger it left behind, still says down until the ladder closes.
+    const open = ticks.filter(
+      (tick) => tick.atS >= 192 && tick.out.closed === null && tick.out.ledger.ladder.t0 !== null,
+    )
+    expect(open.length).toBeGreaterThan(100)
+    for (const tick of open) {
+      expect(
+        notificationStatus({
+          state: tick.out.state,
+          action: tick.out.action,
+          fault: actionFault(tick.ledger),
+        }),
+      ).toBe('down')
+    }
+    const after = ticks.find((tick) => tick.out.closed !== null)!
+    expect(actionFault(after.ledger)).toBeNull()
+  })
+
+  test('the recovery is an external router restart, not "after an action"', () => {
+    const { closedTick } = replay()
+    expect(closedTick).not.toBeNull()
+    expect(closedTick?.out.note).not.toContain('after an action')
+    expect(closedTick?.out.note).toContain('router restarted outside the watchdog (likely manual)')
+  })
+
+  test('one summary closes the ladder: ended by external, 1962 s, every rung with its outcome', () => {
+    const { closedTick, ticks } = replay()
+    const summary = closedTick?.out.closed
+    expect(summary).toMatchObject({
+      outageKey: `wan:${START}`,
+      outageClass: 'full_wan_down',
+      t0: START,
+      durationS: 1962,
+      endedBy: 'external',
+      // The first tick the gateway was unreachable: 1707 s, not the 1700 s the owner pulled the plug.
+      externalAt: START + 1707_000,
+    })
+    expect(summary?.rungs.map((rung) => [rung.rung, rung.outcome, rung.atS])).toEqual([
+      ['reconnect', 'refused', 192],
+      ['escalate', 'escalated', 912],
+    ])
+    expect(ticks.filter((tick) => tick.out.closed !== null)).toHaveLength(1)
+    expect(closedTick?.out.ledger.ladder.t0).toBeNull()
+  })
+
+  test('a reconnect that went out and a recovery with no restart is credited to the reconnect', () => {
+    const { closedTick } = replay({ refuse: false, manualRestart: false })
+    expect(closedTick?.out.closed?.endedBy).toBe('reconnect')
+    expect(closedTick?.out.note).toBe('recovered after an action in this ladder')
+  })
+
+  test('no action and an unbroken gateway is the line fixing itself', () => {
+    // Reconnect refused and nothing else disturbed: nobody ended it but the line.
+    const { closedTick } = replay({ manualRestart: false })
+    expect(closedTick?.out.closed?.endedBy).toBe('self')
+    expect(closedTick?.out.note).toContain('recovered on its own')
+  })
+})
+
+describe('attributing a recovery', () => {
+  const base = ledger({
+    ladder: {
+      outageKey: 'wan:1',
+      t0: 1,
+      rung: 'reconnect',
+      enteredAt: 1,
+      settleUntil: null,
+      announcedAt: null,
+    },
+  })
+  const withLoss = (ms: number) => ({
+    ...base,
+    ladder: {
+      ...base.ladder,
+      gatewayLostAt: 1_000,
+      gatewayLastSeenAt: 1_000 + ms,
+    },
+  })
+
+  test('one failed gateway ping is a dropped frame, not a router restart', () => {
+    expect(attribute(withLoss(15_000)).endedBy).toBe('self')
+    expect(attribute(withLoss(30_000)).endedBy).toBe('external')
+  })
+
+  test('an action that reached the line outranks a gateway that went away', () => {
+    const acted = {
+      ...withLoss(120_000),
+      actions: [
+        {
+          ts: 5,
+          kind: 'reboot' as const,
+          outageKey: 'wan:1',
+          outcome: 'unknown' as const,
+        },
+      ],
+    }
+    expect(attribute(acted).endedBy).toBe('reboot')
+  })
+
+  test('a failed or refused action is not credited', () => {
+    for (const outcome of ['failed', 'refused', 'not_executed'] as const) {
+      const only = {
+        ...base,
+        actions: [{ ts: 5, kind: 'reconnect' as const, outageKey: 'wan:1', outcome }],
+      }
+      expect(attribute(only).endedBy).toBe('self')
+    }
   })
 })

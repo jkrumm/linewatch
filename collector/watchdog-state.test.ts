@@ -42,6 +42,28 @@ describe('the ledger on disk', () => {
     expect(readLedger(path)).toEqual({ ledger, trusted: true, reason: null })
   })
 
+  test('a ledger written before the attribution fields existed still loads, with them absent', () => {
+    const path = join(scratch(), 'state.json')
+    const {
+      outageClass: _c,
+      gatewayLostAt: _l,
+      gatewayLastSeenAt: _s,
+      ...oldLadder
+    } = emptyLedger().ladder
+    writeFileSync(
+      path,
+      JSON.stringify({
+        ...emptyLedger(),
+        ladder: oldLadder,
+        consecutiveActions: 1,
+      }),
+    )
+    const loaded = readLedger(path)
+    expect(loaded.trusted).toBe(true)
+    expect(loaded.ledger.consecutiveActions).toBe(1)
+    expect(loaded.ledger.ladder.gatewayLostAt).toBeNull()
+  })
+
   test('it is written 0600, because it decides whether this machine reboots the router', () => {
     const path = join(scratch(), 'state.json')
     writeLedger(emptyLedger(), path)

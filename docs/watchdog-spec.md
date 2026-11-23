@@ -367,6 +367,33 @@ rung has refused in 2 of 2 real outages and has never been sent at a wedge. §3
 item 7 is the fix. **A reconnect has been tried against a real wedge only after
 that change is deployed**, and whether it clears one is still unobserved (§7).
 
+### What the record says about a refusal and about who ended an outage
+
+The same outage showed the record was diagnosable but hid three things, and each is now
+recorded on its own:
+
+- **`refused` is its own ledger outcome**, apart from `not_executed` (the capability switch
+  is off). Both give the latch increment back; only `refused` is a defect during a real
+  outage. A refused or failed rung in the open ladder turns the watchdog's Kuma monitor
+  `down` at that tick, with the executor's reason leading the message, and keeps it down
+  until a later action answers it or the ladder closes. The state is read from the ledger,
+  so a restart mid-outage keeps it. `make watchdog-readiness` prints a `rung refusals` line.
+- **Recovery is attributed to an action only when one reached the line** (outcome
+  `executed` or `unknown`). With none, a gateway unreachable for ≥30 s inside the ladder
+  and then back is recorded as `router restarted outside the watchdog (likely manual)`:
+  an `intervention` with source `external`, dated at the first tick the gateway was lost.
+  Carrier showtime is deliberately not the signal: the ISP re-syncing a wedged line moves
+  it too. `external` never opens the human quiet period, because it is an inference and
+  not a person saying they are at the box. Anything else is `recovered on its own`.
+- **One `watchdog_outage_summary` note closes every ladder**: outage key, class, T0, end
+  (when the line first became continuously healthy), duration, each rung with its time and
+  outcome, and `endedBy` (`self`, `reconnect`, `reboot`, `external`). Replaying this
+  outage in the tests gives a refused reconnect at T0+192 s, an alert on that tick, an
+  `external` ending and `durationS` 1962. It is exported as the log
+  `line.watchdog.outage_summary` and the gauge `line.watchdog.outage.duration`.
+
+None of this changes a rung's timing or a gate.
+
 ### Conditions for arming, as measured
 
 - **Poll coverage ≥80% of due polls over 48 h, p90 spacing ≤20 min.** Read on

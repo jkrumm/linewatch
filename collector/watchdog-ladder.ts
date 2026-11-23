@@ -277,11 +277,48 @@ export interface CarrierEvidence {
   freshPollAgeS: number | null
 }
 
+/**
+ * What the executor's answer was, kept apart on purpose:
+ *
+ * - `refused` — the executor read the router and declined (no connected WAN
+ *   instance, an unrecognised connType). Nothing was sent, and it is a defect
+ *   signal during a real outage, not a choice.
+ * - `not_executed` — the capability switch is off or the API answered 403.
+ *   Nothing was sent, because we are configured not to.
+ *
+ * Both give the latch increment back; neither is the same fact.
+ */
+export type LedgerOutcome = 'executed' | 'failed' | 'not_executed' | 'refused' | 'unknown'
+
 export interface LedgerAction {
   ts: number
   kind: 'reconnect' | 'reboot'
   outageKey: string
-  outcome: 'executed' | 'failed' | 'not_executed' | 'unknown'
+  outcome: LedgerOutcome
+  /** The executor's own words, clipped. Optional: ledgers written before it existed have none. */
+  detail?: string
+}
+
+/** Who ended an outage, as far as the record can tell. */
+export type EndedBy = 'self' | 'reconnect' | 'reboot' | 'external'
+
+export interface OutageSummary {
+  outageKey: string
+  outageClass: OutageClass | null
+  t0: number
+  /** When the line first became continuously healthy — the outage's real end, not the tick that confirmed it. */
+  endedAt: number
+  durationS: number
+  endedBy: EndedBy
+  /** Every rung the ladder reached in this outage, in order, with what came of it. */
+  rungs: Array<{
+    rung: 'reconnect' | 'reboot' | 'escalate'
+    ts: number
+    atS: number
+    outcome: string
+  }>
+  /** When the router (or the link to it) was first lost during the ladder; set only for `external`. */
+  externalAt: number | null
 }
 
 export interface Ledger {
@@ -293,6 +330,21 @@ export interface Ledger {
     enteredAt: number
     settleUntil: number | null
     announcedAt: number | null
+    /**
+     * The three fields below are optional because a ledger written before they
+     * existed must still load: reading it as untrusted would stand the whole
+     * watchdog down over a field that only feeds a summary.
+     *
+     * The class the ladder opened on.
+     */
+    outageClass?: OutageClass | null
+    /**
+     * First and latest tick on which the gateway was unreachable inside this
+     * ladder. A router that went away and came back while no action of ours
+     * reached the line was restarted by someone else.
+     */
+    gatewayLostAt?: number | null
+    gatewayLastSeenAt?: number | null
   }
   actions: LedgerAction[]
   pending: {
@@ -356,6 +408,8 @@ export interface LadderOutcome extends LadderDecision {
   ledger: Ledger
   /** False when `ledger` must not be written — an untrusted ledger is never overwritten. */
   persist: boolean
+  /** Set on exactly the tick that tears the ladder down: the one-row account of the outage. */
+  closed: OutageSummary | null
 }
 
 export interface LadderDecision {
@@ -526,6 +580,95 @@ function recordedOutageStart(record: RecordEvidence | null): number | null {
   if (record.ongoingWanOutage !== null) starts.push(record.ongoingWanOutage.startedAt)
   if (record.ongoingGatewayOutage !== null) starts.push(record.ongoingGatewayOutage.startedAt)
   return starts.length === 0 ? null : Math.min(...starts)
+}
+
+/**
+ * A router restart needs the gateway to have stayed away this long. One failed
+ * 3-packet ping is a dropped frame, not a reboot, and the shortest real reboot
+ * on record kept the gateway away for 111 s.
+ */
+const EXTERNAL_MIN_GATEWAY_LOSS_MS = 30_000
+
+/** An action that may have touched the line: a verb went out, or we cannot tell. */
+function reachedTheLine(action: LedgerAction): boolean {
+  return action.outcome === 'executed' || action.outcome === 'unknown'
+}
+
+function gatewayUnreachable(input: Pick<LadderInput, 'self' | 'record'>): boolean {
+  const self = measuredSelf(input.self)
+  if (self !== null && self.gateway.received === 0) return true
+  const record = input.record
+  if (record === null) return false
+  return (
+    (record.gateway !== null && record.gateway.received === 0) ||
+    record.ongoingGatewayOutage !== null
+  )
+}
+
+/**
+ * Who ended the outage this ladder was tracking.
+ *
+ * `reconnect`/`reboot` only when an action with outcome executed or unknown
+ * happened in the ladder — a refused one touched nothing, and crediting it is
+ * the lie this exists to stop. With none, a gateway that was unreachable for a
+ * sustained stretch and then came back is a router restarted by someone else
+ * (the 2026-11-22 outage ended that way: link down/up at the mini, the router's
+ * session uptime reset, nothing of ours sent). Otherwise the line fixed itself.
+ *
+ * Gateway loss is the signal because it is the one thing the watchdog sees
+ * directly on every tick; carrier showtime is no use here, since the ISP
+ * re-syncing a wedged line moves it too and that is not a restart.
+ */
+export function attribute(ledger: Ledger): {
+  endedBy: EndedBy
+  externalAt: number | null
+} {
+  const key = ledger.ladder.outageKey
+  const acted = ledger.actions.filter(
+    (action) => action.outageKey === key && reachedTheLine(action),
+  )
+  const last = acted.at(-1)
+  if (last !== undefined) return { endedBy: last.kind, externalAt: null }
+
+  const lostAt = ledger.ladder.gatewayLostAt ?? null
+  const seenAt = ledger.ladder.gatewayLastSeenAt ?? null
+  if (lostAt !== null && seenAt !== null && seenAt - lostAt >= EXTERNAL_MIN_GATEWAY_LOSS_MS) {
+    return { endedBy: 'external', externalAt: lostAt }
+  }
+  return { endedBy: 'self', externalAt: null }
+}
+
+function summarize(ledger: Ledger, now: number): OutageSummary | null {
+  const { t0, outageKey } = ledger.ladder
+  if (t0 === null || outageKey === null) return null
+  const endedAt = ledger.healthySince ?? now
+  const { endedBy, externalAt } = attribute(ledger)
+  const rungs: OutageSummary['rungs'] = ledger.actions
+    .filter((action) => action.outageKey === outageKey)
+    .map((action) => ({
+      rung: action.kind,
+      ts: action.ts,
+      atS: Math.floor((action.ts - t0) / 1000),
+      outcome: action.outcome,
+    }))
+  if (ledger.lastEscalationTs !== null && ledger.lastEscalationTs >= t0) {
+    rungs.push({
+      rung: 'escalate',
+      ts: ledger.lastEscalationTs,
+      atS: Math.floor((ledger.lastEscalationTs - t0) / 1000),
+      outcome: 'escalated',
+    })
+  }
+  return {
+    outageKey,
+    outageClass: ledger.ladder.outageClass ?? null,
+    t0,
+    endedAt,
+    durationS: Math.round((endedAt - t0) / 1000),
+    endedBy,
+    rungs,
+    externalAt,
+  }
 }
 
 function actionsWithin(
@@ -783,13 +926,11 @@ function evaluate(input: LadderInput, outageClass: OutageClass): LadderDecision 
       shadow: false,
       blockedBy: [],
       nextEvaluationAt: tick,
-      // Attribution: if no action was taken in this ladder, the line fixed
-      // itself and the record must say so. Crediting the watchdog for a
-      // self-recovery is the same lie the intervention route exists to
-      // prevent, told about a machine.
-      note: ledger.actions.some((action) => action.outageKey === ledger.ladder.outageKey)
-        ? 'recovered after an action in this ladder'
-        : 'recovered with no action taken — self_recovery',
+      // Attribution: credit an action only when one reached the line. A refused
+      // one did not, and crediting the watchdog for a recovery it had no part
+      // in is the same lie the intervention route exists to prevent, told
+      // about a machine.
+      note: recoveryNote(ledger),
     }
   }
 
@@ -941,6 +1082,18 @@ function evaluate(input: LadderInput, outageClass: OutageClass): LadderDecision 
   }
 }
 
+function recoveryNote(ledger: Ledger): string {
+  switch (attribute(ledger).endedBy) {
+    case 'reconnect':
+    case 'reboot':
+      return 'recovered after an action in this ladder'
+    case 'external':
+      return 'router restarted outside the watchdog (likely manual) — recovered with no action that reached the line'
+    case 'self':
+      return 'recovered on its own — self_recovery'
+  }
+}
+
 /** A ledger with nothing in it. The shape a first boot writes, and what tests start from. */
 export function emptyLedger(): Ledger {
   return {
@@ -952,6 +1105,9 @@ export function emptyLedger(): Ledger {
       enteredAt: 0,
       settleUntil: null,
       announcedAt: null,
+      outageClass: null,
+      gatewayLostAt: null,
+      gatewayLastSeenAt: null,
     },
     actions: [],
     pending: null,
@@ -1051,6 +1207,9 @@ function advance(input: LadderInput, decision: LadderDecision): Ledger {
         enteredAt: now,
         settleUntil: null,
         announcedAt: null,
+        outageClass: null,
+        gatewayLostAt: null,
+        gatewayLastSeenAt: null,
       }
     }
     return next
@@ -1060,6 +1219,16 @@ function advance(input: LadderInput, decision: LadderDecision): Ledger {
     next.ladder.t0 = decision.t0
     next.ladder.outageKey = decision.outageKey
     next.ladder.enteredAt = now
+    next.ladder.outageClass = decision.outageClass
+    next.ladder.gatewayLostAt = null
+    next.ladder.gatewayLastSeenAt = null
+  }
+
+  // Only inside a ladder: a gateway that drops while nothing is wrong is not
+  // an outage this machine is tracking.
+  if (next.ladder.t0 !== null && gatewayUnreachable(input)) {
+    next.ladder.gatewayLostAt = next.ladder.gatewayLostAt ?? now
+    next.ladder.gatewayLastSeenAt = now
   }
 
   if (RUNG_RANK[decision.rung] > RUNG_RANK[ledger.ladder.rung]) {
@@ -1103,7 +1272,16 @@ export function decide(rawInput: LadderInput): LadderOutcome {
   const input = foldStalePending(rawInput)
   const outageClass = classify(input)
   const decision = evaluate(input, outageClass)
-  return { ...decision, ledger: advance(input, decision), persist: true }
+  const closed =
+    decision.state === 'recovered' && input.ledger.pending === null
+      ? summarize(input.ledger, input.now)
+      : null
+  return {
+    ...decision,
+    ledger: advance(input, decision),
+    persist: true,
+    closed,
+  }
 }
 
 /**
@@ -1126,6 +1304,7 @@ function untrustedOutcome(input: LadderInput): LadderOutcome {
     note: 'ledger unreadable — budgets and latch unknown, standing down until a human looks',
     ledger: input.ledger,
     persist: false,
+    closed: null,
   }
 }
 
@@ -1170,7 +1349,7 @@ function foldStalePending(input: LadderInput): LadderInput {
  * knows.
  */
 export function recordOutcome(ledger: Ledger, action: LedgerAction): Ledger {
-  const reachedTheLine = action.outcome !== 'not_executed'
+  const reachedTheLine = action.outcome !== 'not_executed' && action.outcome !== 'refused'
   return {
     ...ledger,
     pending: null,

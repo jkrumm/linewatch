@@ -36,6 +36,11 @@ input; untrusted means no action, no ledger write, and a `down` push every tick.
 in `decide()`, not the runner, because the runner executes for real about once a
 month and the tests are the only thing that exercises this monthly code daily.
 
+**The record names the cause of an outage's end.** `refused` (the executor declined) is a ledger outcome apart from `not_executed`
+(the switch is off) and turns the watchdog monitor `down` while it stands; a recovery is credited to an action only if one reached
+the line, else it is `external` (gateway lost ≥30 s, no action of ours) or `self`; every ladder closes with one
+`watchdog_outage_summary` note (`docs/watchdog-spec.md` §6). None of it touches rung timing or gates.
+
 **Both pushers are bounded; launchd never starts a second instance of a running
 job, so one hung call silences a monitor for good** (dotfiles hit a 28 h freeze,
 2026-11-06). The heartbeat runs under `jobrun --timeout 45 --every 60` (cadence 60 s;

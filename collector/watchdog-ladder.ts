@@ -468,9 +468,11 @@ function v6Health(input: Pick<LadderInput, 'now' | 'policy' | 'self' | 'ledger'>
 
 /**
  * The record, or null when it is too old to describe now. One definition for
- * `classify`, the gateway reading and the shared blockers, so a stale record is
- * ignored by all of them or by none. (`recordedOutageStart` reads the raw record
- * on purpose: it dates T0, which a stale row still describes correctly.)
+ * `classify`, the gateway reading and the `no_evidence` blocker's freshness test.
+ * The other raw reads are deliberate: `recordedOutageStart` dates T0, which a
+ * stale row still describes correctly, and the shared blockers only ever veto, so
+ * a stale record that says something is wrong keeps standing a rung down rather
+ * than being ignored.
  */
 function freshRecord(input: Pick<LadderInput, 'record' | 'policy' | 'now'>): RecordEvidence | null {
   const { record, policy, now } = input

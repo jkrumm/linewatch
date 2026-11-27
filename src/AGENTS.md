@@ -37,6 +37,10 @@ has its own file: [`services/router/AGENTS.md`](services/router/AGENTS.md).
   answer; `note` carries poller telemetry (non-clean polls only — a clean poll
   evidences itself in the rows it stored, and one note per poll would be 52k
   rows a year in the table the UI timeline reads).
+- The two router action routes record who asked: no `x-linewatch-actor` header is
+  `source: api` (a person at `make router-reconnect`, which opens the watchdog's
+  human quiet period), `x-linewatch-actor: watchdog` is `source: watchdog` (the ladder's
+  own call, which must not). A new automated caller of those routes sends the header.
 - `wifi_sample` records the radio every 10th cycle (5 min — `system_profiler
   SPAirPortDataType` costs 4.8 s median, so per-cycle is not affordable). Call
   it **an alternate radio path currently attached**, never "the standby path":

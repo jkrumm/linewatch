@@ -65,6 +65,7 @@ import {
   classify,
   decide,
   DEFAULT_POLICY,
+  newestHumanIntervention,
   recordOutcome,
   type AnchorState,
   type CarrierEvidence,
@@ -403,10 +404,7 @@ async function fetchLastHumanIntervention(now: number): Promise<number | null> {
   // `external` is the watchdog's own inference ("a router restart none of our
   // actions explain"), not a person saying they are at the box, so it must not
   // open a quiet period: the gates stay exactly as they were.
-  const human = payload.events
-    .filter((entry) => entry.source !== 'watchdog' && entry.source !== 'external')
-    .map((entry) => entry.ts)
-  return human.length === 0 ? null : Math.max(...human)
+  return newestHumanIntervention(payload.events)
 }
 
 // ---------------------------------------------------------------------------
@@ -674,7 +672,9 @@ async function perform(kind: 'reconnect' | 'reboot'): Promise<ActionAnswer | nul
   try {
     const response = await fetch(`${config.apiUrl}/api/router/actions/${kind}`, {
       method: 'POST',
-      headers: { authorization: `Bearer ${config.token}` },
+      // The actor label keeps the route from recording this as `api`, which
+      // `fetchLastHumanIntervention` reads as a person at the box.
+      headers: { authorization: `Bearer ${config.token}`, 'x-linewatch-actor': 'watchdog' },
       // A reboot kills the device mid-request by design, so this must be able
       // to return without an answer rather than hanging past the settle window.
       signal: AbortSignal.timeout(kind === 'reboot' ? 30_000 : config.apiTimeoutMs),

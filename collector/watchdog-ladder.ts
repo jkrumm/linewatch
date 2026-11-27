@@ -140,7 +140,8 @@ export interface WatchdogPolicy {
  *     T0+180    reconnect
  *     T0+270    reboot becomes due; announce
  *     T0+330    reboot fires
- *     T0+900    exhausted, escalate to a human
+ *     T0+900    exhausted, escalate to a human (a reboot still owed because only a
+ *               transient blocker held it keeps trying after this)
  *
  * The human on 2026-08-01 started rebooting at T0+18m17s. The ladder is designed
  * to be finished escalating before a person would have reached the box.
@@ -549,10 +550,43 @@ export function classify(input: LadderInput): OutageClass {
   return 'healthy'
 }
 
+/**
+ * The newest *person's* intervention among `events`, or null. A person is
+ * anyone the record does not name as a machine: the watchdog's own actions
+ * (`watchdog`, which the router action routes now stamp from the watchdog's
+ * actor header) and its inference of an outside restart (`external`) are not
+ * someone at the box. `api` is deliberately *not* excluded: it is what a
+ * hand-run `make router-reconnect` writes, and that is a person.
+ */
+export function newestHumanIntervention(
+  events: ReadonlyArray<{ ts: number; source: string | null }>,
+): number | null {
+  const human = events
+    .filter((entry) => entry.source !== 'watchdog' && entry.source !== 'external')
+    .map((entry) => entry.ts)
+  return human.length === 0 ? null : Math.max(...human)
+}
+
 const ACTIONABLE: ReadonlySet<OutageClass> = new Set<OutageClass>([
   'full_wan_down',
   'v4_only_down',
   'wan_down_v6_unknown',
+])
+
+/**
+ * Reboot blockers that pass on their own, and so never justify abandoning a
+ * reboot that was due and not yet attempted. Everything else (the switch off, a
+ * rate limit or min interval, a latch, a gateway or evidence fault) is either
+ * policy or a verdict, and an outage held by one of those escalates as before.
+ * A closed list on purpose: a blocker added later stands the reboot down at
+ * exhaustion until someone decides it belongs here.
+ */
+const RETRYABLE_REBOOT_BLOCKERS: ReadonlySet<string> = new Set([
+  'human_quiet_period',
+  'no_fresh_poll',
+  'not_announced',
+  'announce_pending',
+  'speedtest_running',
 ])
 
 /**
@@ -1009,10 +1043,38 @@ function evaluate(input: LadderInput, outageClass: OutageClass): LadderDecision 
 
   const shared = sharedBlockers(input, outageClass)
 
+  const rebootDueAt = outageClass === 'v4_only_down' ? policy.rebootAtSv4Only : policy.rebootAtS
+  const rebootIsDue = downForS >= rebootDueAt && ledger.ladder.rung !== 'observe'
+
   if (downForS >= policy.exhaustAtS) {
     const quiet =
       ledger.lastEscalationTs !== null &&
       now - ledger.lastEscalationTs < policy.escalationQuietS * 1000
+
+    // Giving up is for a ladder that ran. A reboot that was due and never
+    // attempted, held back only by something that passes on its own, has not
+    // run: abandoning it by the clock is what let a 4 h 44 min outage on
+    // 2026-11-27 end by hand. It stays owed until it fires, subject to the same
+    // gates and budgets as before exhaustion — a blocker outside RETRYABLE (the
+    // switch off, a rate limit, a latch, bad evidence) means there is nothing
+    // to wait for and the outage escalates exactly as it did.
+    if (rebootIsDue && ACTIONABLE.has(outageClass) && !input.disarmed) {
+      const attempted = ledger.actions.some(
+        (action) => action.kind === 'reboot' && action.outageKey === outageKey,
+      )
+      const blockers = [...shared, ...rebootBlockers(input, t0, outageClass)]
+      if (!attempted && blockers.every((blocker) => RETRYABLE_REBOOT_BLOCKERS.has(blocker))) {
+        // Escalation is a notification and the reboot is the write, so the
+        // reboot wins a tick where both are open and the page follows on the
+        // next one; while it waits, the page goes first and the wait is
+        // reported as the reboot rung, which is also what asks for a fresh poll.
+        if (blockers.length === 0 || (blockers.length === 1 && blockers[0] === 'not_announced')) {
+          return rebootDecision(blockers)
+        }
+        if (quiet) return rebootDecision(blockers)
+      }
+    }
+
     // An escalation is a notification, not a write to the line, so it is not
     // gated on `armed` — a shadow run that cannot tell you it gave up is the
     // same inert shadow mode the capability precondition already produced once.
@@ -1041,11 +1103,26 @@ function evaluate(input: LadderInput, outageClass: OutageClass): LadderDecision 
     }
   }
 
-  const rebootDueAt = outageClass === 'v4_only_down' ? policy.rebootAtSv4Only : policy.rebootAtS
-  const rebootIsDue = downForS >= rebootDueAt && ledger.ladder.rung !== 'observe'
+  if (rebootIsDue) return rebootDecision([...shared, ...rebootBlockers(input, t0, outageClass)])
 
-  if (rebootIsDue) {
-    const blockers = [...shared, ...rebootBlockers(input, t0, outageClass)]
+  if (downForS >= policy.observeS) {
+    return decision('reconnect', [...shared, ...reconnectBlockers(input, t0)])
+  }
+
+  return {
+    ...base,
+    t0,
+    outageKey,
+    rung: 'observe',
+    state: 'confirmed',
+    action: 'none',
+    shadow: false,
+    blockedBy: [],
+    nextEvaluationAt: Math.min(tick, t0 + policy.observeS * 1000),
+    note: `${outageClass} for ${downForS}s — observing until ${policy.observeS}s`,
+  }
+
+  function rebootDecision(blockers: string[]): LadderDecision {
     // The announce is its own step, so the abort window is real rather than
     // nominal: it is emitted, then the reboot waits announceLeadS for a human
     // to touch the disarm file from a phone.
@@ -1064,23 +1141,6 @@ function evaluate(input: LadderInput, outageClass: OutageClass): LadderDecision 
       }
     }
     return decision('reboot', blockers)
-  }
-
-  if (downForS >= policy.observeS) {
-    return decision('reconnect', [...shared, ...reconnectBlockers(input, t0)])
-  }
-
-  return {
-    ...base,
-    t0,
-    outageKey,
-    rung: 'observe',
-    state: 'confirmed',
-    action: 'none',
-    shadow: false,
-    blockedBy: [],
-    nextEvaluationAt: Math.min(tick, t0 + policy.observeS * 1000),
-    note: `${outageClass} for ${downForS}s — observing until ${policy.observeS}s`,
   }
 
   function decision(kind: 'reconnect' | 'reboot', blockers: string[]): LadderDecision {

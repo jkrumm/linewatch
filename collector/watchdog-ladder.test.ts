@@ -4,6 +4,7 @@ import {
   classify,
   decide,
   DEFAULT_POLICY,
+  newestHumanIntervention,
   recordOutcome,
   type LadderOutcome,
   type CarrierEvidence,
@@ -2084,5 +2085,172 @@ describe('attributing a recovery', () => {
       }
       expect(attribute(only).endedBy).toBe('self')
     }
+  })
+})
+
+/**
+ * 2026-11-27 03:12 CET: the WAN dropped and stayed down 4 h 44 min. The
+ * watchdog's reconnect at T0+185 was recorded by the router action route as
+ * `api`, read as a person at the box, and the 30-minute quiet period it opened
+ * held the reboot shut until the ladder exhausted by the clock and gave up on it.
+ */
+describe('replaying the 2026-11-27 outage', () => {
+  const policy: WatchdogPolicy = { ...DEFAULT_POLICY, armed: true, rebootEnabled: true }
+  const freshCarrier = { stale: false, lineStatus: 'Up', showtimeStartS: 4000, freshPollAgeS: 10 }
+
+  interface Walked {
+    fired: Array<[number, string]>
+    states: Map<number, { state: string; rung: string; blockedBy: string[] }>
+  }
+
+  /** Ticks the ladder with each tick's ledger fed into the next, WAN down from T0 throughout. */
+  function walk(options: {
+    untilS: number
+    humanAtS?: number
+    carrierAt?: (elapsed: number) => CarrierEvidence | null
+    policy?: WatchdogPolicy
+  }): Walked {
+    let state = ledger({ v6: { lastUpTs: T0 - 60_000, lastCheckedTs: T0 - 60_000 } })
+    const walked: Walked = { fired: [], states: new Map() }
+    for (let elapsed = 0; elapsed <= options.untilS; elapsed += 15) {
+      const now = T0 + elapsed * 1000
+      const input = armedInput({
+        now,
+        policy: options.policy ?? policy,
+        carrier: options.carrierAt?.(elapsed) ?? freshCarrier,
+        ledger: state,
+        record: record({
+          newestSampleTs: now - 10_000,
+          wanAnchors: ALL_WAN_DOWN,
+          ongoingWanOutage: { startedAt: T0, cycles: Math.floor(elapsed / 30) },
+        }),
+        self: self({ probeTs: now, wanAnchors: ALL_WAN_DOWN, v6: { target: 'v6', received: 0 } }),
+        heldTicks: 20,
+        lastHumanInterventionTs:
+          options.humanAtS !== undefined && elapsed >= options.humanAtS
+            ? T0 + options.humanAtS * 1000
+            : null,
+      })
+      const out = decide(input)
+      walked.states.set(elapsed, {
+        state: out.state,
+        rung: out.rung,
+        blockedBy: out.blockedBy,
+      })
+      if (out.action !== 'none') walked.fired.push([elapsed, out.action])
+      state =
+        out.action === 'reconnect' || out.action === 'reboot'
+          ? recordOutcome(out.ledger, {
+              ts: now,
+              kind: out.action,
+              outageKey: out.outageKey ?? `wan:${T0}`,
+              outcome: 'executed',
+            })
+          : out.ledger
+      if (out.action === 'reboot') break
+    }
+    return walked
+  }
+
+  test("the watchdog's own reconnect leaves no human event, and the reboot fires", () => {
+    // Event 4497 (watchdog) and event 4496 (the route's own row, now stamped
+    // `watchdog` too) are both machine-written.
+    expect(
+      newestHumanIntervention([
+        { ts: T0 + 185_000, source: 'watchdog' },
+        { ts: T0 + 195_000, source: 'watchdog' },
+      ]),
+    ).toBeNull()
+    expect(walk({ untilS: 1_500 }).fired).toEqual([
+      [180, 'reconnect'],
+      [270, 'announce'],
+      [330, 'reboot'],
+    ])
+  })
+
+  test('a person running a reconnect by hand still opens the quiet period', () => {
+    // `make router-reconnect` carries no actor header, so the row says `api`.
+    expect(newestHumanIntervention([{ ts: T0 + 195_000, source: 'api' }])).toBe(T0 + 195_000)
+    expect(
+      newestHumanIntervention([
+        { ts: T0 + 100_000, source: 'manual' },
+        { ts: T0 + 195_000, source: 'watchdog' },
+        { ts: T0 + 200_000, source: 'external' },
+      ]),
+    ).toBe(T0 + 100_000)
+
+    const walked = walk({ untilS: 600, humanAtS: 195 })
+    expect(walked.fired.some(([, action]) => action === 'reboot')).toBe(false)
+    expect(walked.states.get(330)?.blockedBy).toContain('human_quiet_period')
+  })
+
+  test('a reboot held shut past exhaustion still fires once the blocker clears', () => {
+    // Quiet period 195 s + 1800 s ends at T0+1995. Exhaustion is at 900.
+    const walked = walk({ untilS: 2_400, humanAtS: 195 })
+    const reboot = walked.fired.find(([, action]) => action === 'reboot')
+    expect(reboot).toBeDefined()
+    expect(reboot![0]).toBeGreaterThan(1_995)
+    expect(walked.fired.filter(([, action]) => action === 'escalate').length).toBe(1)
+    // Between 900 s and the clear, the wait is reported as the reboot rung.
+    expect(walked.states.get(1_200)).toMatchObject({
+      state: 'blocked',
+      rung: 'reboot',
+      blockedBy: ['human_quiet_period', 'not_announced'],
+    })
+  })
+
+  test('the first escalation still goes out at exhaustion while the reboot is owed', () => {
+    const walked = walk({ untilS: 960, humanAtS: 195 })
+    expect(walked.fired.find(([, action]) => action === 'escalate')?.[0]).toBe(900)
+  })
+
+  test('a stale poll past exhaustion keeps asking for a fresh one', () => {
+    const walked = walk({
+      untilS: 1_200,
+      carrierAt: () => ({ ...freshCarrier, freshPollAgeS: 400 }),
+    })
+    const tick = walked.states.get(1_050)!
+    expect(tick.rung).toBe('reboot')
+    expect(tick.blockedBy).toEqual(expect.arrayContaining(['no_fresh_poll']))
+    expect(walked.fired.some(([, action]) => action === 'reboot')).toBe(false)
+  })
+
+  test('a blocker that is policy, not timing, still escalates and never reboots', () => {
+    const off = walk({ untilS: 1_200, policy: { ...policy, rebootEnabled: false } })
+    expect(off.states.get(1_050)?.state).toBe('exhausted')
+    expect(off.fired.map(([, action]) => action)).toEqual(['reconnect', 'escalate'])
+  })
+
+  test('a reboot that already fired is not repeated by exhaustion', () => {
+    const attempted = ledger({
+      v6: { lastUpTs: T0 - 60_000, lastCheckedTs: T0 - 60_000 },
+      actions: [{ ts: T0 + 330_000, kind: 'reboot', outageKey: `wan:${T0}`, outcome: 'unknown' }],
+      ladder: {
+        outageKey: `wan:${T0}`,
+        t0: T0,
+        rung: 'reboot',
+        enteredAt: T0,
+        settleUntil: null,
+        announcedAt: T0 + 270_000,
+      },
+    })
+    const now = T0 + 1_000_000
+    const out = decide(
+      armedInput({
+        now,
+        policy,
+        carrier: freshCarrier,
+        ledger: attempted,
+        record: record({
+          newestSampleTs: now - 10_000,
+          wanAnchors: ALL_WAN_DOWN,
+          ongoingWanOutage: { startedAt: T0, cycles: 30 },
+        }),
+        self: self({ probeTs: now, wanAnchors: ALL_WAN_DOWN, v6: { target: 'v6', received: 0 } }),
+        heldTicks: 20,
+      }),
+    )
+    expect(out.state).toBe('exhausted')
+    expect(out.action).toBe('escalate')
   })
 })

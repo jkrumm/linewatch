@@ -87,11 +87,15 @@ function install(executor: RouterActionExecutor, poll?: () => Promise<unknown>) 
   setRouterRuntimeForTest({ poller, client, executor })
 }
 
-function post(path: string, token: string | null = config.token) {
+function post(
+  path: string,
+  token: string | null = config.token,
+  extra: Record<string, string> = {},
+) {
   return app.handle(
     new Request(`http://local${path}`, {
       method: 'POST',
-      headers: token === null ? {} : { authorization: `Bearer ${token}` },
+      headers: { ...(token === null ? {} : { authorization: `Bearer ${token}` }), ...extra },
     }),
   )
 }
@@ -175,6 +179,20 @@ describe('POST /api/router/poll', () => {
 
     expect((await post('/api/router/poll')).status).toBe(429)
   })
+})
+
+describe('who is recorded as acting', () => {
+  test.each(['/api/router/actions/reconnect', '/api/router/actions/reboot'])(
+    '%s is an api row unless the watchdog says it is the watchdog',
+    async (path) => {
+      install(liveExecutor(() => Promise.resolve(result({}))))
+      await post(path)
+      await post(path, config.token, { 'x-linewatch-actor': 'watchdog' })
+      // Anything but the one known label is still a person.
+      await post(path, config.token, { 'x-linewatch-actor': 'someone-else' })
+      expect(myRows().map((row) => row.detail['source'])).toEqual(['api', 'watchdog', 'api'])
+    },
+  )
 })
 
 describe('action attribution', () => {

@@ -41,6 +41,23 @@ import { routerConfig } from '../services/router/config.js'
  */
 const POLL_MIN_INTERVAL_S = 60
 
+/**
+ * Who is asking. The routes are shared by a person at `make router-reconnect`
+ * and by the watchdog's ladder, and both arrive with the same bearer. Without
+ * this the event row said `api` for both, so the watchdog's own reconnect read
+ * as a human at the box and opened the human quiet period that then blocked its
+ * own reboot (2026-11-27, a 4 h 44 min outage). The header is a label, not an
+ * authority — it sits behind the bearer and only ever *removes* the human
+ * reading — and the one value it takes is `watchdog`; anything else, or none,
+ * is recorded as `api`, which still counts as a person.
+ */
+export const ACTOR_HEADER = 'x-linewatch-actor'
+
+type ActionSource = 'api' | 'watchdog'
+
+const actionSource = (headers: Record<string, string | undefined>): ActionSource =>
+  headers[ACTOR_HEADER] === 'watchdog' ? 'watchdog' : 'api'
+
 const writesEnabled = () => getRouterExecutor().capability === 'live'
 
 const PollFailureSchema = z.object({
@@ -89,6 +106,7 @@ const ActionResultSchema = z.object({
 async function runAndRecord(
   action: 'router_reconnect' | 'router_reboot',
   run: () => Promise<ActionResult>,
+  source: ActionSource,
 ) {
   let result: ActionResult | null = null
   let thrown: unknown = null
@@ -98,7 +116,7 @@ async function runAndRecord(
     thrown = error
     throw error
   } finally {
-    writeRecord(action, result, thrown)
+    writeRecord(action, result, thrown, source)
   }
 
   return {
@@ -114,6 +132,7 @@ function writeRecord(
   action: 'router_reconnect' | 'router_reboot',
   result: ActionResult | null,
   thrown: unknown,
+  source: ActionSource,
 ) {
   const touchedTheLine =
     result !== null &&
@@ -125,7 +144,7 @@ function writeRecord(
       ts: Date.now(),
       kind: touchedTheLine ? 'intervention' : 'note',
       detail: JSON.stringify({
-        source: 'api',
+        source,
         action,
         outcome: result?.outcome ?? 'error',
         capability: result?.capability ?? null,
@@ -219,7 +238,11 @@ export const routerActionRoutes = new Elysia()
         })
       }
 
-      return runAndRecord('router_reconnect', () => getRouterExecutor().reconnect())
+      return runAndRecord(
+        'router_reconnect',
+        () => getRouterExecutor().reconnect(),
+        actionSource(headers),
+      )
     },
     {
       response: {
@@ -247,7 +270,11 @@ export const routerActionRoutes = new Elysia()
         })
       }
 
-      return runAndRecord('router_reboot', () => getRouterExecutor().reboot())
+      return runAndRecord(
+        'router_reboot',
+        () => getRouterExecutor().reboot(),
+        actionSource(headers),
+      )
     },
     {
       response: {

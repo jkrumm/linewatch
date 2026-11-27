@@ -243,6 +243,8 @@ T0+330    reboot fires
 T0+900    exhausted, escalate to a human
 ```
 
+A reboot that was due and never attempted, held back only by a blocker that passes on its own (human quiet period, no fresh poll, announce, speed test), is not given up at T0+900: it still fires once the blocker clears, under the same gates and rate limits, and the escalation goes out once per `escalationQuietS` meanwhile. Without write capability the escalation goes out as before.
+
 | Constant | Value | Why |
 |-|-|-|
 | `observeS` | 180 s | Of the ten self-heals in the 15-outage record, nine ended within 180 s and none at 181–240 s. The tenth ran 420 s; no action reached the line, and the router re-dialled itself at 150 s. The five outages of 720–2160 s were human-ended |

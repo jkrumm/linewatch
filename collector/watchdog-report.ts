@@ -12,6 +12,16 @@
 
 import type { Ledger, LedgerOutcome } from './watchdog-ladder.js'
 
+/**
+ * Headers for a router action request. `x-linewatch-actor` is what makes the
+ * route record the row as `watchdog`: without it the row says `api`, reads as a
+ * person at the box, and opens the human quiet period that blocks the reboot
+ * rung. Lives here so a test can hold the production path to it.
+ */
+export function actionRequestHeaders(token: string): Record<string, string> {
+  return { authorization: `Bearer ${token}`, 'x-linewatch-actor': 'watchdog' }
+}
+
 /** What the two action routes can answer. Mirrors `ActionResult['outcome']`. */
 export type ActionOutcome = LedgerOutcome
 

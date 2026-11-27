@@ -16,6 +16,7 @@ import {
 } from './watchdog-ladder.js'
 import {
   actionFault,
+  actionRequestHeaders,
   ledgerOutcome,
   notificationMessage,
   notificationStatus,
@@ -2219,6 +2220,45 @@ describe('replaying the 2026-11-27 outage', () => {
     const off = walk({ untilS: 1_200, policy: { ...policy, rebootEnabled: false } })
     expect(off.states.get(1_050)?.state).toBe('exhausted')
     expect(off.fired.map(([, action]) => action)).toEqual(['reconnect', 'escalate'])
+  })
+
+  test('without write capability the exhaustion still escalates, never looping on would_reboot', () => {
+    const now = T0 + 1_000_000
+    const out = decide(
+      armedInput({
+        now,
+        policy,
+        capability: 'null',
+        carrier: freshCarrier,
+        ledger: ledger({
+          v6: { lastUpTs: T0 - 60_000, lastCheckedTs: T0 - 60_000 },
+          ladder: {
+            outageKey: `wan:${T0}`,
+            t0: T0,
+            rung: 'reconnect',
+            enteredAt: T0,
+            settleUntil: null,
+            announcedAt: T0 + 270_000,
+          },
+        }),
+        record: record({
+          newestSampleTs: now - 10_000,
+          wanAnchors: ALL_WAN_DOWN,
+          ongoingWanOutage: { startedAt: T0, cycles: 30 },
+        }),
+        self: self({ probeTs: now, wanAnchors: ALL_WAN_DOWN, v6: { target: 'v6', received: 0 } }),
+        heldTicks: 20,
+      }),
+    )
+    expect(out.state).toBe('exhausted')
+    expect(out.action).toBe('escalate')
+  })
+
+  test('the actions the watchdog sends carry the watchdog actor label', () => {
+    expect(actionRequestHeaders('t')).toEqual({
+      authorization: 'Bearer t',
+      'x-linewatch-actor': 'watchdog',
+    })
   })
 
   test('a reboot that already fired is not repeated by exhaustion', () => {

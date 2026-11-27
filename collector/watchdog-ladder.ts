@@ -1068,7 +1068,14 @@ function evaluate(input: LadderInput, outageClass: OutageClass): LadderDecision 
         // reboot wins a tick where both are open and the page follows on the
         // next one; while it waits, the page goes first and the wait is
         // reported as the reboot rung, which is also what asks for a fresh poll.
-        if (blockers.length === 0 || (blockers.length === 1 && blockers[0] === 'not_announced')) {
+        // Without write capability an authorised reboot is only a `would_reboot`
+        // note, which would swallow the escalation every tick and never end, so
+        // that case pages as before.
+        const canAct = input.capability === 'live'
+        if (
+          (blockers.length === 0 && canAct) ||
+          (blockers.length === 1 && blockers[0] === 'not_announced')
+        ) {
           return rebootDecision(blockers)
         }
         if (quiet) return rebootDecision(blockers)

@@ -78,6 +78,7 @@ import {
 } from './watchdog-ladder.js'
 import {
   actionFault,
+  actionRequestHeaders,
   type ActionOutcome,
   eventKindFor,
   ledgerOutcome,
@@ -672,9 +673,9 @@ async function perform(kind: 'reconnect' | 'reboot'): Promise<ActionAnswer | nul
   try {
     const response = await fetch(`${config.apiUrl}/api/router/actions/${kind}`, {
       method: 'POST',
-      // The actor label keeps the route from recording this as `api`, which
+      // Labelled as the watchdog, or the route records `api`, which
       // `fetchLastHumanIntervention` reads as a person at the box.
-      headers: { authorization: `Bearer ${config.token}`, 'x-linewatch-actor': 'watchdog' },
+      headers: actionRequestHeaders(config.token),
       // A reboot kills the device mid-request by design, so this must be able
       // to return without an answer rather than hanging past the settle window.
       signal: AbortSignal.timeout(kind === 'reboot' ? 30_000 : config.apiTimeoutMs),

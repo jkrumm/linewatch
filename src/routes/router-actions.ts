@@ -51,7 +51,7 @@ const POLL_MIN_INTERVAL_S = 60
  * reading — and the one value it takes is `watchdog`; anything else, or none,
  * is recorded as `api`, which still counts as a person.
  */
-export const ACTOR_HEADER = 'x-linewatch-actor'
+const ACTOR_HEADER = 'x-linewatch-actor'
 
 type ActionSource = 'api' | 'watchdog'
 
